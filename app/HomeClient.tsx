@@ -10,8 +10,24 @@ type Jam = {
   host_name: string | null;
   is_playing: boolean;
   position_ms: number;
-  audio_parent_url: string | null;
-  audio_kid_url: string | null;
+  preset_id: string | null;
+};
+
+// ✅ Add presets here (match your hosted paths)
+const PRESETS: Record<
+  string,
+  { name: string; parentUrl: string; kidUrl: string }
+> = {
+  salem: {
+    name: "Salem Night Walk",
+    parentUrl: "https://echojam.idrawcircles.com/audio/adult-01.mp3",
+    kidUrl: "https://echojam.idrawcircles.com/audio/kid-01.mp3",
+  },
+  bedtime: {
+    name: "Bedtime Trail",
+    parentUrl: "https://echojam.idrawcircles.com/audio/adult-02.mp3",
+    kidUrl: "https://echojam.idrawcircles.com/audio/kid-02.mp3",
+  },
 };
 
 export default function HomeClient() {
@@ -23,17 +39,17 @@ export default function HomeClient() {
   const [err, setErr] = useState<string | null>(null);
 
   const [persona, setPersona] = useState<"kid" | "parent">("parent");
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("salem");
 
-  // Howler instance (typed as any to avoid TS type issues on your host)
+  // Howler (typed any to avoid TS drama on host)
   const howlRef = useRef<any>(null);
   const loadedSrcRef = useRef<string | null>(null);
 
-  // Persona persistence (device-local)
+  // Persona persistence
   useEffect(() => {
     const saved = localStorage.getItem("echojam_persona");
     if (saved === "kid" || saved === "parent") setPersona(saved);
   }, []);
-
   useEffect(() => {
     localStorage.setItem("echojam_persona", persona);
   }, [persona]);
@@ -43,9 +59,15 @@ export default function HomeClient() {
     setShareUrl(url);
   }
 
+  function getJamPreset(j: Jam | null) {
+    if (!j?.preset_id) return null;
+    return PRESETS[j.preset_id] ?? null;
+  }
+
   function getPersonaSrc(j: Jam | null): string | null {
-    if (!j) return null;
-    return persona === "parent" ? j.audio_parent_url : j.audio_kid_url;
+    const preset = getJamPreset(j);
+    if (!preset) return null;
+    return persona === "parent" ? preset.parentUrl : preset.kidUrl;
   }
 
   function ensureHowl(src: string) {
@@ -68,13 +90,16 @@ export default function HomeClient() {
   async function loadJamById(id: string) {
     setErr(null);
 
-    const { data, error } = await supabase.from("jams").select("*").eq("id", id).single();
-    if (error) {
-      setErr(error.message);
-      return;
-    }
+    const { data, error } = await supabase
+      .from("jams")
+      .select("id,host_name,is_playing,position_ms,preset_id")
+      .eq("id", id)
+      .single();
 
-    setJam(data as Jam);
+    if (error) return setErr(error.message);
+
+    const loaded = data as Jam;
+    setJam(loaded);
     setJamInput(id);
     updateShareUrl(id);
     window.history.replaceState(null, "", `/?jam=${id}`);
@@ -83,22 +108,20 @@ export default function HomeClient() {
   async function createJam() {
     setErr(null);
 
+    const presetId = selectedPresetId;
+
     const { data, error } = await supabase
       .from("jams")
       .insert({
         host_name: "Rob",
         is_playing: false,
         position_ms: 0,
-        audio_parent_url: null,
-        audio_kid_url: null,
+        preset_id: presetId,
       })
-      .select("*")
+      .select("id,host_name,is_playing,position_ms,preset_id")
       .single();
 
-    if (error) {
-      setErr(error.message);
-      return;
-    }
+    if (error) return setErr(error.message);
 
     const created = data as Jam;
     setJam(created);
@@ -107,10 +130,10 @@ export default function HomeClient() {
     window.history.replaceState(null, "", `/?jam=${created.id}`);
 
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/?jam=${created.id}`);
-    } catch {
-      // clipboard permissions may block; we still show the link
-    }
+      await navigator.clipboard.writeText(
+        `${window.location.origin}/?jam=${created.id}`
+      );
+    } catch {}
   }
 
   async function joinJam() {
@@ -119,66 +142,23 @@ export default function HomeClient() {
     await loadJamById(id);
   }
 
-  async function uploadFileForJam(file: File, jamId: string, kind: "parent" | "kid") {
-    // Store per-jam folder so files are naturally grouped
-    const safeName = file.name.replace(/\s+/g, "_");
-    const filePath = `${jamId}/${kind}-${Date.now()}-${safeName}`;
-
-    const { error: uploadErr } = await supabase.storage.from("audio").upload(filePath, file, {
-      upsert: false,
-      contentType: file.type || "audio/mpeg",
-    });
-
-    if (uploadErr) throw uploadErr;
-
-    const { data } = supabase.storage.from("audio").getPublicUrl(filePath);
-    return data.publicUrl;
-  }
-
-  async function handleUpload(kind: "parent" | "kid", file: File) {
-    if (!jam) return;
-
-    try {
-      setErr(null);
-      const url = await uploadFileForJam(file, jam.id, kind);
-
-      const patch = kind === "parent" ? { audio_parent_url: url } : { audio_kid_url: url };
-
-      const { data, error } = await supabase
-        .from("jams")
-        .update(patch)
-        .eq("id", jam.id)
-        .select("*")
-        .single();
-
-      if (error) {
-        setErr(error.message);
-        return;
-      }
-
-      setJam(data as Jam);
-    } catch (e: any) {
-      setErr(e?.message ?? "Upload failed");
-    }
-  }
-
-  // Play/pause updates jam (simple sync)
   async function togglePlay() {
     if (!jam) return;
 
-    // Must have an audio URL for this persona (or at least one) to play anything
     const src = getPersonaSrc(jam);
     if (!src) {
-      setErr("Upload audio for this persona first (Parent and/or Kid).");
+      setErr("This jam has no valid preset_id. Create a new jam with a preset.");
       return;
     }
 
     const newState = !jam.is_playing;
+    setJam({ ...jam, is_playing: newState }); // optimistic
 
-    // optimistic
-    setJam({ ...jam, is_playing: newState });
+    const { error } = await supabase
+      .from("jams")
+      .update({ is_playing: newState })
+      .eq("id", jam.id);
 
-    const { error } = await supabase.from("jams").update({ is_playing: newState }).eq("id", jam.id);
     if (error) setErr(error.message);
   }
 
@@ -186,15 +166,12 @@ export default function HomeClient() {
   useEffect(() => {
     const id = search.get("jam");
     if (!id) return;
-
-    // Avoid reloading if already loaded
     if (jam?.id === id) return;
-
     void loadJamById(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
-  // Realtime subscription for this jam
+  // Realtime subscription
   useEffect(() => {
     if (!jam?.id) return;
 
@@ -212,30 +189,59 @@ export default function HomeClient() {
     };
   }, [jam?.id]);
 
-  // When jam changes (or persona changes), ensure the right audio loads and play state applies
+  // Apply correct audio + play/pause
   useEffect(() => {
     if (!jam) return;
 
     const src = getPersonaSrc(jam);
-    if (!src) return; // allow jam to exist without audio yet
+    if (!src) return;
 
     ensureHowl(src);
 
-    if (jam.is_playing) {
-      howlRef.current?.play();
-    } else {
-      howlRef.current?.pause();
-    }
+    if (jam.is_playing) howlRef.current?.play();
+    else howlRef.current?.pause();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jam?.is_playing, jam?.audio_parent_url, jam?.audio_kid_url, persona]);
+  }, [jam?.is_playing, jam?.preset_id, persona]);
+
+  const presetForJam = getJamPreset(jam);
 
   return (
-    <main style={{ padding: 40 }}>
+    <main style={{ padding: 40, maxWidth: 720 }}>
       <h1>EchoJam</h1>
+
+      {/* Persona selector */}
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 14, opacity: 0.7 }}>Persona (this device)</div>
+        <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+          <button onClick={() => setPersona("parent")}>Parent</button>
+          <button onClick={() => setPersona("kid")}>Kid</button>
+        </div>
+        <div style={{ marginTop: 6 }}>
+          Current: <b>{persona.toUpperCase()}</b>
+        </div>
+      </div>
 
       {!jam && (
         <>
-          <button onClick={createJam}>Create Jam</button>
+          {/* Preset picker */}
+          <div style={{ marginTop: 18 }}>
+            <div style={{ fontSize: 14, opacity: 0.7 }}>Choose a preset</div>
+            <select
+              value={selectedPresetId}
+              onChange={(e) => setSelectedPresetId(e.target.value)}
+              style={{ marginTop: 6, padding: 6 }}
+            >
+              {Object.entries(PRESETS).map(([id, p]) => (
+                <option key={id} value={id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ marginTop: 18 }}>
+            <button onClick={createJam}>Create Jam</button>
+          </div>
 
           <div style={{ marginTop: 16 }}>
             <input
@@ -257,6 +263,10 @@ export default function HomeClient() {
             Jam: <code>{jam.id}</code>
           </p>
 
+          <p>
+            Preset: <b>{presetForJam ? presetForJam.name : jam.preset_id ?? "—"}</b>
+          </p>
+
           <div style={{ marginTop: 10 }}>
             <div style={{ fontSize: 12, opacity: 0.7 }}>Share link:</div>
             <div style={{ wordBreak: "break-all" }}>{shareUrl}</div>
@@ -265,58 +275,14 @@ export default function HomeClient() {
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(shareUrl);
-                } catch {
-                  // ignore
-                }
+                } catch {}
               }}
             >
               Copy Link
             </button>
           </div>
 
-          <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 14, opacity: 0.7 }}>Persona (this device)</div>
-            <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
-              <button onClick={() => setPersona("parent")}>Parent</button>
-              <button onClick={() => setPersona("kid")}>Kid</button>
-            </div>
-            <div style={{ marginTop: 6 }}>
-              Current: <b>{persona.toUpperCase()}</b>
-            </div>
-          </div>
-
           <div style={{ marginTop: 18 }}>
-            <div>
-              <label>Upload Parent Audio: </label>
-              <input
-                type="file"
-                accept="audio/*"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void handleUpload("parent", f);
-                }}
-              />
-            </div>
-
-            <div style={{ marginTop: 10 }}>
-              <label>Upload Kid Audio: </label>
-              <input
-                type="file"
-                accept="audio/*"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void handleUpload("kid", f);
-                }}
-              />
-            </div>
-
-            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-              Parent URL: {jam.audio_parent_url ? "✅ set" : "—"} <br />
-              Kid URL: {jam.audio_kid_url ? "✅ set" : "—"}
-            </div>
-          </div>
-
-          <div style={{ marginTop: 20 }}>
             <button onClick={togglePlay}>{jam.is_playing ? "Pause" : "Play"}</button>
           </div>
 
