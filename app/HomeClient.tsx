@@ -31,7 +31,7 @@ export default function HomeClient() {
   const [persona, setPersona] = useState<"kid" | "parent">("parent");
 
   // Audio (Howler)
-  const howlRef = useRef<Howl | null>(null);
+  const howlRef = useRef<any>(null);
   const loadedSrcRef = useRef<string | null>(null);
 
   // Heartbeat for host to publish position_ms
