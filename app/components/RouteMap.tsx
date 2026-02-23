@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { Map as MapLibreMap } from "maplibre-gl";
+import type { FeatureCollection, Feature, LineString, Point, GeoJsonProperties } from "geojson";
 
 type Stop = {
   id: string;
@@ -147,23 +148,25 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
   );
 }
 
-function routeGeoJSON(stops: Stop[]) {
+
+
+function routeGeoJSON(stops: Stop[]): FeatureCollection<LineString, GeoJsonProperties> {
+  const feature: Feature<LineString, GeoJsonProperties> = {
+    type: "Feature",
+    properties: {},
+    geometry: {
+      type: "LineString",
+      coordinates: stops.map((s) => [s.lng, s.lat]),
+    },
+  };
+
   return {
     type: "FeatureCollection",
-    features: [
-      {
-        type: "Feature",
-        properties: {},
-        geometry: {
-          type: "LineString",
-          coordinates: stops.map((s) => [s.lng, s.lat]),
-        },
-      },
-    ],
-  } as const;
+    features: [feature],
+  };
 }
 
-function stopsGeoJSON(stops: Stop[], currentIdx: number) {
+function stopsGeoJSON(stops: Stop[], currentIdx: number): FeatureCollection<Point, GeoJsonProperties> {
   return {
     type: "FeatureCollection",
     features: stops.map((s, idx) => ({
@@ -171,11 +174,15 @@ function stopsGeoJSON(stops: Stop[], currentIdx: number) {
       properties: { id: s.id, title: s.title, isCurrent: idx === currentIdx, idx },
       geometry: { type: "Point", coordinates: [s.lng, s.lat] },
     })),
-  } as const;
+  };
 }
 
-function myPosGeoJSON(myPos: { lat: number; lng: number } | null | undefined) {
-  if (!myPos) return { type: "FeatureCollection", features: [] } as const;
+function myPosGeoJSON(
+  myPos: { lat: number; lng: number } | null | undefined
+): FeatureCollection<Point, GeoJsonProperties> {
+  if (!myPos) {
+    return { type: "FeatureCollection", features: [] };
+  }
   return {
     type: "FeatureCollection",
     features: [
@@ -185,7 +192,7 @@ function myPosGeoJSON(myPos: { lat: number; lng: number } | null | undefined) {
         geometry: { type: "Point", coordinates: [myPos.lng, myPos.lat] },
       },
     ],
-  } as const;
+  };
 }
 
 function fitMapToPoints(map: any, stops: Stop[], myPos?: { lat: number; lng: number } | null) {
