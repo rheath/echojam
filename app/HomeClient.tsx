@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { getRouteById, salemRoutes, type Persona, type RouteDef } from "@/app/content/salemRoutes";
 import dynamic from "next/dynamic";
 
-//const RouteMap = dynamic(() => import("./components/RouteMap"), { ssr: false });
+const RouteMap = dynamic(() => import("./components/RouteMap"), { ssr: false });
 
 type JamRow = {
   id: string;
@@ -400,7 +400,7 @@ export default function HomeClient() {
               fontSize: 14,
             }}
           >
-            Map goes here (MVP: show to everyone)
+            <RouteMap stops={route.stops} currentStopIndex={currentStopIndex} myPos={myPos} />
           </div>
 
           {/* Audio */}
