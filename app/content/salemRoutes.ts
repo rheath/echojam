@@ -44,7 +44,7 @@ export const salemRoutes: RouteDef[] = [
           adult: "Welcome to Salem Common—your launch point for the city’s most iconic storylines.",
           preteen: "Welcome! This is Salem Common—think of it like the city’s front yard.",
         },
-        images: ["/images/salem/placeholder-01.jpg"],
+        images: ["/images/salem/placeholder-01.png"],
       },
       {
         id: "core-02",
@@ -59,7 +59,7 @@ export const salemRoutes: RouteDef[] = [
           adult: "This stop focuses on memory, justice, and what Salem learned the hard way.",
           preteen: "This spot is about remembering—and making sure people are treated fairly.",
         },
-        images: ["/images/salem/placeholder-02.jpg"],
+        images: ["/images/salem/placeholder-02.png"],
       },
       {
         id: "core-03",
@@ -74,7 +74,7 @@ export const salemRoutes: RouteDef[] = [
           adult: "Salem reinvented itself—again and again. This building watched a lot of it happen.",
           preteen: "This building has been here for a long time—like a time machine in brick form.",
         },
-        images: ["/images/salem/placeholder-03.jpg"],
+        images: ["/images/salem/placeholder-03.png"],
       },
     ],
   },
@@ -91,7 +91,7 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5196,
         lng: -70.8967,
         audio: { adult: "/audio/adult-01.mp3", preteen: "/audio/kid-01.mp3" },
-        images: ["/images/salem/placeholder-01.jpg"],
+        images: ["/images/salem/placeholder-01.png"],
       },
       {
         id: "story-02",
@@ -99,7 +99,7 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5219,
         lng: -70.8939,
         audio: { adult: "/audio/adult-02.mp3", preteen: "/audio/kid-02.mp3" },
-        images: ["/images/salem/placeholder-02.jpg"],
+        images: ["/images/salem/placeholder-02.png"],
       },
       {
         id: "story-03",
@@ -107,7 +107,7 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5212,
         lng: -70.8877,
         audio: { adult: "/audio/adult-01.mp3", preteen: "/audio/kid-01.mp3" },
-        images: ["/images/salem/placeholder-03.jpg"],
+        images: ["/images/salem/placeholder-03.png"],
       },
       {
         id: "story-04",
@@ -115,7 +115,7 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5205,
         lng: -70.8949,
         audio: { adult: "/audio/adult-02.mp3", preteen: "/audio/kid-02.mp3" },
-        images: ["/images/salem/placeholder-01.jpg"],
+        images: ["/images/salem/placeholder-01.png"],
       },
     ],
   },
@@ -132,7 +132,7 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5196,
         lng: -70.8967,
         audio: { adult: "/audio/adult-01.mp3", preteen: "/audio/kid-01.mp3" },
-        images: ["/images/salem/placeholder-01.jpg"],
+        images: ["/images/salem/placeholder-01.png"],
       },
       {
         id: "deep-02",
@@ -140,7 +140,7 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5226,
         lng: -70.8946,
         audio: { adult: "/audio/adult-02.mp3", preteen: "/audio/kid-02.mp3" },
-        images: ["/images/salem/placeholder-02.jpg"],
+        images: ["/images/salem/placeholder-02.png"],
       },
       {
         id: "deep-03",
@@ -148,7 +148,7 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5212,
         lng: -70.8877,
         audio: { adult: "/audio/adult-01.mp3", preteen: "/audio/kid-01.mp3" },
-        images: ["/images/salem/placeholder-03.jpg"],
+        images: ["/images/salem/placeholder-03.png"],
       },
       {
         id: "deep-04",
@@ -156,7 +156,7 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5232,
         lng: -70.8958,
         audio: { adult: "/audio/adult-02.mp3", preteen: "/audio/kid-02.mp3" },
-        images: ["/images/salem/placeholder-01.jpg"],
+        images: ["/images/salem/placeholder-01.png"],
       },
       {
         id: "deep-05",
@@ -164,7 +164,7 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5199,
         lng: -70.8951,
         audio: { adult: "/audio/adult-01.mp3", preteen: "/audio/kid-01.mp3" },
-        images: ["/images/salem/placeholder-02.jpg"],
+        images: ["/images/salem/placeholder-02.png"],
       },
       {
         id: "deep-06",
@@ -172,7 +172,7 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5205,
         lng: -70.8949,
         audio: { adult: "/audio/adult-02.mp3", preteen: "/audio/kid-02.mp3" },
-        images: ["/images/salem/placeholder-03.jpg"],
+        images: ["/images/salem/placeholder-03.png"],
       },
     ],
   },
