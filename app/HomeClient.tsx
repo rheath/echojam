@@ -1,6 +1,6 @@
 "use client";
-
-import { useEffect, useMemo, useState } from "react";
+ 
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
@@ -8,6 +8,11 @@ import { getRouteById, salemRoutes, type Persona, type RouteDef } from "@/app/co
 import dynamic from "next/dynamic";
 
 const RouteMap = dynamic(() => import("./components/RouteMap"), { ssr: false });
+
+const [distanceToStopM, setDistanceToStopM] = useState<number | null>(null);
+const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
+const audioRef = useRef<HTMLAudioElement | null>(null);
+const audioBlockRef = useRef<HTMLDivElement | null>(null);
 
 type JamRow = {
   id: string;
@@ -171,6 +176,22 @@ export default function HomeClient() {
     setJam(data as JamRow);
   }
 
+  // ---------- "Start stop” handler ----------
+async function startStopNarration() {
+  // scroll to audio block
+  audioBlockRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  // attempt to play (will work because button click is a user gesture)
+  const el = audioRef.current;
+  if (el) {
+    try {
+      await el.play();
+    } catch {
+      // autoplay might still be blocked in some cases; user can press play manually
+    }
+  }
+}
+
   // ---------- Step transitions ----------
   function requestGeo() {
     setErr(null);
@@ -240,6 +261,44 @@ export default function HomeClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jamIdFromUrl]);
 
+// ---------- watchPosition ----------
+  useEffect(() => {
+  if (step !== "walk") return;
+  if (!navigator.geolocation) return;
+  if (!route || !currentStop) return;
+
+  // If user never enabled geo, don't nag; banner will stay hidden.
+  let watchId: number | null = null;
+
+  try {
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const nextPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setMyPos(nextPos);
+        setGeoAllowed(true);
+
+        const meters = haversineMeters(nextPos.lat, nextPos.lng, currentStop.lat, currentStop.lng);
+        setDistanceToStopM(meters);
+
+        // Thresholds (tweak later)
+        if (meters <= 35) setProximity("arrived");
+        else if (meters <= 80) setProximity("near");
+        else setProximity("far");
+      },
+      () => {
+        setGeoAllowed(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 8000 }
+    );
+  } catch {
+    // ignore
+  }
+
+  return () => {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  };
+}, [step, route?.id, currentStop?.id]);
+
   // ---------- Distance/ETA to next stop ----------
   const nextCue = useMemo(() => {
     if (!myPos || !nextStop) return null;
@@ -308,6 +367,38 @@ export default function HomeClient() {
           </div>
         </main>
       )}
+
+{/* banner UI inside the WALK section
+*/}
+{geoAllowed === true && proximity !== "far" && distanceToStopM !== null && (
+  <div
+    style={{
+      marginTop: 10,
+      padding: 12,
+      borderRadius: 12,
+      border: "1px solid #ddd",
+      background: "white",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+      flexWrap: "wrap",
+    }}
+  >
+    <div style={{ lineHeight: 1.3 }}>
+      <div style={{ fontWeight: 700 }}>
+        {proximity === "arrived" ? "Arrived 🎧" : "You’re close"}
+      </div>
+      <div style={{ opacity: 0.8, fontSize: 13 }}>
+        About {formatDistance(distanceToStopM)} from <b>{currentStop.title}</b>
+      </div>
+    </div>
+
+    <button onClick={startStopNarration} style={{ padding: "10px 12px" }}>
+      Start stop
+    </button>
+  </div>
+)}
 
       {/* PICK DURATION */}
       {step === "pickDuration" && (
@@ -412,6 +503,26 @@ export default function HomeClient() {
             )}
           </div>
 
+<div
+  ref={audioBlockRef}
+  style={{ marginTop: 14, padding: 14, border: "1px solid #ddd", borderRadius: 12, background: "white" }}
+>
+  <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 8 }}>
+    Narration ({persona === "adult" ? "Adult" : "Preteen"})
+  </div>
+
+  <audio
+    ref={audioRef}
+    controls
+    preload="metadata"
+    style={{ width: "100%" }}
+    src={currentStop.audio[persona]}
+  />
+
+  {currentStop.text?.[persona] && (
+    <p style={{ marginTop: 10, opacity: 0.85, lineHeight: 1.5 }}>{currentStop.text[persona]}</p>
+  )}
+</div>
           {/* Images */}
           <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
             {currentStop.images.slice(0, 2).map((src) => (
