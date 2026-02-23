@@ -390,7 +390,7 @@ async function startStopNarration() {
         {proximity === "arrived" ? "Arrived 🎧" : "You’re close"}
       </div>
       <div style={{ opacity: 0.8, fontSize: 13 }}>
-        About {formatDistance(distanceToStopM)} from <b>{currentStop.title}</b>
+        About {formatDistance(distanceToStopM)} from <b>{currentStop?.title}</b>
       </div>
     </div>
 
