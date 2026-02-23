@@ -40,7 +40,7 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
         style: "https://demotiles.maplibre.org/style.json",
         center: [first.lng, first.lat],
         zoom: 15,
-        attributionControl: true,
+        attributionControl: { compact: true },
       });
 
       mapRef.current = map;
