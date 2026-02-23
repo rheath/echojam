@@ -19,10 +19,36 @@ export default function HomeClient() {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  // Persona (stored locally per device)
+  const [persona, setPersona] = useState<"kid" | "parent">("parent");
+
+  // Load persona from localStorage on first mount
+  useEffect(() => {
+    const saved = localStorage.getItem("echojam_persona");
+    if (saved === "kid" || saved === "parent") {
+      setPersona(saved);
+    }
+  }, []);
+
+  // Persist persona changes
+  useEffect(() => {
+    localStorage.setItem("echojam_persona", persona);
+  }, [persona]);
+
   async function loadJamById(id: string) {
     setErr(null);
-    const { data, error } = await supabase.from("jams").select("*").eq("id", id).single();
-    if (error) return setErr(error.message);
+
+    const { data, error } = await supabase
+      .from("jams")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+
     setJam(data as Jam);
   }
 
@@ -35,15 +61,20 @@ export default function HomeClient() {
       .select("*")
       .single();
 
-    if (error) return setErr(error.message);
+    if (error) {
+      setErr(error.message);
+      return;
+    }
 
     const created = data as Jam;
     setJam(created);
 
+    // Shareable link
     const url = `${window.location.origin}/?jam=${created.id}`;
     setShareUrl(url);
     window.history.replaceState(null, "", `/?jam=${created.id}`);
 
+    // Copy to clipboard (may fail due to permissions)
     try {
       await navigator.clipboard.writeText(url);
     } catch {
@@ -63,8 +94,15 @@ export default function HomeClient() {
 
   async function setPlaying(isPlaying: boolean) {
     if (!jam) return;
-    setJam({ ...jam, is_playing: isPlaying }); // optimistic
-    const { error } = await supabase.from("jams").update({ is_playing: isPlaying }).eq("id", jam.id);
+
+    // optimistic UI
+    setJam({ ...jam, is_playing: isPlaying });
+
+    const { error } = await supabase
+      .from("jams")
+      .update({ is_playing: isPlaying })
+      .eq("id", jam.id);
+
     if (error) setErr(error.message);
   }
 
@@ -104,9 +142,41 @@ export default function HomeClient() {
     <main style={{ padding: 40, maxWidth: 720 }}>
       <h1>EchoJam</h1>
 
+      {/* Persona selector (device-local) */}
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 14, opacity: 0.7 }}>Persona (this device)</div>
+        <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+          <button
+            onClick={() => setPersona("parent")}
+            style={{
+              background: persona === "parent" ? "black" : "#eee",
+              color: persona === "parent" ? "white" : "black",
+              padding: "6px 12px",
+              borderRadius: 6,
+            }}
+          >
+            Parent
+          </button>
+
+          <button
+            onClick={() => setPersona("kid")}
+            style={{
+              background: persona === "kid" ? "black" : "#eee",
+              color: persona === "kid" ? "white" : "black",
+              padding: "6px 12px",
+              borderRadius: 6,
+            }}
+          >
+            Kid
+          </button>
+        </div>
+      </div>
+
       {!jam && (
         <>
-          <button onClick={createJam}>Create Jam</button>
+          <div style={{ marginTop: 20 }}>
+            <button onClick={createJam}>Create Jam</button>
+          </div>
 
           <div style={{ marginTop: 20 }}>
             <input
@@ -128,6 +198,10 @@ export default function HomeClient() {
             Jam: <code>{jam.id}</code>
           </p>
 
+          <p style={{ marginTop: 10 }}>
+            Viewing as: <b>{persona.toUpperCase()}</b>
+          </p>
+
           <p>
             State: <b>{jam.is_playing ? "PLAYING" : "PAUSED"}</b>
           </p>
@@ -139,7 +213,9 @@ export default function HomeClient() {
 
           {shareUrl && (
             <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Share link:</div>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>
+                Share link (copied to clipboard if allowed):
+              </div>
               <div style={{ wordBreak: "break-all" }}>{shareUrl}</div>
             </div>
           )}
