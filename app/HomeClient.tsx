@@ -19,11 +19,16 @@ export default function HomeClient() {
 
   const [jam, setJam] = useState<Jam | null>(null);
   const [jamInput, setJamInput] = useState("");
+  const [shareUrl, setShareUrl] = useState<string>("");
   const [err, setErr] = useState<string | null>(null);
+
   const [persona, setPersona] = useState<"kid" | "parent">("parent");
 
+  // Howler instance (typed as any to avoid TS type issues on your host)
   const howlRef = useRef<any>(null);
+  const loadedSrcRef = useRef<string | null>(null);
 
+  // Persona persistence (device-local)
   useEffect(() => {
     const saved = localStorage.getItem("echojam_persona");
     if (saved === "kid" || saved === "parent") setPersona(saved);
@@ -33,113 +38,163 @@ export default function HomeClient() {
     localStorage.setItem("echojam_persona", persona);
   }, [persona]);
 
-  function getSrc(j: Jam | null) {
+  function updateShareUrl(id: string) {
+    const url = `${window.location.origin}/?jam=${id}`;
+    setShareUrl(url);
+  }
+
+  function getPersonaSrc(j: Jam | null): string | null {
     if (!j) return null;
     return persona === "parent" ? j.audio_parent_url : j.audio_kid_url;
   }
 
-  function loadAudio(src: string) {
+  function ensureHowl(src: string) {
+    if (loadedSrcRef.current === src && howlRef.current) return;
+
     if (howlRef.current) {
       howlRef.current.stop();
       howlRef.current.unload();
+      howlRef.current = null;
+      loadedSrcRef.current = null;
     }
 
     howlRef.current = new Howl({
       src: [src],
       html5: true,
     });
+    loadedSrcRef.current = src;
   }
 
-  async function uploadFile(file: File) {
-    const filePath = `${Date.now()}-${file.name}`;
+  async function loadJamById(id: string) {
+    setErr(null);
 
-    const { error } = await supabase.storage
-      .from("audio")
-      .upload(filePath, file);
+    const { data, error } = await supabase.from("jams").select("*").eq("id", id).single();
+    if (error) {
+      setErr(error.message);
+      return;
+    }
 
-    if (error) throw error;
-
-    const { data } = supabase.storage
-      .from("audio")
-      .getPublicUrl(filePath);
-
-    return data.publicUrl;
+    setJam(data as Jam);
+    setJamInput(id);
+    updateShareUrl(id);
+    window.history.replaceState(null, "", `/?jam=${id}`);
   }
 
   async function createJam() {
+    setErr(null);
+
     const { data, error } = await supabase
       .from("jams")
       .insert({
         host_name: "Rob",
         is_playing: false,
         position_ms: 0,
+        audio_parent_url: null,
+        audio_kid_url: null,
       })
       .select("*")
       .single();
 
-    if (error) return setErr(error.message);
+    if (error) {
+      setErr(error.message);
+      return;
+    }
 
-    setJam(data as Jam);
+    const created = data as Jam;
+    setJam(created);
+
+    updateShareUrl(created.id);
+    window.history.replaceState(null, "", `/?jam=${created.id}`);
+
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/?jam=${created.id}`);
+    } catch {
+      // clipboard permissions may block; we still show the link
+    }
   }
 
-  async function handleUpload(type: "parent" | "kid", file: File) {
+  async function joinJam() {
+    const id = jamInput.trim();
+    if (!id) return;
+    await loadJamById(id);
+  }
+
+  async function uploadFileForJam(file: File, jamId: string, kind: "parent" | "kid") {
+    // Store per-jam folder so files are naturally grouped
+    const safeName = file.name.replace(/\s+/g, "_");
+    const filePath = `${jamId}/${kind}-${Date.now()}-${safeName}`;
+
+    const { error: uploadErr } = await supabase.storage.from("audio").upload(filePath, file, {
+      upsert: false,
+      contentType: file.type || "audio/mpeg",
+    });
+
+    if (uploadErr) throw uploadErr;
+
+    const { data } = supabase.storage.from("audio").getPublicUrl(filePath);
+    return data.publicUrl;
+  }
+
+  async function handleUpload(kind: "parent" | "kid", file: File) {
     if (!jam) return;
 
     try {
-      const url = await uploadFile(file);
+      setErr(null);
+      const url = await uploadFileForJam(file, jam.id, kind);
 
-      const updateField =
-        type === "parent" ? { audio_parent_url: url } : { audio_kid_url: url };
+      const patch = kind === "parent" ? { audio_parent_url: url } : { audio_kid_url: url };
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("jams")
-        .update(updateField)
+        .update(patch)
         .eq("id", jam.id)
         .select("*")
         .single();
 
-      if (error) return setErr(error.message);
+      if (error) {
+        setErr(error.message);
+        return;
+      }
 
-      await loadJam(jam.id);
+      setJam(data as Jam);
     } catch (e: any) {
-      setErr(e.message);
+      setErr(e?.message ?? "Upload failed");
     }
   }
 
-  async function loadJam(id: string) {
-    const { data, error } = await supabase
-      .from("jams")
-      .select("*")
-      .eq("id", id)
-      .single();
-
-    if (error) return setErr(error.message);
-    setJam(data as Jam);
-  }
-
+  // Play/pause updates jam (simple sync)
   async function togglePlay() {
     if (!jam) return;
 
+    // Must have an audio URL for this persona (or at least one) to play anything
+    const src = getPersonaSrc(jam);
+    if (!src) {
+      setErr("Upload audio for this persona first (Parent and/or Kid).");
+      return;
+    }
+
     const newState = !jam.is_playing;
 
-    await supabase
-      .from("jams")
-      .update({ is_playing: newState })
-      .eq("id", jam.id);
+    // optimistic
+    setJam({ ...jam, is_playing: newState });
+
+    const { error } = await supabase.from("jams").update({ is_playing: newState }).eq("id", jam.id);
+    if (error) setErr(error.message);
   }
 
+  // Auto-join from ?jam=
   useEffect(() => {
-    if (!jam) return;
+    const id = search.get("jam");
+    if (!id) return;
 
-    const src = getSrc(jam);
-    if (!src) return;
+    // Avoid reloading if already loaded
+    if (jam?.id === id) return;
 
-    loadAudio(src);
+    void loadJamById(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
-    if (jam.is_playing) howlRef.current.play();
-    else howlRef.current.pause();
-  }, [jam?.is_playing, persona]);
-
+  // Realtime subscription for this jam
   useEffect(() => {
     if (!jam?.id) return;
 
@@ -157,56 +212,131 @@ export default function HomeClient() {
     };
   }, [jam?.id]);
 
+  // When jam changes (or persona changes), ensure the right audio loads and play state applies
+  useEffect(() => {
+    if (!jam) return;
+
+    const src = getPersonaSrc(jam);
+    if (!src) return; // allow jam to exist without audio yet
+
+    ensureHowl(src);
+
+    if (jam.is_playing) {
+      howlRef.current?.play();
+    } else {
+      howlRef.current?.pause();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jam?.is_playing, jam?.audio_parent_url, jam?.audio_kid_url, persona]);
+
   return (
     <main style={{ padding: 40 }}>
       <h1>EchoJam</h1>
 
-      <div>
-        <button onClick={createJam}>Create Jam</button>
-      </div>
-
-      {jam && (
+      {!jam && (
         <>
-          <p>Jam: {jam.id}</p>
+          <button onClick={createJam}>Create Jam</button>
 
-          <div>
-            <label>Upload Parent Audio:</label>
+          <div style={{ marginTop: 16 }}>
             <input
-              type="file"
-              accept="audio/*"
-              onChange={(e) =>
-                e.target.files &&
-                handleUpload("parent", e.target.files[0])
-              }
+              placeholder="Paste Jam ID"
+              value={jamInput}
+              onChange={(e) => setJamInput(e.target.value)}
+              style={{ width: 420, maxWidth: "100%" }}
             />
-          </div>
-
-          <div>
-            <label>Upload Kid Audio:</label>
-            <input
-              type="file"
-              accept="audio/*"
-              onChange={(e) =>
-                e.target.files &&
-                handleUpload("kid", e.target.files[0])
-              }
-            />
-          </div>
-
-          <div style={{ marginTop: 20 }}>
-            <button onClick={() => setPersona("parent")}>Parent</button>
-            <button onClick={() => setPersona("kid")}>Kid</button>
-          </div>
-
-          <div style={{ marginTop: 20 }}>
-            <button onClick={togglePlay}>
-              {jam.is_playing ? "Pause" : "Play"}
+            <button onClick={joinJam} style={{ marginLeft: 10 }}>
+              Join
             </button>
           </div>
         </>
       )}
 
-      {err && <p style={{ color: "red" }}>{err}</p>}
+      {jam && (
+        <>
+          <p style={{ marginTop: 16 }}>
+            Jam: <code>{jam.id}</code>
+          </p>
+
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>Share link:</div>
+            <div style={{ wordBreak: "break-all" }}>{shareUrl}</div>
+            <button
+              style={{ marginTop: 8 }}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(shareUrl);
+                } catch {
+                  // ignore
+                }
+              }}
+            >
+              Copy Link
+            </button>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 14, opacity: 0.7 }}>Persona (this device)</div>
+            <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+              <button onClick={() => setPersona("parent")}>Parent</button>
+              <button onClick={() => setPersona("kid")}>Kid</button>
+            </div>
+            <div style={{ marginTop: 6 }}>
+              Current: <b>{persona.toUpperCase()}</b>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 18 }}>
+            <div>
+              <label>Upload Parent Audio: </label>
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleUpload("parent", f);
+                }}
+              />
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <label>Upload Kid Audio: </label>
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleUpload("kid", f);
+                }}
+              />
+            </div>
+
+            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+              Parent URL: {jam.audio_parent_url ? "✅ set" : "—"} <br />
+              Kid URL: {jam.audio_kid_url ? "✅ set" : "—"}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            <button onClick={togglePlay}>{jam.is_playing ? "Pause" : "Play"}</button>
+          </div>
+
+          <div style={{ marginTop: 18 }}>
+            <button
+              onClick={() => {
+                setJam(null);
+                setJamInput("");
+                setShareUrl("");
+                setErr(null);
+                window.history.replaceState(null, "", "/");
+              }}
+            >
+              Leave Jam
+            </button>
+          </div>
+        </>
+      )}
+
+      {err && <p style={{ color: "red", marginTop: 16 }}>Error: {err}</p>}
     </main>
   );
 }
