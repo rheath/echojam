@@ -1,308 +1,491 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { supabase } from "../lib/supabaseClient";
-import { Howl } from "howler";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
+import { supabase } from "@/lib/supabaseClient";
+import { getRouteById, salemRoutes, type Persona, type RouteDef } from "@/app/content/salemRoutes";
 
-type Jam = {
+type JamRow = {
   id: string;
   host_name: string | null;
-  is_playing: boolean;
-  position_ms: number;
-  preset_id: string | null;
+
+  // New MVP fields
+  route_id: string | null;
+  persona: Persona | null;
+  current_stop: number | null;
+  completed_at: string | null;
+
+  // Legacy fields (keep if present in table)
+  is_playing?: boolean | null;
+  position_ms?: number | null;
+  preset_id?: string | null;
 };
 
-// ✅ Add presets here (match your hosted paths)
-const PRESETS: Record<
-  string,
-  { name: string; parentUrl: string; kidUrl: string }
-> = {
-  salem: {
-    name: "Salem Night Walk",
-    parentUrl: "https://echojam.idrawcircles.com/audio/adult-01.mp3",
-    kidUrl: "https://echojam.idrawcircles.com/audio/kid-01.mp3",
-  },
-  bedtime: {
-    name: "Bedtime Trail",
-    parentUrl: "https://echojam.idrawcircles.com/audio/adult-02.mp3",
-    kidUrl: "https://echojam.idrawcircles.com/audio/kid-02.mp3",
-  },
-}; 
+type FlowStep = "landing" | "pickDuration" | "walk" | "end";
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+  const lat1 = toRad(aLat);
+  const lat2 = toRad(bLat);
+
+  const x =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+
+  const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  return R * c;
+}
+
+function formatDistance(meters: number) {
+  if (!isFinite(meters)) return "";
+  const miles = meters / 1609.344;
+  if (miles < 0.2) return `${Math.round(meters)} m`;
+  return `${miles.toFixed(miles < 1 ? 2 : 1)} mi`;
+}
+
+function estimateWalkMinutes(meters: number) {
+  // ~1.35 m/s ≈ 3.0 mph
+  const seconds = meters / 1.35;
+  return Math.max(1, Math.round(seconds / 60));
+}
 
 export default function HomeClient() {
-  const search = useSearchParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const [jam, setJam] = useState<Jam | null>(null);
-  const [jamInput, setJamInput] = useState("");
-  const [shareUrl, setShareUrl] = useState<string>("");
   const [err, setErr] = useState<string | null>(null);
+  const [jam, setJam] = useState<JamRow | null>(null);
 
-  const [persona, setPersona] = useState<"kid" | "parent">("parent");
-  const [selectedPresetId, setSelectedPresetId] = useState<string>("salem");
+  const [step, setStep] = useState<FlowStep>("landing");
 
-  // Howler (typed any to avoid TS drama on host)
-  const howlRef = useRef<any>(null);
-  const loadedSrcRef = useRef<string | null>(null);
+  // For MVP: Salem-only. This just controls whether we use geolocation-derived distances.
+  const [geoAllowed, setGeoAllowed] = useState<boolean | null>(null);
+  const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
 
-  // Persona persistence
-  useEffect(() => {
-    const saved = localStorage.getItem("echojam_persona");
-    if (saved === "kid" || saved === "parent") setPersona(saved);
-  }, []);
-  useEffect(() => {
-    localStorage.setItem("echojam_persona", persona);
-  }, [persona]);
+  const jamIdFromUrl = searchParams.get("jam");
 
-  function updateShareUrl(id: string) {
-    const url = `${window.location.origin}/?jam=${id}`;
-    setShareUrl(url);
-  }
+  // Derive route + stop from jam
+  const route: RouteDef | null = useMemo(() => getRouteById(jam?.route_id ?? null), [jam?.route_id]);
+  const persona: Persona = (jam?.persona ?? "adult") as Persona;
 
-  function getJamPreset(j: Jam | null) {
-    if (!j?.preset_id) return null;
-    return PRESETS[j.preset_id] ?? null;
-  }
+  const currentStopIndex = useMemo(() => {
+    const idx = jam?.current_stop ?? 0;
+    if (!route) return 0;
+    return clamp(idx, 0, route.stops.length - 1);
+  }, [jam?.current_stop, route]);
 
-  function getPersonaSrc(j: Jam | null): string | null {
-    const preset = getJamPreset(j);
-    if (!preset) return null;
-    return persona === "parent" ? preset.parentUrl : preset.kidUrl;
-  }
+  const currentStop = route ? route.stops[currentStopIndex] : null;
+  const nextStop = route ? route.stops[currentStopIndex + 1] : null;
 
-  function ensureHowl(src: string) {
-    if (loadedSrcRef.current === src && howlRef.current) return;
-
-    if (howlRef.current) {
-      howlRef.current.stop();
-      howlRef.current.unload();
-      howlRef.current = null;
-      loadedSrcRef.current = null;
-    }
-
-    howlRef.current = new Howl({
-      src: [src],
-      html5: true,
-    });
-    loadedSrcRef.current = src;
-  }
-
+  // ---------- Supabase: load jam ----------
   async function loadJamById(id: string) {
     setErr(null);
-
     const { data, error } = await supabase
       .from("jams")
-      .select("id,host_name,is_playing,position_ms,preset_id")
+      .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms,preset_id")
       .eq("id", id)
       .single();
 
-    if (error) return setErr(error.message);
+    if (error) {
+      setErr(error.message);
+      setJam(null);
+      setStep("landing");
+      return;
+    }
 
-    const loaded = data as Jam;
-    setJam(loaded);
-    setJamInput(id);
-    updateShareUrl(id);
-    window.history.replaceState(null, "", `/?jam=${id}`);
+    setJam(data as JamRow);
+
+    // Decide which screen we’re on
+    if (!data.route_id) setStep("pickDuration");
+    else if (data.completed_at) setStep("end");
+    else setStep("walk");
   }
 
-  async function createJam() {
+  // ---------- Supabase: create jam ----------
+  async function createJam(routeId?: string) {
     setErr(null);
 
-    const presetId = selectedPresetId;
+    // If routeId provided we can jump straight to walk; otherwise we’ll go to pickDuration.
+    const insertRow: Partial<JamRow> & {
+      host_name?: string;
+      route_id?: string | null;
+      persona?: Persona;
+      current_stop?: number;
+      is_playing?: boolean;
+      position_ms?: number;
+      preset_id?: string | null;
+    } = {
+      host_name: "Rob",
+      route_id: routeId ?? null,
+      persona: "adult",
+      current_stop: 0,
+
+      // legacy
+      is_playing: false,
+      position_ms: 0,
+      preset_id: null,
+    };
 
     const { data, error } = await supabase
       .from("jams")
-      .insert({
-        host_name: "Rob",
-        is_playing: false,
-        position_ms: 0,
-        preset_id: presetId,
-      })
-      .select("id,host_name,is_playing,position_ms,preset_id")
+      .insert(insertRow)
+      .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms,preset_id")
       .single();
 
     if (error) return setErr(error.message);
 
-    const created = data as Jam;
-    setJam(created);
+    setJam(data as JamRow);
 
-    updateShareUrl(created.id);
-    window.history.replaceState(null, "", `/?jam=${created.id}`);
+    // Put it in URL like your existing flow
+    router.replace(`/?jam=${data.id}`);
 
-    try {
-      await navigator.clipboard.writeText(
-        `${window.location.origin}/?jam=${created.id}`
-      );
-    } catch {}
+    if (!routeId) setStep("pickDuration");
+    else setStep("walk");
   }
 
-  async function joinJam() {
-    const id = jamInput.trim();
-    if (!id) return;
-    await loadJamById(id);
-  }
-
-  async function togglePlay() {
+  // ---------- Supabase: update jam ----------
+  async function updateJam(patch: Partial<JamRow>) {
     if (!jam) return;
+    setErr(null);
 
-    const src = getPersonaSrc(jam);
-    if (!src) {
-      setErr("This jam has no valid preset_id. Create a new jam with a preset.");
+    const { data, error } = await supabase
+      .from("jams")
+      .update(patch)
+      .eq("id", jam.id)
+      .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms,preset_id")
+      .single();
+
+    if (error) return setErr(error.message);
+    setJam(data as JamRow);
+  }
+
+  // ---------- Step transitions ----------
+  function requestGeo() {
+    setErr(null);
+
+    if (!navigator.geolocation) {
+      setGeoAllowed(false);
+      setMyPos(null);
       return;
     }
 
-    const newState = !jam.is_playing;
-    setJam({ ...jam, is_playing: newState }); // optimistic
-
-    const { error } = await supabase
-      .from("jams")
-      .update({ is_playing: newState })
-      .eq("id", jam.id);
-
-    if (error) setErr(error.message);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGeoAllowed(true);
+        setMyPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      () => {
+        setGeoAllowed(false);
+        setMyPos(null);
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
   }
 
-  // Auto-join from ?jam=
-  useEffect(() => {
-    const id = search.get("jam");
-    if (!id) return;
-    if (jam?.id === id) return;
-    void loadJamById(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  async function chooseRoute(routeId: RouteDef["id"]) {
+    if (!jam) {
+      // Create jam already tied to this route
+      await createJam(routeId);
+      return;
+    }
+    await updateJam({ route_id: routeId, current_stop: 0, completed_at: null });
+    setStep("walk");
+  }
 
-  // Realtime subscription
-  useEffect(() => {
-    if (!jam?.id) return;
-
-    const channel = supabase
-      .channel(`jam:${jam.id}`)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "jams", filter: `id=eq.${jam.id}` },
-        (payload) => setJam(payload.new as Jam)
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [jam?.id]);
-
-  // Apply correct audio + play/pause
-  useEffect(() => {
+  async function setPersona(nextPersona: Persona) {
     if (!jam) return;
+    await updateJam({ persona: nextPersona });
+  }
 
-    const src = getPersonaSrc(jam);
-    if (!src) return;
+  async function nextStopAction() {
+    if (!jam || !route) return;
 
-    ensureHowl(src);
+    const lastIdx = route.stops.length - 1;
+    if ((jam.current_stop ?? 0) >= lastIdx) {
+      // finish
+      await updateJam({ completed_at: new Date().toISOString() });
+      setStep("end");
+      return;
+    }
 
-    if (jam.is_playing) howlRef.current?.play();
-    else howlRef.current?.pause();
+    await updateJam({ current_stop: (jam.current_stop ?? 0) + 1 });
+  }
+
+  async function restartWalk() {
+    if (!jam) return;
+    await updateJam({ current_stop: 0, completed_at: null });
+    setStep(jam.route_id ? "walk" : "pickDuration");
+  }
+
+  // ---------- Init: load jam from URL ----------
+  useEffect(() => {
+    if (!jamIdFromUrl) {
+      setJam(null);
+      setStep("landing");
+      return;
+    }
+    loadJamById(jamIdFromUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jam?.is_playing, jam?.preset_id, persona]);
+  }, [jamIdFromUrl]);
 
-  const presetForJam = getJamPreset(jam);
+  // ---------- Distance/ETA to next stop ----------
+  const nextCue = useMemo(() => {
+    if (!myPos || !nextStop) return null;
+    const meters = haversineMeters(myPos.lat, myPos.lng, nextStop.lat, nextStop.lng);
+    return {
+      meters,
+      dist: formatDistance(meters),
+      mins: estimateWalkMinutes(meters),
+    };
+  }, [myPos, nextStop]);
 
+  // ---------- UI ----------
   return (
-    <main style={{ padding: 40, maxWidth: 720 }}>
-      <h1>EchoJam</h1>
-
-      {/* Persona selector */}
-      <div style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 14, opacity: 0.7 }}>Persona (this device)</div>
-        <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
-          <button onClick={() => setPersona("parent")}>Parent</button>
-          <button onClick={() => setPersona("kid")}>Kid</button>
+    <div style={{ maxWidth: 860, margin: "0 auto", padding: 20 }}>
+      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>EchoJam — Salem</div>
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
+            {jam ? `Jam: ${jam.id}` : "No jam loaded"}
+          </div>
         </div>
-        <div style={{ marginTop: 6 }}>
-          Current: <b>{persona.toUpperCase()}</b>
-        </div>
-      </div>
 
-      {!jam && (
-        <>
-          {/* Preset picker */}
-          <div style={{ marginTop: 18 }}>
-            <div style={{ fontSize: 14, opacity: 0.7 }}>Choose a preset</div>
-            <select
-              value={selectedPresetId}
-              onChange={(e) => setSelectedPresetId(e.target.value)}
-              style={{ marginTop: 6, padding: 6 }}
-            >
-              {Object.entries(PRESETS).map(([id, p]) => (
-                <option key={id} value={id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ marginTop: 18 }}>
-            <button onClick={createJam}>Create Jam</button>
-          </div>
-
-          <div style={{ marginTop: 16 }}>
-            <input
-              placeholder="Paste Jam ID"
-              value={jamInput}
-              onChange={(e) => setJamInput(e.target.value)}
-              style={{ width: 420, maxWidth: "100%" }}
-            />
-            <button onClick={joinJam} style={{ marginLeft: 10 }}>
-              Join
-            </button>
-          </div>
-        </>
-      )}
-
-      {jam && (
-        <>
-          <p style={{ marginTop: 16 }}>
-            Jam: <code>{jam.id}</code>
-          </p>
-
-          <p>
-            Preset: <b>{presetForJam ? presetForJam.name : jam.preset_id ?? "—"}</b>
-          </p>
-
-          <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>Share link:</div>
-            <div style={{ wordBreak: "break-all" }}>{shareUrl}</div>
-            <button
-              style={{ marginTop: 8 }}
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(shareUrl);
-                } catch {}
-              }}
-            >
-              Copy Link
-            </button>
-          </div>
-
-          <div style={{ marginTop: 18 }}>
-            <button onClick={togglePlay}>{jam.is_playing ? "Pause" : "Play"}</button>
-          </div>
-
-          <div style={{ marginTop: 18 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button onClick={() => requestGeo()} style={{ padding: "8px 10px" }}>
+            {geoAllowed === true ? "Location: On" : geoAllowed === false ? "Location: Off" : "Use location"}
+          </button>
+          {jam && (
             <button
               onClick={() => {
-                setJam(null);
-                setJamInput("");
-                setShareUrl("");
-                setErr(null);
-                window.history.replaceState(null, "", "/");
+                navigator.clipboard?.writeText(`${window.location.origin}/?jam=${jam.id}`);
               }}
+              style={{ padding: "8px 10px" }}
             >
-              Leave Jam
+              Copy share link
             </button>
-          </div>
-        </>
+          )}
+        </div>
+      </header>
+
+      {err && (
+        <div style={{ marginTop: 12, padding: 12, border: "1px solid #f0b4b4", background: "#fff5f5" }}>
+          {err}
+        </div>
       )}
 
-      {err && <p style={{ color: "red", marginTop: 16 }}>Error: {err}</p>}
-    </main>
+      {/* LANDING */}
+      {step === "landing" && (
+        <main style={{ marginTop: 18 }}>
+          <h2 style={{ fontSize: 28, margin: "10px 0" }}>One City. Three Walks.</h2>
+          <p style={{ opacity: 0.8, lineHeight: 1.5 }}>
+            Salem-only. Pre-written. Static. No AI. Stop-by-stop audio + images.
+          </p>
+
+          <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
+            <button onClick={() => createJam()} style={{ padding: "12px 14px", fontSize: 16 }}>
+              Start a Salem walk
+            </button>
+            <button onClick={() => requestGeo()} style={{ padding: "12px 14px", fontSize: 16 }}>
+              Enable location (optional)
+            </button>
+          </div>
+
+          <div style={{ marginTop: 18, opacity: 0.7, fontSize: 13 }}>
+            If you already have a link, open it with <code>?jam=&lt;uuid&gt;</code>.
+          </div>
+        </main>
+      )}
+
+      {/* PICK DURATION */}
+      {step === "pickDuration" && (
+        <main style={{ marginTop: 18 }}>
+          <h2 style={{ fontSize: 24, margin: "10px 0" }}>How long do you have?</h2>
+          <p style={{ opacity: 0.8 }}>Pick a fixed route. No branching, no rerouting.</p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginTop: 16 }}>
+            {salemRoutes.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => chooseRoute(r.id)}
+                style={{
+                  textAlign: "left",
+                  padding: 14,
+                  border: "1px solid #ddd",
+                  borderRadius: 10,
+                  background: "white",
+                }}
+              >
+                <div style={{ fontSize: 14, opacity: 0.7 }}>{r.durationLabel}</div>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{r.title}</div>
+                <div style={{ marginTop: 6, opacity: 0.8, lineHeight: 1.4 }}>{r.description}</div>
+                <div style={{ marginTop: 10, fontSize: 13, opacity: 0.7 }}>{r.stops.length} stops</div>
+              </button>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 18 }}>
+            <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 8 }}>Narration:</div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => jam && setPersona("adult")}
+                disabled={!jam}
+                style={{ padding: "10px 12px", opacity: persona === "adult" ? 1 : 0.6 }}
+              >
+                Adult
+              </button>
+              <button
+                onClick={() => jam && setPersona("preteen")}
+                disabled={!jam}
+                style={{ padding: "10px 12px", opacity: persona === "preteen" ? 1 : 0.6 }}
+              >
+                Preteen
+              </button>
+            </div>
+          </div>
+        </main>
+      )}
+
+      {/* WALK */}
+      {step === "walk" && route && currentStop && (
+        <main style={{ marginTop: 18 }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 13 }}>
+                {route.durationLabel} — {route.title} • Stop {currentStopIndex + 1} of {route.stops.length}
+              </div>
+              <h2 style={{ fontSize: 26, margin: "6px 0" }}>{currentStop.title}</h2>
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => setPersona("adult")}
+                style={{ padding: "10px 12px", opacity: persona === "adult" ? 1 : 0.6 }}
+              >
+                Adult
+              </button>
+              <button
+                onClick={() => setPersona("preteen")}
+                style={{ padding: "10px 12px", opacity: persona === "preteen" ? 1 : 0.6 }}
+              >
+                Preteen
+              </button>
+            </div>
+          </div>
+
+          {/* MAP placeholder area (you’ll replace with real map) */}
+          <div
+            style={{
+              marginTop: 12,
+              height: 220,
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              background: "linear-gradient(180deg, #fafafa, #f3f3f3)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#666",
+              fontSize: 14,
+            }}
+          >
+            Map goes here (MVP: show to everyone)
+          </div>
+
+          {/* Audio */}
+          <div style={{ marginTop: 14, padding: 14, border: "1px solid #ddd", borderRadius: 12, background: "white" }}>
+            <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 8 }}>Narration ({persona === "adult" ? "Adult" : "Preteen"})</div>
+            <audio controls preload="metadata" style={{ width: "100%" }} src={currentStop.audio[persona]} />
+            {currentStop.text?.[persona] && (
+              <p style={{ marginTop: 10, opacity: 0.85, lineHeight: 1.5 }}>{currentStop.text[persona]}</p>
+            )}
+          </div>
+
+          {/* Images */}
+          <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+            {currentStop.images.slice(0, 2).map((src) => (
+              <div key={src} style={{ border: "1px solid #ddd", borderRadius: 12, overflow: "hidden", background: "white" }}>
+                <div style={{ position: "relative", width: "100%", height: 180 }}>
+                  <Image src={src} alt={currentStop.title} fill style={{ objectFit: "cover" }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Walk to next */}
+          <div style={{ marginTop: 14, padding: 14, border: "1px solid #ddd", borderRadius: 12, background: "white" }}>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>Walk to next stop</div>
+
+            {!nextStop && <div style={{ marginTop: 6, opacity: 0.75 }}>This is the final stop.</div>}
+
+            {nextStop && (
+              <div style={{ marginTop: 6, opacity: 0.85, lineHeight: 1.5 }}>
+                Next: <b>{nextStop.title}</b>
+                <div style={{ marginTop: 6, opacity: 0.8 }}>
+                  {myPos && nextCue ? (
+                    <>
+                      About <b>{nextCue.dist}</b> • ~<b>{nextCue.mins} min</b> on foot
+                    </>
+                  ) : (
+                    <>Follow the map markers to the next stop.</>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button onClick={() => nextStopAction()} style={{ padding: "12px 14px", fontSize: 16 }}>
+              {currentStopIndex >= route.stops.length - 1 ? "Finish walk" : "Next stop"}
+            </button>
+            <button onClick={() => setStep("pickDuration")} style={{ padding: "12px 14px", fontSize: 16 }}>
+              Change route
+            </button>
+          </div>
+        </main>
+      )}
+
+      {/* END */}
+      {step === "end" && route && (
+        <main style={{ marginTop: 18 }}>
+          <h2 style={{ fontSize: 26, margin: "10px 0" }}>Nice work — walk complete.</h2>
+          <p style={{ opacity: 0.85, lineHeight: 1.6 }}>
+            Reflection prompt (MVP): What was one detail you didn’t expect?
+          </p>
+
+          <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button onClick={() => restartWalk()} style={{ padding: "12px 14px", fontSize: 16 }}>
+              Restart this walk
+            </button>
+            <button
+              onClick={() => {
+                if (!jam) return;
+                navigator.clipboard?.writeText(`${window.location.origin}/?jam=${jam.id}`);
+              }}
+              style={{ padding: "12px 14px", fontSize: 16 }}
+            >
+              Copy share link
+            </button>
+            <button
+              onClick={() => {
+                router.replace("/");
+                setJam(null);
+                setStep("landing");
+              }}
+              style={{ padding: "12px 14px", fontSize: 16 }}
+            >
+              Start over
+            </button>
+          </div>
+        </main>
+      )}
+    </div>
   );
 }
