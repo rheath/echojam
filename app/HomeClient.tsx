@@ -498,7 +498,7 @@ async function startStopNarration() {
 
           {/* Audio */}
           <div style={{ marginTop: 14, padding: 14, border: "1px solid #ddd", borderRadius: 12, background: "white" }}>
-            <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 8 }}>Narration ({persona === "adult" ? "Adult" : "Preteen"})</div>
+            <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 8 }}>Narration 1 ({persona === "adult" ? "Adult" : "Preteen"})</div>
             <audio controls preload="metadata" style={{ width: "100%" }} src={currentStop.audio[persona]} />
             {currentStop.text?.[persona] && (
               <p style={{ marginTop: 10, opacity: 0.85, lineHeight: 1.5 }}>{currentStop.text[persona]}</p>
