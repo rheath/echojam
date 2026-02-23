@@ -250,7 +250,9 @@ export default function HomeClient() {
 
   // ---------- UI ----------
   return (
+     
     <div style={{ maxWidth: 860, margin: "0 auto", padding: 20 }}>
+     <div style={{ fontSize: 20, fontWeight: 700 }}>EchoJam — Salem ✅ NEW BUILD</div>
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div>
           <div style={{ fontSize: 20, fontWeight: 700 }}>EchoJam — Salem</div>
