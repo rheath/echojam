@@ -9,10 +9,7 @@ import dynamic from "next/dynamic";
 
 const RouteMap = dynamic(() => import("./components/RouteMap"), { ssr: false });
 
-const [distanceToStopM, setDistanceToStopM] = useState<number | null>(null);
-const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
-const audioRef = useRef<HTMLAudioElement | null>(null);
-const audioBlockRef = useRef<HTMLDivElement | null>(null);
+
 
 type JamRow = {
   id: string;
@@ -67,6 +64,11 @@ function estimateWalkMinutes(meters: number) {
 }
 
 export default function HomeClient() {
+  const [distanceToStopM, setDistanceToStopM] = useState<number | null>(null);
+const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
+const audioRef = useRef<HTMLAudioElement | null>(null);
+const audioBlockRef = useRef<HTMLDivElement | null>(null);
+
   const router = useRouter();
   const searchParams = useSearchParams();
 
