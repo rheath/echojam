@@ -28,7 +28,7 @@ const PRESETS: Record<
     parentUrl: "https://echojam.idrawcircles.com/audio/adult-02.mp3",
     kidUrl: "https://echojam.idrawcircles.com/audio/kid-02.mp3",
   },
-};
+}; 
 
 export default function HomeClient() {
   const search = useSearchParams();
