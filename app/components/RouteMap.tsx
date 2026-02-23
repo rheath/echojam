@@ -60,8 +60,9 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
           type: "line",
           source: "route",
           paint: {
-            "line-width": 4,
-            "line-opacity": 0.85,
+             "line-color": "#2b1b3f",
+             "line-width": 5,
+              "line-opacity": 0.85,
           },
         });
 
@@ -76,10 +77,22 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
           type: "circle",
           source: "stops",
           paint: {
-            "circle-radius": ["case", ["==", ["get", "isCurrent"], true], 10, 6],
-            "circle-stroke-width": 2,
-            "circle-opacity": 0.95,
-          },
+  "circle-color": [
+    "case",
+    ["==", ["get", "isCurrent"], true],
+    "#ffb020", // current = amber
+    "#2b1b3f", // others = ink
+  ],
+  "circle-radius": [
+    "case",
+    ["==", ["get", "isCurrent"], true],
+    10,
+    6,
+  ],
+  "circle-stroke-color": "#ffffff",
+  "circle-stroke-width": 2,
+  "circle-opacity": 0.95,
+}
         });
 
         // My position
