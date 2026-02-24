@@ -52,6 +52,9 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
   }
 
   await updateProgress("generating_audio", "Generating audio");
+  let audioGeneratedCount = 0;
+  let audioFallbackCount = 0;
+  let lastAudioError = "";
   for (const persona of personas) {
     for (let i = 0; i < stops.length; i += 1) {
       const stop = stops[i];
@@ -67,8 +70,11 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
       try {
         const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, text);
         audioUrl = await uploadNarrationAudio(audioBytes, routeId, persona, stop.id);
-      } catch {
-        // placeholder fallback
+        audioGeneratedCount += 1;
+      } catch (e) {
+        audioFallbackCount += 1;
+        const detail = e instanceof Error ? e.message : "Unknown error";
+        lastAudioError = `Audio generation failed for ${persona} at stop "${stop.title}": ${detail}`;
       }
 
       const patch = persona === "adult" ? { audio_url_adult: audioUrl } : { audio_url_preteen: audioUrl };
@@ -76,6 +82,16 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
       doneUnits += 1;
       await updateProgress("generating_audio", `Generating audio (${doneUnits}/${totalUnits})`);
     }
+  }
+
+  if (audioFallbackCount > 0) {
+    throw new Error(
+      `${audioFallbackCount} audio segments failed and used fallback. ${lastAudioError || "OpenAI TTS failed."}`
+    );
+  }
+
+  if (audioGeneratedCount === 0) {
+    throw new Error(lastAudioError || "Audio generation failed for all stops/personas.");
   }
 
   await admin.from("custom_routes").update({ status: "ready" }).eq("id", routeId);

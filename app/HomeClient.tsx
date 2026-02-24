@@ -146,6 +146,7 @@ const [generationProgress, setGenerationProgress] = useState(0);
 const [generationStatusLabel, setGenerationStatusLabel] = useState("Queued");
 const [generationMessage, setGenerationMessage] = useState("Queued");
 const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
+const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -175,6 +176,10 @@ const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
   }, [jam?.current_stop, route]);
 
   const currentStop = route ? route.stops[currentStopIndex] : null;
+  const currentStopScript = useMemo(() => {
+    if (!currentStop) return "";
+    return currentStop.text[persona] || currentStop.text.adult || currentStop.text.preteen || "";
+  }, [currentStop, persona]);
   const routeMilesLabel = useMemo(() => {
     if (!route) return "";
     return formatRouteMiles(getRouteMiles(route.stops));
@@ -311,6 +316,7 @@ const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
     router.replace("/");
     setJam(null);
     setCustomRoute(null);
+    setIsScriptModalOpen(false);
     setStep("landing");
   }
 
@@ -348,12 +354,12 @@ const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
         lng: s.lng,
         images: [s.image_url || "/images/salem/placeholder-01.png"],
         audio: {
-          adult: s.audio_url_adult || "/audio/adult-01.mp3",
-          preteen: s.audio_url_preteen || "/audio/kid-01.mp3",
+          adult: s.audio_url_adult || s.audio_url_preteen || "/audio/adult-01.mp3",
+          preteen: s.audio_url_preteen || s.audio_url_adult || "/audio/kid-01.mp3",
         },
         text: {
-          adult: s.script_adult || "",
-          preteen: s.script_preteen || "",
+          adult: s.script_adult || s.script_preteen || "",
+          preteen: s.script_preteen || s.script_adult || "",
         },
       })),
     };
@@ -532,6 +538,7 @@ async function startStopNarration() {
 
         if (body.status === "ready") {
           setGenerationJobId(null);
+          await loadCustomRoute(`custom:${body.route_id}`);
           await loadJamById(body.jam_id);
           return;
         }
@@ -563,7 +570,7 @@ async function startStopNarration() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [step, generationJobId]);
+  }, [step, generationJobId, loadCustomRoute]);
 
 // ---------- watchPosition ----------
   useEffect(() => {
@@ -1133,7 +1140,13 @@ async function startStopNarration() {
               />
               <div className={styles.nowPlayingContent}>
                 <div className={styles.nowPlayingMeta}>
-                  <div className={styles.nowPlayingTitle}>{currentStop.title}</div>
+                  <button
+                    type="button"
+                    className={styles.nowPlayingTitleLink}
+                    onClick={() => setIsScriptModalOpen(true)}
+                  >
+                    {currentStop.title}
+                  </button>
                   <div className={styles.nowPlayingSubtitle}>
                     {formatAudioTime(audioTime)} / {formatAudioTime(audioDuration)}
                   </div>
@@ -1147,6 +1160,23 @@ async function startStopNarration() {
                 </button>
               </div>
             </div>
+            {isScriptModalOpen && (
+              <div className={styles.scriptModalOverlay} role="dialog" aria-modal="true" aria-label="Narration script">
+                <div className={styles.scriptModal}>
+                  <button
+                    type="button"
+                    className={styles.scriptModalClose}
+                    onClick={() => setIsScriptModalOpen(false)}
+                    aria-label="Close script"
+                  >
+                    Close
+                  </button>
+                  <div className={styles.scriptModalBody}>
+                    {currentStopScript || "No script available for this stop yet."}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           

@@ -89,6 +89,7 @@ export async function synthesizeSpeechWithOpenAI(apiKey: string, persona: Person
     { model: "gpt-4o-mini-tts", voice: VOICE_BY_PERSONA[persona] },
     { model: "tts-1", voice: VOICE_BY_PERSONA[persona] },
   ];
+  const failures: string[] = [];
 
   for (const attempt of attempts) {
     const response = await fetch("https://api.openai.com/v1/audio/speech", {
@@ -105,12 +106,17 @@ export async function synthesizeSpeechWithOpenAI(apiKey: string, persona: Person
       }),
     });
 
-    if (!response.ok) continue;
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      failures.push(`${attempt.model}/${attempt.voice}: ${response.status}${body ? ` ${body}` : ""}`);
+      continue;
+    }
     const arrayBuffer = await response.arrayBuffer();
     if (arrayBuffer.byteLength > 0) return new Uint8Array(arrayBuffer);
+    failures.push(`${attempt.model}/${attempt.voice}: empty audio response`);
   }
 
-  throw new Error("OpenAI TTS generation failed");
+  throw new Error(`OpenAI TTS generation failed (${failures.join(" | ")})`);
 }
 
 export async function uploadNarrationAudio(audioBytes: Uint8Array, routeId: string, persona: Persona, stopId: string) {
