@@ -92,6 +92,7 @@ const audioBlockRef = useRef<HTMLDivElement | null>(null);
 const [isPlaying, setIsPlaying] = useState(false);
 const [audioTime, setAudioTime] = useState(0);
 const [audioDuration, setAudioDuration] = useState(0);
+const [connectedCount, setConnectedCount] = useState(0);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -383,6 +384,42 @@ async function startStopNarration() {
     };
   }, [currentStop?.id, persona]);
 
+  useEffect(() => {
+    if (!jam?.id) {
+      setConnectedCount(0);
+      return;
+    }
+
+    const presenceKey =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`;
+    const channel = supabase.channel(`jam:${jam.id}`, {
+      config: { presence: { key: presenceKey } },
+    });
+
+    const updateConnectedCount = () => {
+      const presence = channel.presenceState();
+      const count = Object.keys(presence).length;
+      setConnectedCount(Math.max(count, 1));
+    };
+
+    channel
+      .on("presence", { event: "sync" }, updateConnectedCount)
+      .on("presence", { event: "join" }, updateConnectedCount)
+      .on("presence", { event: "leave" }, updateConnectedCount)
+      .subscribe(async (status) => {
+        if (status !== "SUBSCRIBED") return;
+        await channel.track({ jam_id: jam.id, joined_at: new Date().toISOString() });
+        updateConnectedCount();
+      });
+
+    return () => {
+      void channel.untrack();
+      void supabase.removeChannel(channel);
+    };
+  }, [jam?.id]);
+
   // ---------- Distance/ETA to next stop ----------
   const nextCue = useMemo(() => {
     if (!myPos || !nextStop) return null;
@@ -558,11 +595,11 @@ async function startStopNarration() {
                 <div className={styles.walkDot} />
                 <div className={styles.walkNarrator}>{persona === "adult" ? "Adult Narrative" : "Preteen Narrative"}</div>
               </div>
-              <h1 className={styles.walkHeadline}>{route.title}</h1>
-              <div className={styles.walkSubline}>
-                <span>3 people connected</span>
-                <span>{route.durationLabel}/{routeMilesLabel} walking</span>
-              </div>
+            <h1 className={styles.walkHeadline}>{route.title}</h1>
+            <div className={styles.walkSubline}>
+              <span>{connectedCount} {connectedCount === 1 ? "person" : "people"} connected</span>
+              <span>{route.durationLabel}/{routeMilesLabel} walking</span>
+            </div>
 
               <div className={styles.walkActionRow}>
                 <button className={styles.pillButton} type="button" onClick={copyShareLink}>Add people</button>
