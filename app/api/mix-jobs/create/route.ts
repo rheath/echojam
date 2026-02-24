@@ -57,7 +57,7 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
       const stop = stops[i];
       const { data: row } = await admin
         .from("custom_route_stops")
-        .select(persona === "adult" ? "script_adult" : "script_preteen")
+        .select("script_adult,script_preteen")
         .eq("route_id", routeId)
         .eq("stop_id", stop.id)
         .single();
