@@ -389,17 +389,6 @@
   cursor: pointer;
 }
 
-.walkAudioPanel {
-  margin: 0;
-  border-top: 1px solid #2b2b33;
-  border-left: 0;
-  border-right: 0;
-  border-bottom: 0;
-  border-radius: 0;
-  background: #11111a;
-  color: #f4f4f6;
-}
-
 .walkImagesGrid {
   margin-top: 0;
   padding: 16px 20px 20px;
@@ -417,18 +406,6 @@
   justify-content: center;
   color: #666;
   font-size: 14px;
-}
-
-.panel {
-  margin-top: 14px;
-  padding: 14px;
-  border: 1px solid #ddd;
-  border-radius: 12px;
-  background: #fff;
-}
-
-.audioPlayer {
-  width: 100%;
 }
 
 .audioSeek {
@@ -625,10 +602,6 @@
     left: auto;
     right: auto;
     width: 100%;
-  }
-
-  .walkAudioPanel {
-    padding-inline: 20px;
   }
 
   .walkImagesGrid {

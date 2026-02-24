@@ -77,18 +77,10 @@ function formatRouteMiles(miles: number) {
   return `${miles.toFixed(miles < 1 ? 2 : 1)} mi`;
 }
 
-function formatAudioTime(seconds: number) {
-  if (!isFinite(seconds) || seconds < 0) return "0:00";
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
-}
-
 export default function HomeClient() {
   const [distanceToStopM, setDistanceToStopM] = useState<number | null>(null);
 const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
 const audioRef = useRef<HTMLAudioElement | null>(null);
-const audioBlockRef = useRef<HTMLDivElement | null>(null);
 const [isPlaying, setIsPlaying] = useState(false);
 const [audioTime, setAudioTime] = useState(0);
 const [audioDuration, setAudioDuration] = useState(0);
@@ -214,9 +206,6 @@ const [connectedCount, setConnectedCount] = useState(0);
 
   // ---------- "Start stop” handler ----------
 async function startStopNarration() {
-  // scroll to audio block
-  audioBlockRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-
   // attempt to play (will work because button click is a user gesture)
   const el = audioRef.current;
   if (el) {
@@ -629,6 +618,7 @@ async function startStopNarration() {
             </div>
 
             <div className={styles.nowPlayingBar}>
+              <audio ref={audioRef} preload="metadata" src={currentStop.audio[persona]} hidden />
               <input
                 type="range"
                 min={0}
@@ -653,10 +643,6 @@ async function startStopNarration() {
                   {isPlaying ? "❚❚" : "▶"}
                 </button>
               </div>
-            </div>
-
-            <div ref={audioBlockRef} className={`${styles.panel} ${styles.walkAudioPanel}`}>
-            <audio ref={audioRef} preload="metadata" className={styles.audioPlayer} src={currentStop.audio[persona]} />
             </div>
           </div>
 
