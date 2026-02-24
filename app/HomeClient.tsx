@@ -178,7 +178,7 @@ const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
   const currentStop = route ? route.stops[currentStopIndex] : null;
   const currentStopScript = useMemo(() => {
     if (!currentStop) return "";
-    return currentStop.text[persona] || currentStop.text.adult || currentStop.text.preteen || "";
+    return currentStop?.text?.[persona] || currentStop?.text?.adult || currentStop?.text?.preteen || "";
   }, [currentStop, persona]);
   const routeMilesLabel = useMemo(() => {
     if (!route) return "";
