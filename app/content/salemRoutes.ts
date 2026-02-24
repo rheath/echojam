@@ -27,7 +27,7 @@ export type RouteDef = {
 export const salemRoutes: RouteDef[] = [
   {
     id: "salem-core-15",
-    title: "The Core",
+    title: "Demo",
     durationLabel: "15 min",
     description: "A tight loop of Salem’s essential landmarks—quick, iconic, easy.",
     stops: [
@@ -81,7 +81,7 @@ export const salemRoutes: RouteDef[] = [
 
   {
     id: "salem-story-30",
-    title: "The Story",
+    title: "Top Hits",
     durationLabel: "30 min",
     description: "More context, more texture—how Salem became Salem.",
     stops: [
@@ -122,7 +122,7 @@ export const salemRoutes: RouteDef[] = [
 
   {
     id: "salem-deepdive-60",
-    title: "The Deep Dive",
+    title: "Full Album",
     durationLabel: "60 min",
     description: "A fuller arc: landmarks + hidden context + the ‘why it matters’ layer.",
     stops: [

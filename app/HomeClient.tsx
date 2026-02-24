@@ -529,13 +529,7 @@ async function startStopNarration() {
                 <div className={styles.landingTourSub}>Coming Soon...</div>
               </div>
             </div>
-
-            <div className={styles.landingTourRowMuted}>
-              <div className={styles.landingTourText}>
-                <div className={styles.landingTourTitleMuted}>Concord</div>
-                <div className={styles.landingTourSub}>Coming Soon...</div>
-              </div>
-            </div>
+ 
 
             <div className={styles.landingCtaWrap}>
               <button onClick={() => createJam()} className={styles.landingCtaButton}>
@@ -587,7 +581,9 @@ async function startStopNarration() {
                 >
                   <div className={styles.pickRouteMain}>
                     <div className={styles.pickRouteTitle}>{r.title}</div>
-                    <div className={styles.pickRouteMeta}>{r.durationLabel} • {formatRouteMiles(getRouteMiles(r.stops))} walking</div>
+                    <div className={styles.pickRouteMeta}>
+                      {r.durationLabel} • {r.stops.length} stops • {formatRouteMiles(getRouteMiles(r.stops))} walking
+                    </div>
                   </div>
                   <div className={styles.pickRouteArrow}>&#8250;</div>
                 </button>
@@ -600,14 +596,14 @@ async function startStopNarration() {
                 onClick={() => setSelectedPersona("adult")}
                 className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
               >
-                <div className={styles.pickRouteTitle}>Adult</div>
+                <div className={styles.pickRouteTitle}>Historian</div>
                 <div className={styles.pickNarratorSub}>Lorem ispum</div>
               </button>
               <button
                 onClick={() => setSelectedPersona("preteen")}
                 className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
               >
-                <div className={styles.pickRouteTitle}>Preteen</div>
+                <div className={styles.pickRouteTitle}>Main Character</div>
                 <div className={styles.pickNarratorSub}>Lorem ispum</div>
               </button>
             </div>
@@ -649,7 +645,7 @@ async function startStopNarration() {
             <div className={styles.walkCard}>
               <div className={styles.walkMetaRow}>
                 <div className={styles.walkDot} />
-                <div className={styles.walkNarrator}>{persona === "adult" ? "Adult Narrative" : "Preteen Narrative"}</div>
+                <div className={styles.walkNarrator}>{persona === "adult" ? "Historian Narrative" : "Main Character Narrative"}</div>
               </div>
             <h1 className={styles.walkHeadline}>{route.title}</h1>
             <div className={styles.walkSubline}>
