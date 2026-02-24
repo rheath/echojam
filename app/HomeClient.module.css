@@ -285,6 +285,11 @@
   color: #ff79a8;
 }
 
+.pickRouteRowDisabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .pickRouteMain {
   display: flex;
   flex-direction: column;

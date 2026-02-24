@@ -572,7 +572,7 @@ async function startStopNarration() {
               <h2 className={styles.pickHeading}>How long do you have?</h2>
             </div>
 
-             <div className={styles.pickRouteList}>
+            <div className={styles.pickRouteList}>
               {salemRoutes.map((r) => (
                 <button
                   key={r.id}
@@ -588,6 +588,18 @@ async function startStopNarration() {
                   <div className={styles.pickRouteArrow}>&#8250;</div>
                 </button>
               ))}
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                className={`${styles.pickRouteRow} ${styles.pickRouteRowDisabled}`}
+              >
+                <div className={styles.pickRouteMain}>
+                  <div className={styles.pickRouteTitle}>City Drive Thru</div>
+                  <div className={styles.pickRouteMeta}>Driving route • Coming soon</div>
+                </div>
+                <div className={styles.pickRouteArrow}>-</div>
+              </button>
             </div>
 
             <h2 className={`${styles.pickHeading} ${styles.pickNarratorHeading}`}>What narrator do you want?</h2>
@@ -635,7 +647,7 @@ async function startStopNarration() {
           <div className={styles.mapHero}>
             <RouteMap stops={route.stops} currentStopIndex={currentStopIndex} myPos={myPos} />
             <button onClick={() => setStep("pickDuration")} className={styles.mapBackButton} aria-label="Back to routes">
-              &#8592;
+              &#9001;
             </button>
             <a href={mapsUrl} target="_blank" rel="noreferrer" className={styles.mapViewButton}>
               View in maps
