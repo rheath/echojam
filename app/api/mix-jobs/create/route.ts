@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { fallbackScript, generateScriptWithOpenAI, synthesizeSpeechWithOpenAI, uploadNarrationAudio, type Persona, type StopInput } from "@/lib/mixGeneration";
 import { validateMixSelection, type TransportMode } from "@/lib/mixConstraints";
 
@@ -12,6 +14,34 @@ type CreateBody = {
   stops: StopInput[];
 };
 
+type GenerationMode =
+  | "reuse_existing"
+  | "force_regenerate_all"
+  | "force_regenerate_script"
+  | "force_regenerate_audio";
+
+type GenerationSwitch = {
+  mode?: GenerationMode;
+  replay_audio?: Record<string, Partial<Record<Persona, string>>>;
+};
+
+type StopAssetCache = Partial<
+  Record<
+    string,
+    {
+      script_adult?: string;
+      script_preteen?: string;
+      audio_url_adult?: string;
+      audio_url_preteen?: string;
+    }
+  >
+>;
+
+const DEFAULT_SWITCH: Required<GenerationSwitch> = {
+  mode: "reuse_existing",
+  replay_audio: {},
+};
+
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -19,10 +49,62 @@ function getAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+function isGeneratedAudioUrl(url: string | null | undefined) {
+  if (!url) return false;
+  return !url.startsWith("/audio/");
+}
+
+async function loadGenerationSwitch(): Promise<Required<GenerationSwitch>> {
+  const fileName = process.env.MIX_GENERATION_SWITCH_FILE || "mix-generation-switch.json";
+  const filePath = path.join(process.cwd(), fileName);
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw) as GenerationSwitch;
+    return {
+      mode: parsed.mode || DEFAULT_SWITCH.mode,
+      replay_audio: parsed.replay_audio || {},
+    };
+  } catch {
+    return DEFAULT_SWITCH;
+  }
+}
+
+async function loadReusableAssets(
+  admin: ReturnType<typeof getAdmin>,
+  stopIds: string[]
+): Promise<StopAssetCache> {
+  if (!stopIds.length) return {};
+  const { data } = await admin
+    .from("custom_route_stops")
+    .select("stop_id,script_adult,script_preteen,audio_url_adult,audio_url_preteen,created_at")
+    .in("stop_id", stopIds)
+    .order("created_at", { ascending: false });
+
+  const byStop: StopAssetCache = {};
+  for (const row of data ?? []) {
+    const stopId = row.stop_id as string;
+    if (!byStop[stopId]) byStop[stopId] = {};
+    const cached = byStop[stopId]!;
+
+    if (!cached.script_adult && row.script_adult) cached.script_adult = row.script_adult;
+    if (!cached.script_preteen && row.script_preteen) cached.script_preteen = row.script_preteen;
+    if (!cached.audio_url_adult && isGeneratedAudioUrl(row.audio_url_adult)) cached.audio_url_adult = row.audio_url_adult;
+    if (!cached.audio_url_preteen && isGeneratedAudioUrl(row.audio_url_preteen)) cached.audio_url_preteen = row.audio_url_preteen;
+  }
+  return byStop;
+}
+
 async function runGeneration(jobId: string, routeId: string, city: string, transportMode: TransportMode, lengthMinutes: number, stops: StopInput[]) {
   const admin = getAdmin();
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is required.");
+  const switchConfig = await loadGenerationSwitch();
+  const forceScript = switchConfig.mode === "force_regenerate_all" || switchConfig.mode === "force_regenerate_script";
+  const forceAudio = switchConfig.mode === "force_regenerate_all" || switchConfig.mode === "force_regenerate_audio";
+  const reusableAssets = await loadReusableAssets(
+    admin,
+    Array.from(new Set(stops.map((s) => s.id)))
+  );
 
   const personas: Persona[] = ["adult", "preteen"];
   const totalUnits = personas.length * stops.length * 2;
@@ -37,12 +119,27 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
   for (const persona of personas) {
     for (let i = 0; i < stops.length; i += 1) {
       const stop = stops[i];
-      let script = fallbackScript(city, persona, stop, i);
-      try {
-        const generated = await generateScriptWithOpenAI(apiKey, city, transportMode, lengthMinutes, persona, stop, i, stops.length);
-        if (generated) script = generated;
-      } catch {
-        // fallback kept
+      const { data: current } = await admin
+        .from("custom_route_stops")
+        .select("script_adult,script_preteen")
+        .eq("route_id", routeId)
+        .eq("stop_id", stop.id)
+        .single();
+      const existingScript = persona === "adult" ? current?.script_adult : current?.script_preteen;
+      const reusableScript = persona === "adult" ? reusableAssets[stop.id]?.script_adult : reusableAssets[stop.id]?.script_preteen;
+
+      let script = existingScript || "";
+      if (!script && !forceScript && reusableScript) {
+        script = reusableScript;
+      }
+      if (!script || forceScript) {
+        script = fallbackScript(city, persona, stop, i);
+        try {
+          const generated = await generateScriptWithOpenAI(apiKey, city, transportMode, lengthMinutes, persona, stop, i, stops.length);
+          if (generated) script = generated;
+        } catch {
+          // fallback kept
+        }
       }
       const patch = persona === "adult" ? { script_adult: script } : { script_preteen: script };
       await admin.from("custom_route_stops").update(patch).eq("route_id", routeId).eq("stop_id", stop.id);
@@ -60,21 +157,34 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
       const stop = stops[i];
       const { data: row } = await admin
         .from("custom_route_stops")
-        .select("script_adult,script_preteen")
+        .select("script_adult,script_preteen,audio_url_adult,audio_url_preteen")
         .eq("route_id", routeId)
         .eq("stop_id", stop.id)
         .single();
       const text = (persona === "adult" ? row?.script_adult : row?.script_preteen) || fallbackScript(city, persona, stop, i);
 
-      let audioUrl = persona === "adult" ? "/audio/adult-01.mp3" : "/audio/kid-01.mp3";
-      try {
-        const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, text);
-        audioUrl = await uploadNarrationAudio(audioBytes, routeId, persona, stop.id);
-        audioGeneratedCount += 1;
-      } catch (e) {
-        audioFallbackCount += 1;
-        const detail = e instanceof Error ? e.message : "Unknown error";
-        lastAudioError = `Audio generation failed for ${persona} at stop "${stop.title}": ${detail}`;
+      const replayUrl = switchConfig.replay_audio[stop.id]?.[persona];
+      const existingAudio = persona === "adult" ? row?.audio_url_adult : row?.audio_url_preteen;
+      const reusableAudio = persona === "adult" ? reusableAssets[stop.id]?.audio_url_adult : reusableAssets[stop.id]?.audio_url_preteen;
+
+      let audioUrl = "";
+      if (replayUrl) {
+        audioUrl = replayUrl;
+      } else if (!forceAudio && isGeneratedAudioUrl(existingAudio)) {
+        audioUrl = existingAudio as string;
+      } else if (!forceAudio && reusableAudio) {
+        audioUrl = reusableAudio;
+      } else {
+        audioUrl = persona === "adult" ? "/audio/adult-01.mp3" : "/audio/kid-01.mp3";
+        try {
+          const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, text);
+          audioUrl = await uploadNarrationAudio(audioBytes, routeId, persona, stop.id);
+          audioGeneratedCount += 1;
+        } catch (e) {
+          audioFallbackCount += 1;
+          const detail = e instanceof Error ? e.message : "Unknown error";
+          lastAudioError = `Audio generation failed for ${persona} at stop "${stop.title}": ${detail}`;
+        }
       }
 
       const patch = persona === "adult" ? { audio_url_adult: audioUrl } : { audio_url_preteen: audioUrl };

@@ -1,0 +1,19 @@
+{
+  "__how_to_use": [
+    "Copy this file to mix-generation-switch.json in the project root.",
+    "Mode options: reuse_existing | force_regenerate_all | force_regenerate_script | force_regenerate_audio.",
+    "reuse_existing: keep any existing script/audio and only generate missing pieces.",
+    "force_regenerate_all: regenerate both script and audio for every stop/persona.",
+    "force_regenerate_script: regenerate scripts only; audio can still be reused if present.",
+    "force_regenerate_audio: regenerate audio only; scripts can still be reused if present.",
+    "replay_audio lets you force a specific URL per stop_id and persona.",
+    "If you want a different file name/path, set MIX_GENERATION_SWITCH_FILE in env."
+  ],
+  "mode": "reuse_existing",
+  "replay_audio": {
+    "salem-common": {
+      "adult": "https://YOUR_AUDIO_HOST/mixes/custom-audio/adult-salem-common.mp3",
+      "preteen": "https://YOUR_AUDIO_HOST/mixes/custom-audio/preteen-salem-common.mp3"
+    }
+  }
+}
