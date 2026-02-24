@@ -629,49 +629,34 @@ async function startStopNarration() {
             </div>
 
             <div className={styles.nowPlayingBar}>
-              <div>
-                <div className={styles.nowPlayingTitle}>{currentStop.title}</div>
-                <div className={styles.nowPlayingSubtitle}>
-                  {nextStop && nextCue ? `Next: ${nextCue.mins} min walk away` : "At this location"}
+              <input
+                type="range"
+                min={0}
+                max={audioDuration || 0}
+                step={0.1}
+                value={Math.min(audioTime, audioDuration || audioTime)}
+                onChange={(e) => seekAudio(Number(e.target.value))}
+                className={`${styles.audioSeek} ${styles.nowPlayingSeek}`}
+              />
+              <div className={styles.nowPlayingContent}>
+                <div className={styles.nowPlayingMeta}>
+                  <div className={styles.nowPlayingTitle}>{currentStop.title}</div>
+                  <div className={styles.nowPlayingSubtitle}>
+                    {nextStop && nextCue ? `Next: ${nextCue.mins} min walk away` : "At this location"}
+                  </div>
                 </div>
+                <button
+                  className={styles.nowPlayingButton}
+                  onClick={toggleAudio}
+                  aria-label={isPlaying ? "Pause current stop" : "Play current stop"}
+                >
+                  {isPlaying ? "❚❚" : "▶"}
+                </button>
               </div>
-              <button
-                className={styles.nowPlayingButton}
-                onClick={toggleAudio}
-                aria-label={isPlaying ? "Pause current stop" : "Play current stop"}
-              >
-                {isPlaying ? "❚❚" : "▶"}
-              </button>
             </div>
 
             <div ref={audioBlockRef} className={`${styles.panel} ${styles.walkAudioPanel}`}>
-              <audio ref={audioRef} preload="metadata" className={styles.audioPlayer} src={currentStop.audio[persona]} />
-              <div className={styles.audioControls}>
-                <button type="button" onClick={toggleAudio} className={styles.audioControlButton}>
-                  {isPlaying ? "Pause" : "Play"}
-                </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={audioDuration || 0}
-                  step={0.1}
-                  value={Math.min(audioTime, audioDuration || audioTime)}
-                  onChange={(e) => seekAudio(Number(e.target.value))}
-                  className={styles.audioSeek}
-                />
-                <div className={styles.audioTime}>
-                  {formatAudioTime(audioTime)} / {formatAudioTime(audioDuration)}
-                </div>
-              </div>
-              <div className={styles.actionRow}>
-                <span className={styles.blackText}>is this needed?</span>
-                <button onClick={() => setPersona("adult")} className={`${styles.button} ${persona === "adult" ? styles.personaActive : styles.personaInactive}`}>Adult</button>
-                <button onClick={() => setPersona("preteen")} className={`${styles.button} ${persona === "preteen" ? styles.personaActive : styles.personaInactive}`}>Preteen</button>
-                <button onClick={() => nextStopAction()} className={`${styles.button} ${styles.buttonLarge}`}>
-                  {currentStopIndex >= route.stops.length - 1 ? "Finish walk" : "Next stop"}
-                </button>
-                <button onClick={() => setStep("pickDuration")} className={`${styles.button} ${styles.buttonLarge}`}>Customize</button>
-              </div>
+            <audio ref={audioRef} preload="metadata" className={styles.audioPlayer} src={currentStop.audio[persona]} />
             </div>
           </div>
 
