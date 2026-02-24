@@ -4,6 +4,13 @@
   padding: 20px;
 }
 
+.containerWide {
+  max-width: none;
+  width: 100%;
+  padding: 0;
+  overflow-x: hidden;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -106,7 +113,7 @@
 
 .routeCard {
   text-align: left;
-  border-radius: 10px;
+  border-radius: 0px;
   background: #fff;
 }
 
@@ -168,6 +175,220 @@
   margin: 6px 0;
 }
 
+.walkLayout {
+  margin-top: 0;
+  border-radius: 0;
+  overflow: visible;
+  background: #0f0f16;
+  color: #f4f4f6;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+}
+
+.rightRail {
+  display: flex;
+  flex-direction: column;
+}
+
+.mapHero {
+  position: relative;
+  height: 360px;
+}
+
+.mapBackButton {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(24, 24, 31, 0.82);
+  color: #fff;
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mapViewButton {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  border-radius: 999px;
+  background: rgba(24, 24, 31, 0.82);
+  color: #fff;
+  padding: 14px 20px;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.walkCard {
+  padding: 24px;
+  background: radial-gradient(110% 140% at 0% 0%, #262631 0%, #171722 55%, #101019 100%);
+}
+
+.walkMetaRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.walkDot {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #c8c8cc;
+}
+
+.walkNarrator {
+  font-size: 20px;
+  opacity: 0.86;
+}
+
+.walkHeadline {
+  margin: 0;
+  font-size: 58px;
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+}
+
+.walkSubline {
+  margin-top: 10px;
+  display: flex;
+  gap: 22px;
+  flex-wrap: wrap;
+  opacity: 0.86;
+  font-size: 32px;
+}
+
+.walkActionRow {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.pillButton {
+  flex: 1;
+  border: 0;
+  border-radius: 999px;
+  background: #4a4a52;
+  color: #fff;
+  padding: 12px 16px;
+  font-size: 28px;
+  cursor: pointer;
+}
+
+.stopList {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stopItem {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+}
+
+.stopItemActive {
+  opacity: 1;
+}
+
+.stopThumbWrap {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  border-radius: 12px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.stopThumb {
+  object-fit: cover;
+}
+
+.stopText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stopTitle {
+  font-size: 44px;
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.stopTitleActive {
+  color: #ff79a8;
+}
+
+.stopSubtitle {
+  font-size: 28px;
+  opacity: 0.84;
+}
+
+.nowPlayingBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid #2b2b33;
+  background: #0a0a10;
+}
+
+.nowPlayingTitle {
+  font-size: 40px;
+  font-weight: 700;
+}
+
+.nowPlayingSubtitle {
+  font-size: 28px;
+  opacity: 0.85;
+}
+
+.nowPlayingButton {
+  width: 60px;
+  height: 60px;
+  border-radius: 999px;
+  border: 0;
+  background: #ff5f92;
+  color: #16161d;
+  font-size: 30px;
+  cursor: pointer;
+}
+
+.walkAudioPanel {
+  margin: 0;
+  border-top: 1px solid #2b2b33;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
+  background: #11111a;
+  color: #f4f4f6;
+}
+
+.walkImagesGrid {
+  margin-top: 0;
+  padding: 16px 20px 20px;
+  background: #11111a;
+}
+
 .mapFrame {
   margin-top: 12px;
   height: 220px;
@@ -191,6 +412,34 @@
 
 .audioPlayer {
   width: 100%;
+}
+
+.audioControls {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.audioControlButton {
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  background: #1d1d2a;
+  color: #f4f4f6;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.audioSeek {
+  flex: 1;
+  min-width: 160px;
+  accent-color: #ff5f92;
+}
+
+.audioTime {
+  font-size: 12px;
+  opacity: 0.85;
 }
 
 .narrationText {
@@ -255,4 +504,135 @@
 .endText {
   opacity: 0.85;
   line-height: 1.6;
+}
+
+.blackText {
+  color: #000;
+}
+
+.footer {
+  margin-top: 24px;
+  padding-top: 12px;
+  border-top: 1px solid #ddd;
+  opacity: 0.7;
+  font-size: 13px;
+}
+
+@media (max-width: 860px) {
+  .walkLayout {
+    border-radius: 0;
+    margin-inline: 0;
+    padding-bottom: 92px;
+  }
+
+  .mapHero {
+    height: 300px;
+  }
+
+  .walkNarrator {
+    font-size: 16px;
+  }
+
+  .walkHeadline {
+    font-size: 54px;
+  }
+
+  .walkSubline {
+    font-size: 26px;
+    gap: 10px;
+  }
+
+  .pillButton {
+    font-size: 24px;
+  }
+
+  .stopTitle {
+    font-size: 34px;
+  }
+
+  .stopSubtitle {
+    font-size: 22px;
+  }
+
+  .nowPlayingTitle {
+    font-size: 34px;
+  }
+
+  .nowPlayingSubtitle {
+    font-size: 20px;
+  }
+
+  .nowPlayingBar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: 100%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .walkLayout {
+    display: grid;
+    grid-template-columns: minmax(0, 59%) minmax(380px, 41%);
+    grid-template-areas: "map rail";
+    height: 100vh;
+    margin-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+
+  .mapHero {
+    grid-area: map;
+    height: 100%;
+  }
+
+  .rightRail {
+    grid-area: rail;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: #11111a;
+  }
+
+  .walkCard {
+    min-height: auto;
+    overflow: visible;
+    padding: 28px 30px;
+  }
+
+  .walkActionRow {
+    align-items: center;
+  }
+
+  .pillButton {
+    font-size: 34px;
+    padding-block: 14px;
+  }
+
+  .stopTitle {
+    font-size: 44px;
+  }
+
+  .stopSubtitle {
+    font-size: 30px;
+  }
+
+  .nowPlayingBar {
+    position: sticky;
+    bottom: 0;
+    left: auto;
+    right: auto;
+    width: 100%;
+    padding-inline: 20px;
+  }
+
+  .walkAudioPanel {
+    padding-inline: 20px;
+  }
+
+  .walkImagesGrid {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
 }

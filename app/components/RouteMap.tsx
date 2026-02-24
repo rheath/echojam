@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { Map as MapLibreMap } from "maplibre-gl";
+import type { GeoJSONSource, Map as MapLibreMap } from "maplibre-gl";
 import type { FeatureCollection, Feature, LineString, Point, GeoJsonProperties } from "geojson";
+import styles from "./RouteMap.module.css";
 
 type Stop = {
   id: string;
@@ -45,6 +46,7 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
       });
 
       mapRef.current = map;
+      map.on("load", () => map.resize());
 
       map.on("load", () => {
         if (cancelled) return;
@@ -126,19 +128,25 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
     };
   }, [stops, currentStopIndex, myPos]);
 
+  useEffect(() => {
+    const onResize = () => mapRef.current?.resize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   // update sources when data changes
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     if (!map.isStyleLoaded()) return;
 
-    const routeSrc = map.getSource("route") as any;
+    const routeSrc = map.getSource("route") as GeoJSONSource | undefined;
     routeSrc?.setData?.(routeGeoJSON(stops));
 
-    const stopsSrc = map.getSource("stops") as any;
+    const stopsSrc = map.getSource("stops") as GeoJSONSource | undefined;
     stopsSrc?.setData?.(stopsGeoJSON(stops, currentStopIndex));
 
-    const meSrc = map.getSource("me") as any;
+    const meSrc = map.getSource("me") as GeoJSONSource | undefined;
     meSrc?.setData?.(myPosGeoJSON(myPos));
 
     const cur = stops[currentStopIndex];
@@ -146,17 +154,8 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
   }, [stops, currentStopIndex, myPos]);
 
   return (
-    <div
-      style={{
-        height: 220,
-        width: "100%",
-        borderRadius: 12,
-        overflow: "hidden",
-        border: "1px solid #ddd",
-        background: "#f5f5f5",
-      }}
-    >
-      <div ref={containerRef} style={{ height: "100%", width: "100%" }} />
+    <div className={styles.mapShell}>
+      <div ref={containerRef} className={styles.mapContainer} />
     </div>
   );
 }
@@ -208,7 +207,7 @@ function myPosGeoJSON(
   };
 }
 
-function fitMapToPoints(map: any, stops: Stop[], myPos?: { lat: number; lng: number } | null) {
+function fitMapToPoints(map: MapLibreMap, stops: Stop[], myPos?: { lat: number; lng: number } | null) {
   const coords: [number, number][] = stops.map((s) => [s.lng, s.lat]);
   if (myPos) coords.push([myPos.lng, myPos.lat]);
   if (!coords.length) return;

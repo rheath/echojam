@@ -64,11 +64,34 @@ function estimateWalkMinutes(meters: number) {
   return Math.max(1, Math.round(seconds / 60));
 }
 
+function getRouteMiles(stops: RouteDef["stops"]) {
+  if (stops.length < 2) return 0;
+  let totalMeters = 0;
+  for (let i = 1; i < stops.length; i += 1) {
+    totalMeters += haversineMeters(stops[i - 1].lat, stops[i - 1].lng, stops[i].lat, stops[i].lng);
+  }
+  return totalMeters / 1609.344;
+}
+
+function formatRouteMiles(miles: number) {
+  return `${miles.toFixed(miles < 1 ? 2 : 1)} mi`;
+}
+
+function formatAudioTime(seconds: number) {
+  if (!isFinite(seconds) || seconds < 0) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
 export default function HomeClient() {
   const [distanceToStopM, setDistanceToStopM] = useState<number | null>(null);
 const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
 const audioRef = useRef<HTMLAudioElement | null>(null);
 const audioBlockRef = useRef<HTMLDivElement | null>(null);
+const [isPlaying, setIsPlaying] = useState(false);
+const [audioTime, setAudioTime] = useState(0);
+const [audioDuration, setAudioDuration] = useState(0);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -96,6 +119,10 @@ const audioBlockRef = useRef<HTMLDivElement | null>(null);
 
   const currentStop = route ? route.stops[currentStopIndex] : null;
   const nextStop = route ? route.stops[currentStopIndex + 1] : null;
+  const routeMilesLabel = useMemo(() => {
+    if (!route) return "";
+    return formatRouteMiles(getRouteMiles(route.stops));
+  }, [route]);
 
   // ---------- Supabase: load jam ----------
   async function loadJamById(id: string) {
@@ -179,6 +206,11 @@ const audioBlockRef = useRef<HTMLDivElement | null>(null);
     setJam(data as JamRow);
   }
 
+  async function copyShareLink() {
+    if (!jam) return;
+    await navigator.clipboard?.writeText(`${window.location.origin}/?jam=${jam.id}`);
+  }
+
   // ---------- "Start stop” handler ----------
 async function startStopNarration() {
   // scroll to audio block
@@ -194,6 +226,24 @@ async function startStopNarration() {
     }
   }
 }
+
+  async function toggleAudio() {
+    const el = audioRef.current;
+    if (!el) return;
+    try {
+      if (el.paused) await el.play();
+      else el.pause();
+    } catch {
+      // ignore play interruption errors
+    }
+  }
+
+  function seekAudio(nextTime: number) {
+    const el = audioRef.current;
+    if (!el) return;
+    el.currentTime = nextTime;
+    setAudioTime(nextTime);
+  }
 
   // ---------- Step transitions ----------
   function requestGeo() {
@@ -302,6 +352,37 @@ async function startStopNarration() {
   };
 }, [step, route?.id, currentStop?.id]);
 
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+
+    const onTimeUpdate = () => setAudioTime(el.currentTime || 0);
+    const onLoadedMeta = () => {
+      setAudioDuration(Number.isFinite(el.duration) ? el.duration : 0);
+      setAudioTime(el.currentTime || 0);
+    };
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onEnded = () => setIsPlaying(false);
+
+    el.addEventListener("timeupdate", onTimeUpdate);
+    el.addEventListener("loadedmetadata", onLoadedMeta);
+    el.addEventListener("durationchange", onLoadedMeta);
+    el.addEventListener("play", onPlay);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("ended", onEnded);
+    onLoadedMeta();
+
+    return () => {
+      el.removeEventListener("timeupdate", onTimeUpdate);
+      el.removeEventListener("loadedmetadata", onLoadedMeta);
+      el.removeEventListener("durationchange", onLoadedMeta);
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("ended", onEnded);
+    };
+  }, [currentStop?.id, persona]);
+
   // ---------- Distance/ETA to next stop ----------
   const nextCue = useMemo(() => {
     if (!myPos || !nextStop) return null;
@@ -313,33 +394,59 @@ async function startStopNarration() {
     };
   }, [myPos, nextStop]);
 
+  const stopList = useMemo(() => {
+    if (!route) return [];
+    return route.stops.map((stop, idx) => {
+      let subtitle = "At this location";
+      if (idx < currentStopIndex) subtitle = "Visited";
+      if (idx > currentStopIndex) {
+        const prev = route.stops[idx - 1];
+        const meters = haversineMeters(prev.lat, prev.lng, stop.lat, stop.lng);
+        subtitle = `${estimateWalkMinutes(meters)} min walk away`;
+      }
+      return {
+        id: stop.id,
+        title: stop.title,
+        image: stop.images[0] ?? "/images/salem/placeholder-01.png",
+        subtitle,
+        isActive: idx === currentStopIndex,
+      };
+    });
+  }, [route, currentStopIndex]);
+
+  const mapsUrl = useMemo(() => {
+    if (!route || route.stops.length < 2) return "#";
+    const origin = `${route.stops[0].lat},${route.stops[0].lng}`;
+    const destination = `${route.stops[route.stops.length - 1].lat},${route.stops[route.stops.length - 1].lng}`;
+    const waypoints = route.stops
+      .slice(1, -1)
+      .map((s) => `${s.lat},${s.lng}`)
+      .join("|");
+    const base = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=walking`;
+    return waypoints ? `${base}&waypoints=${encodeURIComponent(waypoints)}` : base;
+  }, [route]);
+
   // ---------- UI ----------
   return (
-    <div className={styles.container}>
-      <header className={styles.header}>
-        <div>
-          <div className={styles.brandTitle}>EchoJam — Salem</div>
-          <div className={styles.mutedSmall}>
-            {jam ? `Jam: ${jam.id}` : "No jam loaded"}
+    <div className={`${styles.container} ${step === "walk" ? styles.containerWide : ""}`}>
+      {step !== "walk" && (
+        <header className={styles.header}>
+          <div>
+            <div className={styles.brandTitle}>EchoJam</div>
           </div>
-        </div>
 
-        <div className={styles.headerActions}>
-          <button onClick={() => requestGeo()} className={styles.button}>
-            {geoAllowed === true ? "Location: On" : geoAllowed === false ? "Location: Off" : "Use location"}
-          </button>
-          {jam && (
-            <button
-              onClick={() => {
-                navigator.clipboard?.writeText(`${window.location.origin}/?jam=${jam.id}`);
-              }}
-              className={styles.button}
-            >
-              Copy share link
-            </button>
-          )}
-        </div>
-      </header>
+          <div className={styles.headerActions}>
+            {jam && (
+              <button
+                onClick={copyShareLink}
+                className={styles.button}
+              >
+                Share
+              </button>
+            )}
+          </div>
+        </header>
+      )}
 
       {err && (
         <div className={styles.error}>
@@ -350,14 +457,15 @@ async function startStopNarration() {
       {/* LANDING */}
       {step === "landing" && (
         <main className={styles.section}>
-          <h2 className={styles.landingTitle}>One City. Three Walks.</h2>
+          <h2 className={styles.landingTitle}>Your journey starts here</h2>
           <p className={styles.sectionBody}>
-            Salem-only. Pre-written. Static. No AI. Stop-by-stop audio + images.
+            Create a personalized audio tour — just for you. Answer a few quick questions and we&apos;ll map the stories, stops, and surprises that fit your pace.
+
           </p>
 
           <div className={styles.buttonRow}>
             <button onClick={() => createJam()} className={`${styles.button} ${styles.buttonLarge}`}>
-              Start a Salem walk
+              Start tour
             </button>
             <button onClick={() => requestGeo()} className={`${styles.button} ${styles.buttonLarge}`}>
               Enable location (optional)
@@ -392,8 +500,7 @@ async function startStopNarration() {
       {/* PICK DURATION */}
       {step === "pickDuration" && (
         <main className={styles.section}>
-          <h2 className={styles.sectionTitle}>How long do you have?</h2>
-          <p className={styles.muted}>Pick a fixed route. No branching, no rerouting.</p>
+          <h2 className={styles.sectionTitle}>How long do you have?</h2> 
 
           <div className={styles.routesGrid}>
             {salemRoutes.map((r) => (
@@ -402,7 +509,7 @@ async function startStopNarration() {
                 onClick={() => chooseRoute(r.id)}
                 className={`${styles.button} ${styles.routeCard}`}
               >
-                <div className={styles.routeDuration}>{r.durationLabel}</div>
+                <div className={styles.routeDuration}>{r.durationLabel} • {formatRouteMiles(getRouteMiles(r.stops))} walking</div>
                 <div className={styles.routeTitle}>{r.title}</div>
                 <div className={styles.routeDescription}>{r.description}</div>
                 <div className={styles.routeStops}>{r.stops.length} stops</div>
@@ -411,14 +518,15 @@ async function startStopNarration() {
           </div>
 
           <div className={styles.narrationBlock}>
-            <div className={styles.narrationLabel}>Narration:</div>
+
+          <h2 className={styles.sectionTitle}>Narration (Settings):</h2>  
             <div className={styles.actionGroup}>
               <button
                 onClick={() => jam && setPersona("adult")}
                 disabled={!jam}
                 className={`${styles.button} ${persona === "adult" ? styles.personaActive : styles.personaInactive}`}
               >
-                Adult
+                Adult 
               </button>
               <button
                 onClick={() => jam && setPersona("preteen")}
@@ -434,96 +542,105 @@ async function startStopNarration() {
 
       {/* WALK */}
       {step === "walk" && route && currentStop && (
-        <main className={styles.section}>
-          <div className={styles.walkHeader}>
-            <div>
-              <div className={styles.mutedSmall}>
-                {route.durationLabel} — {route.title} • Stop {currentStopIndex + 1} of {route.stops.length}
-              </div>
-              <h2 className={styles.walkTitle}>{currentStop.title}</h2>
-            </div>
-
-            <div className={styles.actionGroup}>
-              <button
-                onClick={() => setPersona("adult")}
-                className={`${styles.button} ${persona === "adult" ? styles.personaActive : styles.personaInactive}`}
-              >
-                Adult
-              </button>
-              <button
-                onClick={() => setPersona("preteen")}
-                className={`${styles.button} ${persona === "preteen" ? styles.personaActive : styles.personaInactive}`}
-              >
-                Preteen
-              </button>
-            </div>
-          </div>
-
-          {/* MAP placeholder area (you’ll replace with real map) */}
-          <div className={styles.mapFrame}>
+        <main className={styles.walkLayout}>
+          <div className={styles.mapHero}>
             <RouteMap stops={route.stops} currentStopIndex={currentStopIndex} myPos={myPos} />
+            <button onClick={() => setStep("pickDuration")} className={styles.mapBackButton} aria-label="Back to routes">
+              &#8592;
+            </button>
+            <a href={mapsUrl} target="_blank" rel="noreferrer" className={styles.mapViewButton}>
+              View in maps
+            </a>
           </div>
+          <div className={styles.rightRail}>
+            <div className={styles.walkCard}>
+              <div className={styles.walkMetaRow}>
+                <div className={styles.walkDot} />
+                <div className={styles.walkNarrator}>{persona === "adult" ? "Adult Narrative" : "Preteen Narrative"}</div>
+              </div>
+              <h1 className={styles.walkHeadline}>{route.title}</h1>
+              <div className={styles.walkSubline}>
+                <span>3 people connected</span>
+                <span>{route.durationLabel}/{routeMilesLabel} walking</span>
+              </div>
 
-          {/* Audio */}
-          <div ref={audioBlockRef} className={styles.panel}>
-            <div className={styles.narrationLabel}>
-              Narration ({persona === "adult" ? "Adult" : "Preteen"})
+              <div className={styles.walkActionRow}>
+                <button className={styles.pillButton} type="button" onClick={copyShareLink}>Add people</button>
+                <button className={styles.pillButton} type="button" onClick={() => setStep("pickDuration")}>Customize</button>
+              </div>
+
+              <div className={styles.stopList}>
+                {stopList.map((stop, idx) => (
+                  <button
+                    key={stop.id}
+                    onClick={() => updateJam({ current_stop: idx })}
+                    className={`${styles.stopItem} ${stop.isActive ? styles.stopItemActive : ""}`}
+                    type="button"
+                  >
+                    <div className={styles.stopThumbWrap}>
+                      <Image src={stop.image} alt={stop.title} fill className={styles.stopThumb} />
+                    </div>
+                    <div className={styles.stopText}>
+                      <div className={`${styles.stopTitle} ${stop.isActive ? styles.stopTitleActive : ""}`}>
+                        {idx + 1}. {stop.title}
+                      </div>
+                      <div className={styles.stopSubtitle}>{stop.subtitle}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <audio
-              ref={audioRef}
-              controls
-              preload="metadata"
-              className={styles.audioPlayer}
-              src={currentStop.audio[persona]}
-            />
-
-            {currentStop.text?.[persona] && (
-              <p className={styles.narrationText}>{currentStop.text[persona]}</p>
-            )}
-          </div>
-          {/* Images */}
-          <div className={styles.imagesGrid}>
-            {currentStop.images.slice(0, 2).map((src) => (
-              <div key={src} className={styles.imageCard}>
-                <div className={styles.imageFrame}>
-                  <Image src={src} alt={currentStop.title} fill className={styles.image} />
+            <div className={styles.nowPlayingBar}>
+              <div>
+                <div className={styles.nowPlayingTitle}>{currentStop.title}</div>
+                <div className={styles.nowPlayingSubtitle}>
+                  {nextStop && nextCue ? `Next: ${nextCue.mins} min walk away` : "At this location"}
                 </div>
               </div>
-            ))}
-          </div>
+              <button
+                className={styles.nowPlayingButton}
+                onClick={toggleAudio}
+                aria-label={isPlaying ? "Pause current stop" : "Play current stop"}
+              >
+                {isPlaying ? "❚❚" : "▶"}
+              </button>
+            </div>
 
-          {/* Walk to next */}
-          <div className={styles.panel}>
-            <div className={styles.nextTitle}>Walk to next stop</div>
-
-            {!nextStop && <div className={`${styles.spacedTop} ${styles.lightMuted}`}>This is the final stop.</div>}
-
-            {nextStop && (
-              <div className={`${styles.spacedTop} ${styles.semiMuted}`}>
-                Next: <b>{nextStop.title}</b>
-                <div className={`${styles.spacedTop} ${styles.muted}`}>
-                  {myPos && nextCue ? (
-                    <>
-                      About <b>{nextCue.dist}</b> • ~<b>{nextCue.mins} min</b> on foot
-                    </>
-                  ) : (
-                    <>Follow the map markers to the next stop.</>
-                  )}
+            <div ref={audioBlockRef} className={`${styles.panel} ${styles.walkAudioPanel}`}>
+              <audio ref={audioRef} preload="metadata" className={styles.audioPlayer} src={currentStop.audio[persona]} />
+              <div className={styles.audioControls}>
+                <button type="button" onClick={toggleAudio} className={styles.audioControlButton}>
+                  {isPlaying ? "Pause" : "Play"}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={audioDuration || 0}
+                  step={0.1}
+                  value={Math.min(audioTime, audioDuration || audioTime)}
+                  onChange={(e) => seekAudio(Number(e.target.value))}
+                  className={styles.audioSeek}
+                />
+                <div className={styles.audioTime}>
+                  {formatAudioTime(audioTime)} / {formatAudioTime(audioDuration)}
                 </div>
               </div>
-            )}
+              <div className={styles.actionRow}>
+                <span className={styles.blackText}>is this needed?</span>
+                <button onClick={() => setPersona("adult")} className={`${styles.button} ${persona === "adult" ? styles.personaActive : styles.personaInactive}`}>Adult</button>
+                <button onClick={() => setPersona("preteen")} className={`${styles.button} ${persona === "preteen" ? styles.personaActive : styles.personaInactive}`}>Preteen</button>
+                <button onClick={() => nextStopAction()} className={`${styles.button} ${styles.buttonLarge}`}>
+                  {currentStopIndex >= route.stops.length - 1 ? "Finish walk" : "Next stop"}
+                </button>
+                <button onClick={() => setStep("pickDuration")} className={`${styles.button} ${styles.buttonLarge}`}>Customize</button>
+              </div>
+            </div>
           </div>
 
-          <div className={styles.actionRow}>
-            <button onClick={() => nextStopAction()} className={`${styles.button} ${styles.buttonLarge}`}>
-              {currentStopIndex >= route.stops.length - 1 ? "Finish walk" : "Next stop"}
-            </button>
-            <button onClick={() => setStep("pickDuration")} className={`${styles.button} ${styles.buttonLarge}`}>
-              Change route
-            </button>
-          </div>
+          
         </main>
+        
       )}
 
       {/* END */}
@@ -539,10 +656,7 @@ async function startStopNarration() {
               Restart this walk
             </button>
             <button
-              onClick={() => {
-                if (!jam) return;
-                navigator.clipboard?.writeText(`${window.location.origin}/?jam=${jam.id}`);
-              }}
+              onClick={copyShareLink}
               className={`${styles.button} ${styles.buttonLarge}`}
             >
               Copy share link
@@ -559,6 +673,13 @@ async function startStopNarration() {
             </button>
           </div>
         </main>
+
+      )}
+
+      {step !== "walk" && (
+        <footer className={styles.footer}>
+          {jam ? `Jam: ${jam.id}` : "No jam loaded"}
+        </footer>
       )}
     </div>
   );
