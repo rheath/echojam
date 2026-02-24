@@ -1,0 +1,258 @@
+.container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.brandTitle {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.mutedSmall {
+  opacity: 0.7;
+  font-size: 13px;
+}
+
+.headerActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.button {
+  padding: 5px;
+  border: 1px solid #ccc;
+  cursor: pointer;
+}
+
+.buttonLarge {
+  font-size: 16px;
+}
+
+.error {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #f0b4b4;
+  background: #fff5f5;
+}
+
+.section {
+  margin-top: 18px;
+}
+
+.landingTitle {
+  font-size: 28px;
+  margin: 10px 0;
+}
+
+.sectionBody {
+  opacity: 0.8;
+  line-height: 1.5;
+}
+
+.buttonRow {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.hint {
+  margin-top: 18px;
+  opacity: 0.7;
+  font-size: 13px;
+}
+
+.proximityBanner {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.compactText {
+  line-height: 1.3;
+}
+
+.strongText {
+  font-weight: 700;
+}
+
+.sectionTitle {
+  font-size: 24px;
+  margin: 10px 0;
+}
+
+.routesGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.routeCard {
+  text-align: left;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.routeDuration {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.routeTitle {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.routeDescription {
+  margin-top: 6px;
+  opacity: 0.8;
+  line-height: 1.4;
+}
+
+.routeStops {
+  margin-top: 10px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.narrationBlock {
+  margin-top: 18px;
+}
+
+.narrationLabel {
+  font-size: 14px;
+  opacity: 0.8;
+  margin-bottom: 8px;
+}
+
+.actionGroup {
+  display: flex;
+  gap: 10px;
+}
+
+.personaActive {
+  opacity: 1;
+}
+
+.personaInactive {
+  opacity: 0.6;
+}
+
+.walkHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.walkTitle {
+  font-size: 26px;
+  margin: 6px 0;
+}
+
+.mapFrame {
+  margin-top: 12px;
+  height: 220px;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+  background: linear-gradient(180deg, #fafafa, #f3f3f3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-size: 14px;
+}
+
+.panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.audioPlayer {
+  width: 100%;
+}
+
+.narrationText {
+  margin-top: 10px;
+  opacity: 0.85;
+  line-height: 1.5;
+}
+
+.imagesGrid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.imageCard {
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.imageFrame {
+  position: relative;
+  width: 100%;
+  height: 180px;
+}
+
+.image {
+  object-fit: cover;
+}
+
+.nextTitle {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.spacedTop {
+  margin-top: 6px;
+}
+
+.muted {
+  opacity: 0.8;
+}
+
+.semiMuted {
+  opacity: 0.85;
+  line-height: 1.5;
+}
+
+.lightMuted {
+  opacity: 0.75;
+}
+
+.actionRow {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.endText {
+  opacity: 0.85;
+  line-height: 1.6;
+}

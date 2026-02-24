@@ -6,6 +6,7 @@ import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import { getRouteById, salemRoutes, type Persona, type RouteDef } from "@/app/content/salemRoutes";
 import dynamic from "next/dynamic";
+import styles from "./HomeClient.module.css";
 
 const RouteMap = dynamic(() => import("./components/RouteMap"), { ssr: false });
 
@@ -314,18 +315,17 @@ async function startStopNarration() {
 
   // ---------- UI ----------
   return (
-     
-    <div style={{ maxWidth: 860, margin: "0 auto", padding: 20 }}> 
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+    <div className={styles.container}>
+      <header className={styles.header}>
         <div>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>EchoJam — Salem</div>
-          <div style={{ opacity: 0.7, fontSize: 13 }}>
+          <div className={styles.brandTitle}>EchoJam — Salem</div>
+          <div className={styles.mutedSmall}>
             {jam ? `Jam: ${jam.id}` : "No jam loaded"}
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button onClick={() => requestGeo()} style={{ padding: "8px 10px" }}>
+        <div className={styles.headerActions}>
+          <button onClick={() => requestGeo()} className={styles.button}>
             {geoAllowed === true ? "Location: On" : geoAllowed === false ? "Location: Off" : "Use location"}
           </button>
           {jam && (
@@ -333,7 +333,7 @@ async function startStopNarration() {
               onClick={() => {
                 navigator.clipboard?.writeText(`${window.location.origin}/?jam=${jam.id}`);
               }}
-              style={{ padding: "8px 10px" }}
+              className={styles.button}
             >
               Copy share link
             </button>
@@ -342,29 +342,29 @@ async function startStopNarration() {
       </header>
 
       {err && (
-        <div style={{ marginTop: 12, padding: 12, border: "1px solid #f0b4b4", background: "#fff5f5" }}>
+        <div className={styles.error}>
           {err}
         </div>
       )}
 
       {/* LANDING */}
       {step === "landing" && (
-        <main style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 28, margin: "10px 0" }}>One City. Three Walks.</h2>
-          <p style={{ opacity: 0.8, lineHeight: 1.5 }}>
+        <main className={styles.section}>
+          <h2 className={styles.landingTitle}>One City. Three Walks.</h2>
+          <p className={styles.sectionBody}>
             Salem-only. Pre-written. Static. No AI. Stop-by-stop audio + images.
           </p>
 
-          <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
-            <button onClick={() => createJam()} style={{ padding: "12px 14px", fontSize: 16 }}>
+          <div className={styles.buttonRow}>
+            <button onClick={() => createJam()} className={`${styles.button} ${styles.buttonLarge}`}>
               Start a Salem walk
             </button>
-            <button onClick={() => requestGeo()} style={{ padding: "12px 14px", fontSize: 16 }}>
+            <button onClick={() => requestGeo()} className={`${styles.button} ${styles.buttonLarge}`}>
               Enable location (optional)
             </button>
           </div>
 
-          <div style={{ marginTop: 18, opacity: 0.7, fontSize: 13 }}>
+          <div className={styles.hint}>
             If you already have a link, open it with <code>?jam=&lt;uuid&gt;</code>.
           </div>
         </main>
@@ -373,30 +373,17 @@ async function startStopNarration() {
 {/* banner UI inside the WALK section
 */}
 {geoAllowed === true && proximity !== "far" && distanceToStopM !== null && (
-  <div
-    style={{
-      marginTop: 10,
-      padding: 12,
-      borderRadius: 12,
-      border: "1px solid #ddd",
-      background: "white",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12,
-      flexWrap: "wrap",
-    }}
-  >
-    <div style={{ lineHeight: 1.3 }}>
-      <div style={{ fontWeight: 700 }}>
+  <div className={styles.proximityBanner}>
+    <div className={styles.compactText}>
+      <div className={styles.strongText}>
         {proximity === "arrived" ? "Arrived 🎧" : "You’re close"}
       </div>
-      <div style={{ opacity: 0.8, fontSize: 13 }}>
+      <div className={styles.narrationLabel}>
         About {formatDistance(distanceToStopM)} from <b>{currentStop?.title}</b>
       </div>
     </div>
 
-    <button onClick={startStopNarration} style={{ padding: "10px 12px" }}>
+    <button onClick={startStopNarration} className={styles.button}>
       Start stop
     </button>
   </div>
@@ -404,45 +391,39 @@ async function startStopNarration() {
 
       {/* PICK DURATION */}
       {step === "pickDuration" && (
-        <main style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 24, margin: "10px 0" }}>How long do you have?</h2>
-          <p style={{ opacity: 0.8 }}>Pick a fixed route. No branching, no rerouting.</p>
+        <main className={styles.section}>
+          <h2 className={styles.sectionTitle}>How long do you have?</h2>
+          <p className={styles.muted}>Pick a fixed route. No branching, no rerouting.</p>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginTop: 16 }}>
+          <div className={styles.routesGrid}>
             {salemRoutes.map((r) => (
               <button
                 key={r.id}
                 onClick={() => chooseRoute(r.id)}
-                style={{
-                  textAlign: "left",
-                  padding: 14,
-                  border: "1px solid #ddd",
-                  borderRadius: 10,
-                  background: "white",
-                }}
+                className={`${styles.button} ${styles.routeCard}`}
               >
-                <div style={{ fontSize: 14, opacity: 0.7 }}>{r.durationLabel}</div>
-                <div style={{ fontSize: 18, fontWeight: 700 }}>{r.title}</div>
-                <div style={{ marginTop: 6, opacity: 0.8, lineHeight: 1.4 }}>{r.description}</div>
-                <div style={{ marginTop: 10, fontSize: 13, opacity: 0.7 }}>{r.stops.length} stops</div>
+                <div className={styles.routeDuration}>{r.durationLabel}</div>
+                <div className={styles.routeTitle}>{r.title}</div>
+                <div className={styles.routeDescription}>{r.description}</div>
+                <div className={styles.routeStops}>{r.stops.length} stops</div>
               </button>
             ))}
           </div>
 
-          <div style={{ marginTop: 18 }}>
-            <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 8 }}>Narration:</div>
-            <div style={{ display: "flex", gap: 10 }}>
+          <div className={styles.narrationBlock}>
+            <div className={styles.narrationLabel}>Narration:</div>
+            <div className={styles.actionGroup}>
               <button
                 onClick={() => jam && setPersona("adult")}
                 disabled={!jam}
-                style={{ padding: "10px 12px", opacity: persona === "adult" ? 1 : 0.6 }}
+                className={`${styles.button} ${persona === "adult" ? styles.personaActive : styles.personaInactive}`}
               >
                 Adult
               </button>
               <button
                 onClick={() => jam && setPersona("preteen")}
                 disabled={!jam}
-                style={{ padding: "10px 12px", opacity: persona === "preteen" ? 1 : 0.6 }}
+                className={`${styles.button} ${persona === "preteen" ? styles.personaActive : styles.personaInactive}`}
               >
                 Preteen
               </button>
@@ -453,25 +434,25 @@ async function startStopNarration() {
 
       {/* WALK */}
       {step === "walk" && route && currentStop && (
-        <main style={{ marginTop: 18 }}>
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <main className={styles.section}>
+          <div className={styles.walkHeader}>
             <div>
-              <div style={{ opacity: 0.7, fontSize: 13 }}>
+              <div className={styles.mutedSmall}>
                 {route.durationLabel} — {route.title} • Stop {currentStopIndex + 1} of {route.stops.length}
               </div>
-              <h2 style={{ fontSize: 26, margin: "6px 0" }}>{currentStop.title}</h2>
+              <h2 className={styles.walkTitle}>{currentStop.title}</h2>
             </div>
 
-            <div style={{ display: "flex", gap: 10 }}>
+            <div className={styles.actionGroup}>
               <button
                 onClick={() => setPersona("adult")}
-                style={{ padding: "10px 12px", opacity: persona === "adult" ? 1 : 0.6 }}
+                className={`${styles.button} ${persona === "adult" ? styles.personaActive : styles.personaInactive}`}
               >
                 Adult
               </button>
               <button
                 onClick={() => setPersona("preteen")}
-                style={{ padding: "10px 12px", opacity: persona === "preteen" ? 1 : 0.6 }}
+                className={`${styles.button} ${persona === "preteen" ? styles.personaActive : styles.personaInactive}`}
               >
                 Preteen
               </button>
@@ -479,67 +460,49 @@ async function startStopNarration() {
           </div>
 
           {/* MAP placeholder area (you’ll replace with real map) */}
-          <div
-            style={{
-              marginTop: 12,
-              height: 220,
-              borderRadius: 12,
-              border: "1px solid #ddd",
-              background: "linear-gradient(180deg, #fafafa, #f3f3f3)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#666",
-              fontSize: 14,
-            }}
-          >
+          <div className={styles.mapFrame}>
             <RouteMap stops={route.stops} currentStopIndex={currentStopIndex} myPos={myPos} />
           </div>
 
           {/* Audio */}
-          
+          <div ref={audioBlockRef} className={styles.panel}>
+            <div className={styles.narrationLabel}>
+              Narration ({persona === "adult" ? "Adult" : "Preteen"})
+            </div>
 
-<div
-  ref={audioBlockRef}
-  style={{ marginTop: 14, padding: 14, border: "1px solid #ddd", borderRadius: 12, background: "white" }}
->
-  <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 8 }}>
-    Narration ({persona === "adult" ? "Adult" : "Preteen"})
-  </div>
+            <audio
+              ref={audioRef}
+              controls
+              preload="metadata"
+              className={styles.audioPlayer}
+              src={currentStop.audio[persona]}
+            />
 
-  <audio
-    ref={audioRef}
-    controls
-    preload="metadata"
-    style={{ width: "100%" }}
-    src={currentStop.audio[persona]}
-  />
-
-  {currentStop.text?.[persona] && (
-    <p style={{ marginTop: 10, opacity: 0.85, lineHeight: 1.5 }}>{currentStop.text[persona]}</p>
-  )}
-</div>
+            {currentStop.text?.[persona] && (
+              <p className={styles.narrationText}>{currentStop.text[persona]}</p>
+            )}
+          </div>
           {/* Images */}
-          <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+          <div className={styles.imagesGrid}>
             {currentStop.images.slice(0, 2).map((src) => (
-              <div key={src} style={{ border: "1px solid #ddd", borderRadius: 12, overflow: "hidden", background: "white" }}>
-                <div style={{ position: "relative", width: "100%", height: 180 }}>
-                  <Image src={src} alt={currentStop.title} fill style={{ objectFit: "cover" }} />
+              <div key={src} className={styles.imageCard}>
+                <div className={styles.imageFrame}>
+                  <Image src={src} alt={currentStop.title} fill className={styles.image} />
                 </div>
               </div>
             ))}
           </div>
 
           {/* Walk to next */}
-          <div style={{ marginTop: 14, padding: 14, border: "1px solid #ddd", borderRadius: 12, background: "white" }}>
-            <div style={{ fontSize: 16, fontWeight: 700 }}>Walk to next stop</div>
+          <div className={styles.panel}>
+            <div className={styles.nextTitle}>Walk to next stop</div>
 
-            {!nextStop && <div style={{ marginTop: 6, opacity: 0.75 }}>This is the final stop.</div>}
+            {!nextStop && <div className={`${styles.spacedTop} ${styles.lightMuted}`}>This is the final stop.</div>}
 
             {nextStop && (
-              <div style={{ marginTop: 6, opacity: 0.85, lineHeight: 1.5 }}>
+              <div className={`${styles.spacedTop} ${styles.semiMuted}`}>
                 Next: <b>{nextStop.title}</b>
-                <div style={{ marginTop: 6, opacity: 0.8 }}>
+                <div className={`${styles.spacedTop} ${styles.muted}`}>
                   {myPos && nextCue ? (
                     <>
                       About <b>{nextCue.dist}</b> • ~<b>{nextCue.mins} min</b> on foot
@@ -552,11 +515,11 @@ async function startStopNarration() {
             )}
           </div>
 
-          <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button onClick={() => nextStopAction()} style={{ padding: "12px 14px", fontSize: 16 }}>
+          <div className={styles.actionRow}>
+            <button onClick={() => nextStopAction()} className={`${styles.button} ${styles.buttonLarge}`}>
               {currentStopIndex >= route.stops.length - 1 ? "Finish walk" : "Next stop"}
             </button>
-            <button onClick={() => setStep("pickDuration")} style={{ padding: "12px 14px", fontSize: 16 }}>
+            <button onClick={() => setStep("pickDuration")} className={`${styles.button} ${styles.buttonLarge}`}>
               Change route
             </button>
           </div>
@@ -565,14 +528,14 @@ async function startStopNarration() {
 
       {/* END */}
       {step === "end" && route && (
-        <main style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 26, margin: "10px 0" }}>Nice work — walk complete.</h2>
-          <p style={{ opacity: 0.85, lineHeight: 1.6 }}>
+        <main className={styles.section}>
+          <h2 className={styles.walkTitle}>Nice work — walk complete.</h2>
+          <p className={styles.endText}>
             Reflection prompt (MVP): What was one detail you didn’t expect?
           </p>
 
-          <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button onClick={() => restartWalk()} style={{ padding: "12px 14px", fontSize: 16 }}>
+          <div className={styles.actionRow}>
+            <button onClick={() => restartWalk()} className={`${styles.button} ${styles.buttonLarge}`}>
               Restart this walk
             </button>
             <button
@@ -580,7 +543,7 @@ async function startStopNarration() {
                 if (!jam) return;
                 navigator.clipboard?.writeText(`${window.location.origin}/?jam=${jam.id}`);
               }}
-              style={{ padding: "12px 14px", fontSize: 16 }}
+              className={`${styles.button} ${styles.buttonLarge}`}
             >
               Copy share link
             </button>
@@ -590,7 +553,7 @@ async function startStopNarration() {
                 setJam(null);
                 setStep("landing");
               }}
-              style={{ padding: "12px 14px", fontSize: 16 }}
+              className={`${styles.button} ${styles.buttonLarge}`}
             >
               Start over
             </button>
