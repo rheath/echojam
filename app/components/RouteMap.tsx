@@ -23,14 +23,17 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
+  const [routeStatus, setRouteStatus] = useState<"loading" | "ready" | "failed">("loading");
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
 
     async function loadWalkingRoute() {
+      setRouteStatus("loading");
       if (stops.length < 2) {
         setRouteCoords(null);
+        setRouteStatus("failed");
         return;
       }
 
@@ -45,9 +48,18 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
         };
         const coords = data.routes?.[0]?.geometry?.coordinates;
         if (cancelled) return;
-        setRouteCoords(coords && coords.length ? coords : null);
+        if (coords && coords.length) {
+          setRouteCoords(coords);
+          setRouteStatus("ready");
+        } else {
+          setRouteCoords(null);
+          setRouteStatus("failed");
+        }
       } catch {
-        if (!cancelled) setRouteCoords(null);
+        if (!cancelled) {
+          setRouteCoords(null);
+          setRouteStatus("failed");
+        }
       }
     }
 
@@ -89,7 +101,7 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
         // Route line
         map.addSource("route", {
           type: "geojson",
-          data: routeGeoJSON(stops, routeCoords),
+          data: routeGeoJSON(stops, null, "loading"),
         });
 
         map.addLayer({
@@ -117,7 +129,7 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
         // Stops
         map.addSource("stops", {
           type: "geojson",
-          data: stopsGeoJSON(stops, currentStopIndex),
+          data: stopsGeoJSON(stops, 0),
         });
 
         map.addLayer({
@@ -170,7 +182,7 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
         // My position
         map.addSource("me", {
           type: "geojson",
-          data: myPosGeoJSON(myPos),
+          data: myPosGeoJSON(null),
         });
 
         map.addLayer({
@@ -210,7 +222,7 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
             .addTo(map);
         });
 
-        fitMapToPoints(map, stops, myPos);
+        fitMapToPoints(map, stops, null);
       });
     }
 
@@ -221,7 +233,7 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [stops, currentStopIndex, myPos, routeCoords]);
+  }, [stops]);
 
   useEffect(() => {
     const onResize = () => mapRef.current?.resize();
@@ -236,17 +248,23 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
     if (!map.isStyleLoaded()) return;
 
     const routeSrc = map.getSource("route") as GeoJSONSource | undefined;
-    routeSrc?.setData?.(routeGeoJSON(stops, routeCoords));
+    routeSrc?.setData?.(routeGeoJSON(stops, routeCoords, routeStatus));
 
     const stopsSrc = map.getSource("stops") as GeoJSONSource | undefined;
     stopsSrc?.setData?.(stopsGeoJSON(stops, currentStopIndex));
 
     const meSrc = map.getSource("me") as GeoJSONSource | undefined;
     meSrc?.setData?.(myPosGeoJSON(myPos));
+  }, [stops, currentStopIndex, myPos, routeCoords, routeStatus]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!map.isStyleLoaded()) return;
 
     const cur = stops[currentStopIndex];
     if (cur) map.easeTo({ center: [cur.lng, cur.lat], duration: 450 });
-  }, [stops, currentStopIndex, myPos, routeCoords]);
+  }, [stops, currentStopIndex]);
 
   return (
     <div className={styles.mapShell}>
@@ -259,8 +277,27 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
 
 function routeGeoJSON(
   stops: Stop[],
-  routedCoords?: [number, number][] | null
+  routedCoords?: [number, number][] | null,
+  routeStatus: "loading" | "ready" | "failed" = "loading"
 ): FeatureCollection<LineString, GeoJsonProperties> {
+  if (routedCoords?.length) {
+    return {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: { type: "LineString", coordinates: routedCoords },
+        },
+      ],
+    };
+  }
+
+  // Avoid drawing a temporary straight line while walking geometry is loading.
+  if (routeStatus !== "failed") {
+    return { type: "FeatureCollection", features: [] };
+  }
+
   const feature: Feature<LineString, GeoJsonProperties> = {
     type: "Feature",
     properties: {},

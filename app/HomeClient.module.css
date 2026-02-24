@@ -104,7 +104,7 @@
 }
 
 .landingBrand {
-  font-size: 38px;
+  font-size: 44px;
   font-weight: 700;
 }
 
@@ -114,7 +114,7 @@
 
 .landingHeading {
   margin: 0;
-  font-size: 56px;
+  font-size: 44px;
   line-height: 1.05;
   font-weight: 500;
 }
@@ -235,9 +235,13 @@
 
 .pickHeading {
   margin: 0;
-  font-size: 44px;
+  font-size: 26px;
   line-height: 1.05;
   font-weight: 700;
+}
+
+.pickNarratorHeading {
+  margin-top: 28px;
 }
 
 .pickCopy {
@@ -277,6 +281,10 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
+.pickRouteRowSelected .pickRouteTitle {
+  color: #ff79a8;
+}
+
 .pickRouteMain {
   display: flex;
   flex-direction: column;
@@ -284,7 +292,7 @@
 }
 
 .pickRouteTitle {
-  font-size: 24px;
+  font-size: 36px;
   font-weight: 700;
 }
 
@@ -302,23 +310,33 @@
 .pickPersonaRow {
   margin-top: 10px;
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 0;
 }
 
-.pickPersonaButton {
-  border: 1px solid #5a5b61;
-  border-radius: 999px;
-  background: #3f4148;
-  color: #fff;
-  padding: 10px 22px;
-  font-size: 16px;
+.pickNarratorOption {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #34353b;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 12px 0;
   cursor: pointer;
-  opacity: 0.7;
 }
 
-.pickPersonaSelected {
-  opacity: 1;
-  border-color: #fff;
+.pickNarratorOptionSelected {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.pickNarratorOptionSelected .pickRouteTitle {
+  color: #ff79a8;
+}
+
+.pickNarratorSub {
+  margin-top: 4px;
+  font-size: 16px;
+  opacity: 0.82;
 }
 
 .pickImagePane {
@@ -816,7 +834,7 @@
     top: 18px;
     left: 24px;
     z-index: 1;
-    font-size: 38px;
+    font-size: 44px;
   }
 
   .landingCopyBlock {
@@ -824,7 +842,7 @@
   }
 
   .landingHeading {
-    font-size: 52px;
+    font-size: 44px;
   }
 
   .landingPopular {
@@ -833,7 +851,7 @@
 
   .landingTourTitle,
   .landingTourTitleMuted {
-    font-size: 56px;
+    font-size: 44px;
   }
 
   .landingArrow {
@@ -863,7 +881,7 @@
   }
 
   .pickHeading {
-    font-size: 40px;
+    font-size: 26px;
   }
 
   .pickSectionLabel {
@@ -871,7 +889,7 @@
   }
 
   .pickRouteTitle {
-    font-size: 32px;
+    font-size: 44px;
   }
 
   .pickRouteArrow {

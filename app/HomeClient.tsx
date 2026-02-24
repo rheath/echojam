@@ -479,7 +479,7 @@ async function startStopNarration() {
       {step !== "walk" && step !== "landing" && step !== "pickDuration" && (
         <header className={styles.header}>
           <div>
-            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.brandTitle}`}>EchoJam</button>
+            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.brandTitle}`}>MixTours</button>
           </div>
 
           <div className={styles.headerActions}>
@@ -505,7 +505,7 @@ async function startStopNarration() {
       {step === "landing" && (
         <main className={styles.landingLayout}>
           <section className={styles.landingInfo}>
-            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>EchoJam</button>
+            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>MixTours</button>
             <div className={styles.landingCopyBlock}>
               <h1 className={styles.landingHeading}>A mixtape for the streets.</h1>
               <p className={styles.landingCopy}>
@@ -573,14 +573,12 @@ async function startStopNarration() {
       {step === "pickDuration" && (
         <main className={styles.pickLayout}>
           <section className={styles.pickInfo}>
-            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>EchoJam</button>
+            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>MixTours</button>
             <div className={styles.pickCopyBlock}>
-              <h1 className={styles.pickHeading}>How long do you have?</h1>
-              <p className={styles.pickCopy}>Choose a mix length, then choose narration, then start your tour.</p>
+              <h2 className={styles.pickHeading}>How long do you have?</h2>
             </div>
 
-            <div className={styles.pickSectionLabel}>Tour length:</div>
-            <div className={styles.pickRouteList}>
+             <div className={styles.pickRouteList}>
               {salemRoutes.map((r) => (
                 <button
                   key={r.id}
@@ -596,19 +594,21 @@ async function startStopNarration() {
               ))}
             </div>
 
-            <div className={styles.pickSectionLabel}>Narration:</div>
+            <h2 className={`${styles.pickHeading} ${styles.pickNarratorHeading}`}>What narrator do you want?</h2>
             <div className={styles.pickPersonaRow}>
               <button
                 onClick={() => setSelectedPersona("adult")}
-                className={`${styles.pickPersonaButton} ${selectedPersona === "adult" ? styles.pickPersonaSelected : ""}`}
+                className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
               >
-                Adult
+                <div className={styles.pickRouteTitle}>Adult</div>
+                <div className={styles.pickNarratorSub}>Lorem ispum</div>
               </button>
               <button
                 onClick={() => setSelectedPersona("preteen")}
-                className={`${styles.pickPersonaButton} ${selectedPersona === "preteen" ? styles.pickPersonaSelected : ""}`}
+                className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
               >
-                Preteen
+                <div className={styles.pickRouteTitle}>Preteen</div>
+                <div className={styles.pickNarratorSub}>Lorem ispum</div>
               </button>
             </div>
 
