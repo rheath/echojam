@@ -136,8 +136,8 @@ export async function uploadNarrationAudio(audioBytes: Uint8Array, routeId: stri
 }
 
 export function fallbackScript(city: string, persona: Persona, stop: StopInput, index: number) {
-  const personaPrompt = PERSONA_PROMPTS[persona];
   if (persona === "adult") {
+    const personaPrompt = historianPersonaPrompt;
     return [
       personaPrompt.fallbackTemplate.line1(stop.title, city),
       personaPrompt.fallbackTemplate.line2,
@@ -145,6 +145,7 @@ export function fallbackScript(city: string, persona: Persona, stop: StopInput, 
       personaPrompt.fallbackTemplate.line4(index + 2),
     ].join(" ");
   }
+  const personaPrompt = mainCharacterPersonaPrompt;
   return [
     personaPrompt.fallbackTemplate.line1(stop.title),
     personaPrompt.fallbackTemplate.line2,
