@@ -16,9 +16,9 @@ export type Stop = {
 };
 
 export type RouteDef = {
-  id: "salem-core-15" | "salem-story-30" | "salem-deepdive-60";
+  id: string;
   title: string;
-  durationLabel: "15 min" | "30 min" | "60 min";
+  durationLabel: string;
   description: string;
   stops: Stop[];
 };
@@ -182,4 +182,3 @@ export function getRouteById(routeId: string | null | undefined): RouteDef | nul
   if (!routeId) return null;
   return salemRoutes.find((r) => r.id === routeId) ?? null;
 }
-

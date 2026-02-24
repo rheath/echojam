@@ -1,10 +1,11 @@
 "use client";
  
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import { getRouteById, salemRoutes, type Persona, type RouteDef } from "@/app/content/salemRoutes";
+import { getMaxStops, validateMixSelection } from "@/lib/mixConstraints";
 import dynamic from "next/dynamic";
 import styles from "./HomeClient.module.css";
 
@@ -25,10 +26,51 @@ type JamRow = {
   // Legacy fields (keep if present in table)
   is_playing?: boolean | null;
   position_ms?: number | null;
-  preset_id?: string | null;
 };
 
-type FlowStep = "landing" | "pickDuration" | "walk" | "end";
+type FlowStep = "landing" | "pickDuration" | "buildMix" | "generating" | "walk" | "end";
+type CityOption = "salem" | "boston" | "concord";
+type TransportMode = "walk" | "drive";
+
+type CustomMixStop = {
+  id: string;
+  title: string;
+  lat: number;
+  lng: number;
+  image: string;
+};
+
+type CustomRouteResponse = {
+  route: {
+    id: string;
+    title: string;
+    length_minutes: number;
+    transport_mode: TransportMode;
+    status: "generating" | "ready" | "failed";
+  };
+  stops: Array<{
+    stop_id: string;
+    title: string;
+    lat: number;
+    lng: number;
+    image_url: string | null;
+    script_adult: string | null;
+    script_preteen: string | null;
+    audio_url_adult: string | null;
+    audio_url_preteen: string | null;
+    position: number;
+  }>;
+};
+
+type MixJobResponse = {
+  id: string;
+  status: "queued" | "generating_script" | "generating_audio" | "ready" | "failed";
+  progress: number;
+  message: string | null;
+  error: string | null;
+  jam_id: string;
+  route_id: string;
+};
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -77,6 +119,13 @@ function formatRouteMiles(miles: number) {
   return `${miles.toFixed(miles < 1 ? 2 : 1)} mi`;
 }
 
+function formatAudioTime(seconds: number) {
+  if (!isFinite(seconds) || seconds < 0) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
 export default function HomeClient() {
   const [distanceToStopM, setDistanceToStopM] = useState<number | null>(null);
 const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
@@ -87,6 +136,16 @@ const [audioDuration, setAudioDuration] = useState(0);
 const [connectedCount, setConnectedCount] = useState(0);
 const [selectedRouteId, setSelectedRouteId] = useState<RouteDef["id"] | null>(null);
 const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
+const [selectedCity, setSelectedCity] = useState<CityOption>("salem");
+const [transportMode, setTransportMode] = useState<TransportMode>("walk");
+const [selectedLengthMinutes, setSelectedLengthMinutes] = useState<number>(30);
+const [builderSelectedStops, setBuilderSelectedStops] = useState<CustomMixStop[]>([]);
+const [isGeneratingMix, setIsGeneratingMix] = useState(false);
+const [generationJobId, setGenerationJobId] = useState<string | null>(null);
+const [generationProgress, setGenerationProgress] = useState(0);
+const [generationStatusLabel, setGenerationStatusLabel] = useState("Queued");
+const [generationMessage, setGenerationMessage] = useState("Queued");
+const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -103,7 +162,10 @@ const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
   const jamIdFromUrl = searchParams.get("jam");
 
   // Derive route + stop from jam
-  const route: RouteDef | null = useMemo(() => getRouteById(jam?.route_id ?? null), [jam?.route_id]);
+  const route: RouteDef | null = useMemo(
+    () => customRoute ?? getRouteById(jam?.route_id ?? null),
+    [customRoute, jam?.route_id]
+  );
   const persona: Persona = (jam?.persona ?? "adult") as Persona;
 
   const currentStopIndex = useMemo(() => {
@@ -113,7 +175,6 @@ const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
   }, [jam?.current_stop, route]);
 
   const currentStop = route ? route.stops[currentStopIndex] : null;
-  const nextStop = route ? route.stops[currentStopIndex + 1] : null;
   const routeMilesLabel = useMemo(() => {
     if (!route) return "";
     return formatRouteMiles(getRouteMiles(route.stops));
@@ -122,13 +183,51 @@ const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
     () => (selectedRouteId ? salemRoutes.find((r) => r.id === selectedRouteId) ?? null : null),
     [selectedRouteId]
   );
+  const selectedCityLabel = useMemo(
+    () => (selectedCity === "salem" ? "Salem" : selectedCity === "boston" ? "Boston" : "Concord"),
+    [selectedCity]
+  );
+  const selectedCityCenter = useMemo(
+    () =>
+      selectedCity === "salem"
+        ? { lat: 42.5195, lng: -70.8967 }
+        : selectedCity === "boston"
+          ? { lat: 42.3601, lng: -71.0589 }
+          : { lat: 42.4604, lng: -71.3489 },
+    [selectedCity]
+  );
+  const availableStopsForCity = useMemo<CustomMixStop[]>(() => {
+    if (selectedCity !== "salem") return [];
+    const byId = new Map<string, CustomMixStop>();
+    for (const r of salemRoutes) {
+      for (const s of r.stops) {
+        if (byId.has(s.id)) continue;
+        byId.set(s.id, {
+          id: s.id,
+          title: s.title,
+          lat: s.lat,
+          lng: s.lng,
+          image: s.images[0] ?? "/images/salem/placeholder-01.png",
+        });
+      }
+    }
+    return Array.from(byId.values());
+  }, [selectedCity]);
+  const maxStopsForSelection = useMemo(
+    () => getMaxStops(selectedLengthMinutes, transportMode),
+    [selectedLengthMinutes, transportMode]
+  );
+  const selectionValidation = useMemo(
+    () => validateMixSelection(selectedLengthMinutes, transportMode, builderSelectedStops.length),
+    [selectedLengthMinutes, transportMode, builderSelectedStops.length]
+  );
 
   // ---------- Supabase: load jam ----------
   async function loadJamById(id: string) {
     setErr(null);
     const { data, error } = await supabase
       .from("jams")
-      .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms,preset_id")
+      .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms")
       .eq("id", id)
       .single();
 
@@ -159,7 +258,6 @@ const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
       current_stop?: number;
       is_playing?: boolean;
       position_ms?: number;
-      preset_id?: string | null;
     } = {
       host_name: "Rob",
       route_id: routeId ?? null,
@@ -169,13 +267,12 @@ const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
       // legacy
       is_playing: false,
       position_ms: 0,
-      preset_id: null,
     };
 
     const { data, error } = await supabase
       .from("jams")
       .insert(insertRow)
-      .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms,preset_id")
+      .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms")
       .single();
 
     if (error) return setErr(error.message);
@@ -198,7 +295,7 @@ const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
       .from("jams")
       .update(patch)
       .eq("id", jam.id)
-      .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms,preset_id")
+      .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms")
       .single();
 
     if (error) return setErr(error.message);
@@ -213,8 +310,55 @@ const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
   function goHome() {
     router.replace("/");
     setJam(null);
+    setCustomRoute(null);
     setStep("landing");
   }
+
+  function getCustomRouteId(routeRef: string | null | undefined) {
+    if (!routeRef?.startsWith("custom:")) return null;
+    return routeRef.slice("custom:".length) || null;
+  }
+
+  function getGenerationStatusLabel(status: MixJobResponse["status"]) {
+    if (status === "queued") return "Queued";
+    if (status === "generating_script") return "Generating script";
+    if (status === "generating_audio") return "Generating audio";
+    if (status === "ready") return "Ready";
+    return "Failed";
+  }
+
+  const loadCustomRoute = useCallback(async (routeRef: string) => {
+    const customRouteId = getCustomRouteId(routeRef);
+    if (!customRouteId) {
+      setCustomRoute(null);
+      return;
+    }
+    const res = await fetch(`/api/custom-routes/${customRouteId}`);
+    if (!res.ok) throw new Error("Failed to load custom route");
+    const payload = (await res.json()) as CustomRouteResponse;
+    const nextRoute: RouteDef = {
+      id: routeRef,
+      title: payload.route.title,
+      durationLabel: `${payload.route.length_minutes} min`,
+      description: `${payload.route.transport_mode === "drive" ? "Drive" : "Walk"} • ${payload.stops.length} stops`,
+      stops: payload.stops.map((s, idx) => ({
+        id: s.stop_id || `custom-${idx}`,
+        title: s.title,
+        lat: s.lat,
+        lng: s.lng,
+        images: [s.image_url || "/images/salem/placeholder-01.png"],
+        audio: {
+          adult: s.audio_url_adult || "/audio/adult-01.mp3",
+          preteen: s.audio_url_preteen || "/audio/kid-01.mp3",
+        },
+        text: {
+          adult: s.script_adult || "",
+          preteen: s.script_preteen || "",
+        },
+      })),
+    };
+    setCustomRoute(nextRoute);
+  }, []);
 
   // ---------- "Start stop” handler ----------
 async function startStopNarration() {
@@ -248,27 +392,6 @@ async function startStopNarration() {
   }
 
   // ---------- Step transitions ----------
-  function requestGeo() {
-    setErr(null);
-
-    if (!navigator.geolocation) {
-      setGeoAllowed(false);
-      setMyPos(null);
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setGeoAllowed(true);
-        setMyPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      },
-      () => {
-        setGeoAllowed(false);
-        setMyPos(null);
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  }
 
   async function startTourFromSelection() {
     if (!selectedRouteId || !selectedPersona) return;
@@ -287,18 +410,66 @@ async function startStopNarration() {
     setStep("walk");
   }
 
-  async function nextStopAction() {
-    if (!jam || !route) return;
+  function toggleBuilderStop(stop: CustomMixStop) {
+    setErr(null);
+    setBuilderSelectedStops((prev) => {
+      const exists = prev.some((s) => s.id === stop.id);
+      if (exists) return prev.filter((s) => s.id !== stop.id);
+      const nextMaxStops = getMaxStops(selectedLengthMinutes, transportMode);
+      if (nextMaxStops > 0 && prev.length >= nextMaxStops) {
+        setErr(`Select at most ${nextMaxStops} stops for ${selectedLengthMinutes} min ${transportMode} tours.`);
+        return prev;
+      }
+      return [...prev, stop];
+    });
+  }
 
-    const lastIdx = route.stops.length - 1;
-    if ((jam.current_stop ?? 0) >= lastIdx) {
-      // finish
-      await updateJam({ completed_at: new Date().toISOString() });
-      setStep("end");
+  async function startCustomMixGeneration() {
+    if (!builderSelectedStops.length || !selectedPersona) return;
+    const validation = validateMixSelection(selectedLengthMinutes, transportMode, builderSelectedStops.length);
+    if (!validation.ok) {
+      setErr(validation.message);
       return;
     }
 
-    await updateJam({ current_stop: (jam.current_stop ?? 0) + 1 });
+    setErr(null);
+    setIsGeneratingMix(true);
+    setStep("generating");
+
+    try {
+      const res = await fetch("/api/mix-jobs/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jamId: jam?.id ?? null,
+          city: selectedCity,
+          transportMode,
+          lengthMinutes: selectedLengthMinutes,
+          persona: selectedPersona,
+          stops: builderSelectedStops,
+        }),
+      });
+      const body = (await res.json()) as { error?: string; jamId?: string; jobId?: string };
+      if (!res.ok) {
+        throw new Error(body.error || "Failed to start mix generation");
+      }
+      if (!body.jamId || !body.jobId) {
+        throw new Error("Missing generation job metadata");
+      }
+      setGenerationJobId(body.jobId);
+      setGenerationProgress(0);
+      setGenerationStatusLabel("Queued");
+      setGenerationMessage("Queued");
+      router.replace(`/?jam=${body.jamId}`);
+      if (!jam || jam.id !== body.jamId) {
+        await loadJamById(body.jamId);
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to generate custom mix");
+      setStep("buildMix");
+    } finally {
+      setIsGeneratingMix(false);
+    }
   }
 
   async function restartWalk() {
@@ -311,18 +482,94 @@ async function startStopNarration() {
   useEffect(() => {
     if (!jamIdFromUrl) {
       setJam(null);
+      setCustomRoute(null);
       setStep("landing");
       return;
     }
     loadJamById(jamIdFromUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jamIdFromUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      const routeRef = jam?.route_id ?? null;
+      if (!routeRef?.startsWith("custom:")) {
+        setCustomRoute(null);
+        return;
+      }
+      try {
+        await loadCustomRoute(routeRef);
+      } catch (e) {
+        if (!cancelled) {
+          setErr(e instanceof Error ? e.message : "Failed to load custom route");
+          setCustomRoute(null);
+        }
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [jam?.route_id, loadCustomRoute]);
+
+  useEffect(() => {
+    if (step !== "generating" || !generationJobId) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/mix-jobs/${generationJobId}`, { cache: "no-store" });
+        const body = (await res.json()) as MixJobResponse | { error?: string };
+        if (!res.ok || !("status" in body)) {
+          throw new Error(("error" in body && body.error) || "Failed to poll generation status");
+        }
+        if (cancelled) return;
+
+        const nextProgress = Math.max(0, Math.min(100, Number(body.progress) || 0));
+        setGenerationProgress(nextProgress);
+        setGenerationStatusLabel(getGenerationStatusLabel(body.status));
+        setGenerationMessage(body.message || "");
+
+        if (body.status === "ready") {
+          setGenerationJobId(null);
+          await loadJamById(body.jam_id);
+          return;
+        }
+        if (body.status === "failed") {
+          setGenerationJobId(null);
+          setErr(body.error || body.message || "Generation failed");
+          setGenerationProgress(100);
+          setGenerationStatusLabel("Failed");
+          setGenerationMessage(body.error || body.message || "Generation failed");
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setGenerationJobId(null);
+          const message = e instanceof Error ? e.message : "Failed to poll generation status";
+          setErr(message);
+          setGenerationProgress(100);
+          setGenerationStatusLabel("Failed");
+          setGenerationMessage(message);
+        }
+      }
+    };
+
+    void poll();
+    const interval = window.setInterval(() => {
+      void poll();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [step, generationJobId]);
 
 // ---------- watchPosition ----------
   useEffect(() => {
   if (step !== "walk") return;
   if (!navigator.geolocation) return;
-  if (!route || !currentStop) return;
+  if (!currentStop) return;
 
   // If user never enabled geo, don't nag; banner will stay hidden.
   let watchId: number | null = null;
@@ -354,7 +601,7 @@ async function startStopNarration() {
   return () => {
     if (watchId !== null) navigator.geolocation.clearWatch(watchId);
   };
-}, [step, route?.id, currentStop?.id]);
+}, [step, currentStop]);
 
   useEffect(() => {
     const el = audioRef.current;
@@ -389,10 +636,21 @@ async function startStopNarration() {
 
   useEffect(() => {
     if (step !== "pickDuration") return;
-    const jamRoute = (jam?.route_id as RouteDef["id"] | null) ?? null;
-    setSelectedRouteId(jamRoute);
-    setSelectedPersona(jamRoute ? ((jam?.persona as Persona | null) ?? null) : null);
-  }, [step, jam?.route_id, jam?.persona]);
+    setSelectedRouteId(null);
+    setSelectedPersona(null);
+  }, [step]);
+
+  useEffect(() => {
+    if (step !== "buildMix") return;
+    setBuilderSelectedStops([]);
+    setSelectedPersona("adult");
+    setTransportMode("walk");
+    setSelectedLengthMinutes(30);
+    setGenerationJobId(null);
+    setGenerationProgress(0);
+    setGenerationStatusLabel("Queued");
+    setGenerationMessage("Queued");
+  }, [step]);
 
   useEffect(() => {
     if (!jam?.id) {
@@ -430,16 +688,10 @@ async function startStopNarration() {
     };
   }, [jam?.id]);
 
-  // ---------- Distance/ETA to next stop ----------
-  const nextCue = useMemo(() => {
-    if (!myPos || !nextStop) return null;
-    const meters = haversineMeters(myPos.lat, myPos.lng, nextStop.lat, nextStop.lng);
-    return {
-      meters,
-      dist: formatDistance(meters),
-      mins: estimateWalkMinutes(meters),
-    };
-  }, [myPos, nextStop]);
+  useEffect(() => {
+    if (step !== "walk") return;
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [step]);
 
   const stopList = useMemo(() => {
     if (!route) return [];
@@ -475,7 +727,7 @@ async function startStopNarration() {
 
   // ---------- UI ----------
   return (
-    <div className={`${styles.container} ${step === "walk" || step === "landing" || step === "pickDuration" ? styles.containerWide : ""}`}>
+    <div className={`${styles.container} ${step === "walk" || step === "landing" || step === "pickDuration" || step === "buildMix" || step === "generating" ? styles.containerWide : ""}`}>
       {step !== "walk" && step !== "landing" && step !== "pickDuration" && (
         <header className={styles.header}>
           <div>
@@ -516,7 +768,14 @@ async function startStopNarration() {
 
             <div className={styles.landingPopular}>Popular mix tours:</div>
 
-            <button className={styles.landingTourRow} type="button" onClick={() => createJam()}>
+            <button
+              className={styles.landingTourRow}
+              type="button"
+              onClick={() => {
+                setSelectedCity("salem");
+                setStep("pickDuration");
+              }}
+            >
               <div className={styles.landingTourText}>
                 <div className={styles.landingTourTitle}>Salem</div>
               </div>
@@ -532,7 +791,13 @@ async function startStopNarration() {
  
 
             <div className={styles.landingCtaWrap}>
-              <button onClick={() => createJam()} className={styles.landingCtaButton}>
+              <button
+                onClick={() => {
+                  setSelectedCity("salem");
+                  setStep("pickDuration");
+                }}
+                className={styles.landingCtaButton}
+              >
                 Create your own mix tour
               </button>
             </div>
@@ -569,7 +834,7 @@ async function startStopNarration() {
           <section className={styles.pickInfo}>
             <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>MixTours</button>
             <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>How long do you have?</h2>
+              <h2 className={styles.pickHeading}>How long do you have in {selectedCityLabel}?</h2>
             </div>
 
             <div className={styles.pickRouteList}>
@@ -608,14 +873,14 @@ async function startStopNarration() {
                 onClick={() => setSelectedPersona("adult")}
                 className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
               >
-                <div className={styles.pickRouteTitle}>Historian</div>
+                <div className={styles.pickRouteTitle}>AI Historian</div>
                 <div className={styles.pickNarratorSub}>Lorem ispum</div>
               </button>
               <button
                 onClick={() => setSelectedPersona("preteen")}
                 className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
               >
-                <div className={styles.pickRouteTitle}>Main Character</div>
+                <div className={styles.pickRouteTitle}>AI Main Character</div>
                 <div className={styles.pickNarratorSub}>Lorem ispum</div>
               </button>
             </div>
@@ -628,15 +893,176 @@ async function startStopNarration() {
               >
                 Start Tour
               </button>
+              <button
+                onClick={() => setStep("buildMix")}
+                className={styles.pickBuildMixButton}
+              >
+                Build your own mix
+              </button>
             </div>
           </section>
 
           <section className={styles.pickImagePane}>
-            {selectedRoute ? (
-              <RouteMap stops={selectedRoute.stops} currentStopIndex={0} myPos={myPos} />
-            ) : (
-              <div className={styles.pickImagePlaceholder} aria-hidden="true" />
-            )}
+            <RouteMap
+              stops={selectedRoute ? selectedRoute.stops : []}
+              currentStopIndex={0}
+              myPos={myPos}
+              cityCenter={selectedCityCenter}
+            />
+          </section>
+        </main>
+      )}
+
+      {step === "buildMix" && (
+        <main className={styles.pickLayout}>
+          <section className={styles.pickInfo}>
+            <button type="button" onClick={() => setStep("pickDuration")} className={`${styles.brandLink} ${styles.landingBrand}`}>
+              MixTours
+            </button>
+            <div className={styles.pickCopyBlock}>
+              <h2 className={styles.pickHeading}>Create your own mix in {selectedCityLabel}</h2>
+            </div>
+
+            <div className={styles.pickSectionLabel}>Transportation</div>
+            <div className={styles.pickPersonaRow}>
+              <button
+                onClick={() => setTransportMode("walk")}
+                className={`${styles.pickNarratorOption} ${transportMode === "walk" ? styles.pickNarratorOptionSelected : ""}`}
+              >
+                <div className={styles.pickRouteTitle}>Walk</div>
+                <div className={styles.pickNarratorSub}>Curated walking route</div>
+              </button>
+              <button
+                onClick={() => setTransportMode("drive")}
+                className={`${styles.pickNarratorOption} ${transportMode === "drive" ? styles.pickNarratorOptionSelected : ""}`}
+              >
+                <div className={styles.pickRouteTitle}>Drive</div>
+                <div className={styles.pickNarratorSub}>City drive-through mix</div>
+              </button>
+            </div>
+
+            <div className={styles.pickSectionLabel}>Length of stay</div>
+            <div className={styles.pickLengthRow}>
+              {[15, 30, 60].map((min) => (
+                <button
+                  key={min}
+                  onClick={() => setSelectedLengthMinutes(min)}
+                  className={`${styles.pickLengthButton} ${selectedLengthMinutes === min ? styles.pickLengthButtonSelected : ""}`}
+                >
+                  {min} min
+                </button>
+              ))}
+            </div>
+
+            <div className={styles.pickSectionLabel}>Narrator</div>
+            <div className={styles.pickPersonaRow}>
+              <button
+                onClick={() => setSelectedPersona("adult")}
+                className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
+              >
+                <div className={styles.pickRouteTitle}>AI Historian</div>
+                <div className={styles.pickNarratorSub}>Context and facts</div>
+              </button>
+              <button
+                onClick={() => setSelectedPersona("preteen")}
+                className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
+              >
+                <div className={styles.pickRouteTitle}>AI Main Character</div>
+                <div className={styles.pickNarratorSub}>Story-led and playful</div>
+              </button>
+            </div>
+
+            <div className={styles.pickSectionLabel}>
+              Choose stops ({builderSelectedStops.length}/{maxStopsForSelection || 0} selected)
+            </div>
+            <div className={styles.pickLimitHint}>
+              Max {maxStopsForSelection || 0} stops for {selectedLengthMinutes} min {transportMode} tour.
+            </div>
+            <div className={styles.pickRouteList}>
+              {availableStopsForCity.map((stop) => {
+                const active = builderSelectedStops.some((s) => s.id === stop.id);
+                return (
+                  <button
+                    key={stop.id}
+                    onClick={() => toggleBuilderStop(stop)}
+                    className={`${styles.pickRouteRow} ${active ? styles.pickRouteRowSelected : ""}`}
+                  >
+                    <div className={styles.pickRouteMain}>
+                      <div className={styles.pickRouteTitle}>{stop.title}</div>
+                      <div className={styles.pickRouteMeta}>{active ? "Selected" : "Tap to add stop"}</div>
+                    </div>
+                    <div className={styles.pickRouteArrow}>{active ? "✓" : "+"}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className={styles.pickDurationStartWrap}>
+              <button
+                onClick={startCustomMixGeneration}
+                disabled={!selectionValidation.ok || !selectedPersona || isGeneratingMix}
+                className={styles.landingCtaButton}
+              >
+                Generate & Start Tour
+              </button>
+            </div>
+          </section>
+          <section className={styles.pickImagePane}>
+            <RouteMap
+              stops={builderSelectedStops}
+              currentStopIndex={0}
+              myPos={myPos}
+              cityCenter={selectedCityCenter}
+            />
+          </section>
+        </main>
+      )}
+
+      {step === "generating" && (
+        <main className={styles.pickLayout}>
+          <section className={styles.pickInfo}>
+            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>MixTours</button>
+            <div className={styles.pickCopyBlock}>
+              <h2 className={styles.pickHeading}>Generating your mix...</h2>
+              <p className={styles.pickCopy}>
+                We are creating AI narration and preparing audio for your selected stops. This can take a few moments.
+              </p>
+              <div className={styles.generationStatusWrap}>
+                <div className={styles.generationStatusLine}>
+                  <span>{generationStatusLabel}</span>
+                  <span>{generationProgress}%</span>
+                </div>
+                <div className={styles.generationProgressBar}>
+                  <div
+                    className={styles.generationProgressFill}
+                    style={{ width: `${generationProgress}%` }}
+                  />
+                </div>
+                <div className={styles.generationStatusMessage}>{generationMessage}</div>
+                {generationStatusLabel === "Failed" && (
+                  <div className={styles.pickDurationStartWrap}>
+                    <button
+                      type="button"
+                      onClick={startCustomMixGeneration}
+                      disabled={isGeneratingMix}
+                      className={styles.landingCtaButton}
+                    >
+                      Retry generation
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStep("buildMix")}
+                      className={styles.pickBuildMixButton}
+                    >
+                      Back to editor
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+          <section className={styles.pickImagePane}>
+            <div className={styles.pickImagePlaceholder} aria-hidden="true" />
           </section>
         </main>
       )}
@@ -657,7 +1083,9 @@ async function startStopNarration() {
             <div className={styles.walkCard}>
               <div className={styles.walkMetaRow}>
                 <div className={styles.walkDot} />
-                <div className={styles.walkNarrator}>{persona === "adult" ? "Historian Narrative" : "Main Character Narrative"}</div>
+                <div className={styles.walkNarrator}>
+                  Narrated by {persona === "adult" ? "AI Historian" : "AI Main Character"}
+                </div>
               </div>
             <h1 className={styles.walkHeadline}>{route.title}</h1>
             <div className={styles.walkSubline}>
@@ -707,7 +1135,7 @@ async function startStopNarration() {
                 <div className={styles.nowPlayingMeta}>
                   <div className={styles.nowPlayingTitle}>{currentStop.title}</div>
                   <div className={styles.nowPlayingSubtitle}>
-                    {nextStop && nextCue ? `Next: ${nextCue.mins} min walk away` : "At this location"}
+                    {formatAudioTime(audioTime)} / {formatAudioTime(audioDuration)}
                   </div>
                 </div>
                 <button

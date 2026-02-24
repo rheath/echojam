@@ -17,9 +17,10 @@ type Props = {
   stops: Stop[];
   currentStopIndex: number;
   myPos?: { lat: number; lng: number } | null;
+  cityCenter?: { lat: number; lng: number } | null;
 };
 
-export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
+export default function RouteMap({ stops, currentStopIndex, myPos, cityCenter }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
@@ -77,18 +78,17 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
     async function init() {
       if (!containerRef.current) return;
       if (mapRef.current) return;
-      if (!stops.length) return;
 
       const maplibregl = await import("maplibre-gl");
       if (cancelled) return;
 
-      const first = stops[0];
+      const first = stops[0] ?? cityCenter ?? { lat: 42.5195, lng: -70.8967 };
 
       const map = new maplibregl.Map({
         container: containerRef.current,
         style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
         center: [first.lng, first.lat],
-        zoom: 15,
+        zoom: stops.length ? 15 : 13,
         attributionControl: { compact: true },
       });
 
@@ -98,86 +98,88 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
       map.on("load", () => {
         if (cancelled) return;
 
-        // Route line
-        map.addSource("route", {
-          type: "geojson",
-          data: routeGeoJSON(stops, null, "loading"),
-        });
+        if (stops.length) {
+          // Route line
+          map.addSource("route", {
+            type: "geojson",
+            data: routeGeoJSON(stops, null, "loading"),
+          });
 
-        map.addLayer({
-          id: "route-line-underlay",
-          type: "line",
-          source: "route",
-          paint: {
-            "line-color": "#ffffff",
-            "line-width": 8,
-            "line-opacity": 0.8,
-          },
-        });
+          map.addLayer({
+            id: "route-line-underlay",
+            type: "line",
+            source: "route",
+            paint: {
+              "line-color": "#ffffff",
+              "line-width": 8,
+              "line-opacity": 0.8,
+            },
+          });
 
-        map.addLayer({
-          id: "route-line",
-          type: "line",
-          source: "route",
-          paint: {
-            "line-color": "#2b1b3f",
-            "line-width": 5,
-            "line-opacity": 0.9,
-          },
-        });
+          map.addLayer({
+            id: "route-line",
+            type: "line",
+            source: "route",
+            paint: {
+              "line-color": "#2b1b3f",
+              "line-width": 5,
+              "line-opacity": 0.9,
+            },
+          });
 
-        // Stops
-        map.addSource("stops", {
-          type: "geojson",
-          data: stopsGeoJSON(stops, 0),
-        });
+          // Stops
+          map.addSource("stops", {
+            type: "geojson",
+            data: stopsGeoJSON(stops, 0),
+          });
 
-        map.addLayer({
-          id: "stops-circle",
-          type: "circle",
-          source: "stops",
-          paint: {
-            "circle-color": [
-              "match",
-              ["get", "status"],
-              "current",
-              "#ff5f92",
-              "visited",
-              "#8e93a3",
-              "#2b1b3f",
-            ],
-            "circle-radius": [
-              "match",
-              ["get", "status"],
-              "current",
-              10,
-              7,
-            ],
-            "circle-stroke-color": "#ffffff",
-            "circle-stroke-width": 2,
-            "circle-opacity": 0.95,
-          },
-        });
+          map.addLayer({
+            id: "stops-circle",
+            type: "circle",
+            source: "stops",
+            paint: {
+              "circle-color": [
+                "match",
+                ["get", "status"],
+                "current",
+                "#ff5f92",
+                "visited",
+                "#8e93a3",
+                "#2b1b3f",
+              ],
+              "circle-radius": [
+                "match",
+                ["get", "status"],
+                "current",
+                10,
+                7,
+              ],
+              "circle-stroke-color": "#ffffff",
+              "circle-stroke-width": 2,
+              "circle-opacity": 0.95,
+            },
+          });
 
-        map.addLayer({
-          id: "stops-label",
-          type: "symbol",
-          source: "stops",
-          layout: {
-            "text-field": ["get", "label"],
-            "text-size": 11,
-            "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
-          },
-          paint: {
-            "text-color": [
-              "match",
-              ["get", "status"],
-              "current",
-              "#111111",
-              "#ffffff",
-            ],
-          },
-        });
+          map.addLayer({
+            id: "stops-label",
+            type: "symbol",
+            source: "stops",
+            layout: {
+              "text-field": ["get", "label"],
+              "text-size": 11,
+              "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+            },
+            paint: {
+              "text-color": [
+                "match",
+                ["get", "status"],
+                "current",
+                "#111111",
+                "#ffffff",
+              ],
+            },
+          });
+        }
 
         // My position
         map.addSource("me", {
@@ -198,31 +200,33 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
           },
         });
 
-        map.on("mouseenter", "stops-circle", () => {
-          map.getCanvas().style.cursor = "pointer";
-        });
+        if (stops.length) {
+          map.on("mouseenter", "stops-circle", () => {
+            map.getCanvas().style.cursor = "pointer";
+          });
 
-        map.on("mouseleave", "stops-circle", () => {
-          map.getCanvas().style.cursor = "";
-        });
+          map.on("mouseleave", "stops-circle", () => {
+            map.getCanvas().style.cursor = "";
+          });
 
-        map.on("click", "stops-circle", (e) => {
-          const feature = e.features?.[0];
-          if (!feature || feature.geometry.type !== "Point") return;
+          map.on("click", "stops-circle", (e) => {
+            const feature = e.features?.[0];
+            if (!feature || feature.geometry.type !== "Point") return;
 
-          const props = feature.properties ?? {};
-          const title = typeof props.title === "string" ? props.title : "Stop";
-          const subtitle = typeof props.subtitle === "string" ? props.subtitle : "";
-          const image = typeof props.image === "string" ? props.image : "";
-          const coordinates = feature.geometry.coordinates as [number, number];
+            const props = feature.properties ?? {};
+            const title = typeof props.title === "string" ? props.title : "Stop";
+            const subtitle = typeof props.subtitle === "string" ? props.subtitle : "";
+            const image = typeof props.image === "string" ? props.image : "";
+            const coordinates = feature.geometry.coordinates as [number, number];
 
-          new maplibregl.Popup({ closeButton: false, offset: 14 })
-            .setLngLat(coordinates)
-            .setDOMContent(buildStopPopupContent(title, subtitle, image))
-            .addTo(map);
-        });
+            new maplibregl.Popup({ closeButton: false, offset: 14 })
+              .setLngLat(coordinates)
+              .setDOMContent(buildStopPopupContent(title, subtitle, image))
+              .addTo(map);
+          });
 
-        fitMapToPoints(map, stops, null);
+          fitMapToPoints(map, stops, null);
+        }
       });
     }
 
@@ -233,7 +237,7 @@ export default function RouteMap({ stops, currentStopIndex, myPos }: Props) {
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [stops]);
+  }, [stops, cityCenter]);
 
   useEffect(() => {
     const onResize = () => mapRef.current?.resize();
