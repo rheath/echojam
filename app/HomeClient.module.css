@@ -249,7 +249,8 @@
 
 .walkHeadline {
   margin: 0;
-  font-size: 58px;
+  font-size: 44px;
+  font-weight: 700;
   line-height: 0.98;
   letter-spacing: -0.02em;
 }
@@ -271,13 +272,15 @@
 }
 
 .pillButton {
-  flex: 1;
+  flex: 0 0 170px;
+  width: 170px;
   border: 0;
   border-radius: 999px;
   background: #4a4a52;
   color: #fff;
   padding: 12px 16px;
   font-size: 16px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -324,7 +327,7 @@
 }
 
 .stopTitle {
-  font-size: 44px;
+  font-size: 24px;
   font-weight: 700;
   opacity: 0.9;
 }
@@ -334,7 +337,7 @@
 }
 
 .stopSubtitle {
-  font-size: 28px;
+  font-size: 16px;
   opacity: 0.84;
 }
 
@@ -352,12 +355,12 @@
 }
 
 .nowPlayingTitle {
-  font-size: 40px;
+  font-size: 24px;
   font-weight: 700;
 }
 
 .nowPlayingSubtitle {
-  font-size: 28px;
+  font-size: 16px;
   opacity: 0.85;
 }
 
@@ -533,28 +536,8 @@
     font-size: 16px;
   }
 
-  .walkHeadline {
-    font-size: 54px;
-  }
-
   .walkSubline {
     gap: 10px;
-  }
-
-  .stopTitle {
-    font-size: 34px;
-  }
-
-  .stopSubtitle {
-    font-size: 22px;
-  }
-
-  .nowPlayingTitle {
-    font-size: 34px;
-  }
-
-  .nowPlayingSubtitle {
-    font-size: 20px;
   }
 
   .nowPlayingBar {
@@ -599,14 +582,6 @@
 
   .walkActionRow {
     align-items: center;
-  }
-
-  .stopTitle {
-    font-size: 44px;
-  }
-
-  .stopSubtitle {
-    font-size: 30px;
   }
 
   .nowPlayingBar {
