@@ -23,6 +23,15 @@
   font-weight: 700;
 }
 
+.brandLink {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
 .mutedSmall {
   opacity: 0.7;
   font-size: 13px;
@@ -206,6 +215,123 @@
   background: #c9c9cc;
 }
 
+.pickLayout {
+  min-height: 100vh;
+  background: #07080c;
+  color: #f4f4f6;
+  display: grid;
+  grid-template-columns: 42% 58%;
+}
+
+.pickInfo {
+  padding: 34px 32px 28px;
+  display: flex;
+  flex-direction: column;
+}
+
+.pickCopyBlock {
+  margin-top: 68px;
+}
+
+.pickHeading {
+  margin: 0;
+  font-size: 44px;
+  line-height: 1.05;
+  font-weight: 700;
+}
+
+.pickCopy {
+  margin: 10px 0 0;
+  font-size: 17px;
+  line-height: 1.45;
+  max-width: 560px;
+  opacity: 0.95;
+}
+
+.pickSectionLabel {
+  margin-top: 30px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.pickRouteList {
+  margin-top: 10px;
+}
+
+.pickRouteRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 0;
+  border-bottom: 1px solid #34353b;
+  background: transparent;
+  color: inherit;
+  padding: 12px 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pickRouteRowSelected {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.pickRouteMain {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pickRouteTitle {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.pickRouteMeta {
+  font-size: 16px;
+  opacity: 0.82;
+}
+
+.pickRouteArrow {
+  font-size: 44px;
+  line-height: 1;
+  opacity: 0.92;
+}
+
+.pickPersonaRow {
+  margin-top: 10px;
+  display: flex;
+  gap: 12px;
+}
+
+.pickPersonaButton {
+  border: 1px solid #5a5b61;
+  border-radius: 999px;
+  background: #3f4148;
+  color: #fff;
+  padding: 10px 22px;
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.pickPersonaSelected {
+  opacity: 1;
+  border-color: #fff;
+}
+
+.pickImagePane {
+  min-height: 100%;
+}
+
+.pickImagePlaceholder {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  background: #c9c9cc;
+}
+
 .proximityBanner {
   margin-top: 10px;
   padding: 12px;
@@ -245,6 +371,11 @@
   background: #fff;
 }
 
+.routeCardSelected {
+  border-color: #111;
+  box-shadow: inset 0 0 0 1px #111;
+}
+
 .routeDuration {
   font-size: 14px;
   opacity: 0.7;
@@ -269,6 +400,10 @@
 
 .narrationBlock {
   margin-top: 18px;
+}
+
+.pickDurationStartWrap {
+  margin-top: 16px;
 }
 
 .narrationLabel {
@@ -707,6 +842,46 @@
 
   .landingCtaWrap {
     margin-top: 24px;
+  }
+
+  .pickLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .pickImagePane {
+    order: 1;
+    min-height: 320px;
+  }
+
+  .pickInfo {
+    order: 2;
+    padding: 20px 24px 30px;
+  }
+
+  .pickCopyBlock {
+    margin-top: 0;
+  }
+
+  .pickHeading {
+    font-size: 40px;
+  }
+
+  .pickSectionLabel {
+    margin-top: 24px;
+  }
+
+  .pickRouteTitle {
+    font-size: 32px;
+  }
+
+  .pickRouteArrow {
+    font-size: 54px;
+  }
+
+  .pickDurationStartWrap {
+    margin-top: 24px;
+    display: flex;
+    justify-content: center;
   }
 
   .walkLayout {

@@ -85,6 +85,8 @@ const [isPlaying, setIsPlaying] = useState(false);
 const [audioTime, setAudioTime] = useState(0);
 const [audioDuration, setAudioDuration] = useState(0);
 const [connectedCount, setConnectedCount] = useState(0);
+const [selectedRouteId, setSelectedRouteId] = useState<RouteDef["id"] | null>(null);
+const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -116,6 +118,10 @@ const [connectedCount, setConnectedCount] = useState(0);
     if (!route) return "";
     return formatRouteMiles(getRouteMiles(route.stops));
   }, [route]);
+  const selectedRoute = useMemo(
+    () => (selectedRouteId ? salemRoutes.find((r) => r.id === selectedRouteId) ?? null : null),
+    [selectedRouteId]
+  );
 
   // ---------- Supabase: load jam ----------
   async function loadJamById(id: string) {
@@ -142,7 +148,7 @@ const [connectedCount, setConnectedCount] = useState(0);
   }
 
   // ---------- Supabase: create jam ----------
-  async function createJam(routeId?: string) {
+  async function createJam(routeId?: string, personaValue: Persona = "adult") {
     setErr(null);
 
     // If routeId provided we can jump straight to walk; otherwise we’ll go to pickDuration.
@@ -157,7 +163,7 @@ const [connectedCount, setConnectedCount] = useState(0);
     } = {
       host_name: "Rob",
       route_id: routeId ?? null,
-      persona: "adult",
+      persona: personaValue,
       current_stop: 0,
 
       // legacy
@@ -202,6 +208,12 @@ const [connectedCount, setConnectedCount] = useState(0);
   async function copyShareLink() {
     if (!jam) return;
     await navigator.clipboard?.writeText(`${window.location.origin}/?jam=${jam.id}`);
+  }
+
+  function goHome() {
+    router.replace("/");
+    setJam(null);
+    setStep("landing");
   }
 
   // ---------- "Start stop” handler ----------
@@ -258,19 +270,21 @@ async function startStopNarration() {
     );
   }
 
-  async function chooseRoute(routeId: RouteDef["id"]) {
+  async function startTourFromSelection() {
+    if (!selectedRouteId || !selectedPersona) return;
+
     if (!jam) {
-      // Create jam already tied to this route
-      await createJam(routeId);
+      await createJam(selectedRouteId, selectedPersona);
       return;
     }
-    await updateJam({ route_id: routeId, current_stop: 0, completed_at: null });
-    setStep("walk");
-  }
 
-  async function setPersona(nextPersona: Persona) {
-    if (!jam) return;
-    await updateJam({ persona: nextPersona });
+    await updateJam({
+      route_id: selectedRouteId,
+      persona: selectedPersona,
+      current_stop: 0,
+      completed_at: null,
+    });
+    setStep("walk");
   }
 
   async function nextStopAction() {
@@ -374,6 +388,13 @@ async function startStopNarration() {
   }, [currentStop?.id, persona]);
 
   useEffect(() => {
+    if (step !== "pickDuration") return;
+    const jamRoute = (jam?.route_id as RouteDef["id"] | null) ?? null;
+    setSelectedRouteId(jamRoute);
+    setSelectedPersona(jamRoute ? ((jam?.persona as Persona | null) ?? null) : null);
+  }, [step, jam?.route_id, jam?.persona]);
+
+  useEffect(() => {
     if (!jam?.id) {
       setConnectedCount(0);
       return;
@@ -454,11 +475,11 @@ async function startStopNarration() {
 
   // ---------- UI ----------
   return (
-    <div className={`${styles.container} ${step === "walk" || step === "landing" ? styles.containerWide : ""}`}>
-      {step !== "walk" && step !== "landing" && (
+    <div className={`${styles.container} ${step === "walk" || step === "landing" || step === "pickDuration" ? styles.containerWide : ""}`}>
+      {step !== "walk" && step !== "landing" && step !== "pickDuration" && (
         <header className={styles.header}>
           <div>
-            <div className={styles.brandTitle}>EchoJam</div>
+            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.brandTitle}`}>EchoJam</button>
           </div>
 
           <div className={styles.headerActions}>
@@ -484,7 +505,7 @@ async function startStopNarration() {
       {step === "landing" && (
         <main className={styles.landingLayout}>
           <section className={styles.landingInfo}>
-            <div className={styles.landingBrand}>EchoJam</div>
+            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>EchoJam</button>
             <div className={styles.landingCopyBlock}>
               <h1 className={styles.landingHeading}>A mixtape for the streets.</h1>
               <p className={styles.landingCopy}>
@@ -550,44 +571,65 @@ async function startStopNarration() {
 
       {/* PICK DURATION */}
       {step === "pickDuration" && (
-        <main className={styles.section}>
-          <h2 className={styles.sectionTitle}>How long do you have?</h2> 
+        <main className={styles.pickLayout}>
+          <section className={styles.pickInfo}>
+            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>EchoJam</button>
+            <div className={styles.pickCopyBlock}>
+              <h1 className={styles.pickHeading}>How long do you have?</h1>
+              <p className={styles.pickCopy}>Choose a mix length, then choose narration, then start your tour.</p>
+            </div>
 
-          <div className={styles.routesGrid}>
-            {salemRoutes.map((r) => (
+            <div className={styles.pickSectionLabel}>Tour length:</div>
+            <div className={styles.pickRouteList}>
+              {salemRoutes.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => setSelectedRouteId(r.id)}
+                  className={`${styles.pickRouteRow} ${selectedRouteId === r.id ? styles.pickRouteRowSelected : ""}`}
+                >
+                  <div className={styles.pickRouteMain}>
+                    <div className={styles.pickRouteTitle}>{r.title}</div>
+                    <div className={styles.pickRouteMeta}>{r.durationLabel} • {formatRouteMiles(getRouteMiles(r.stops))} walking</div>
+                  </div>
+                  <div className={styles.pickRouteArrow}>&#8250;</div>
+                </button>
+              ))}
+            </div>
+
+            <div className={styles.pickSectionLabel}>Narration:</div>
+            <div className={styles.pickPersonaRow}>
               <button
-                key={r.id}
-                onClick={() => chooseRoute(r.id)}
-                className={`${styles.button} ${styles.routeCard}`}
+                onClick={() => setSelectedPersona("adult")}
+                className={`${styles.pickPersonaButton} ${selectedPersona === "adult" ? styles.pickPersonaSelected : ""}`}
               >
-                <div className={styles.routeDuration}>{r.durationLabel} • {formatRouteMiles(getRouteMiles(r.stops))} walking</div>
-                <div className={styles.routeTitle}>{r.title}</div>
-                <div className={styles.routeDescription}>{r.description}</div>
-                <div className={styles.routeStops}>{r.stops.length} stops</div>
-              </button>
-            ))}
-          </div>
-
-          <div className={styles.narrationBlock}>
-
-          <h2 className={styles.sectionTitle}>Narration (Settings):</h2>  
-            <div className={styles.actionGroup}>
-              <button
-                onClick={() => jam && setPersona("adult")}
-                disabled={!jam}
-                className={`${styles.button} ${persona === "adult" ? styles.personaActive : styles.personaInactive}`}
-              >
-                Adult 
+                Adult
               </button>
               <button
-                onClick={() => jam && setPersona("preteen")}
-                disabled={!jam}
-                className={`${styles.button} ${persona === "preteen" ? styles.personaActive : styles.personaInactive}`}
+                onClick={() => setSelectedPersona("preteen")}
+                className={`${styles.pickPersonaButton} ${selectedPersona === "preteen" ? styles.pickPersonaSelected : ""}`}
               >
                 Preteen
               </button>
             </div>
-          </div>
+
+            <div className={styles.pickDurationStartWrap}>
+              <button
+                onClick={startTourFromSelection}
+                disabled={!selectedRouteId || !selectedPersona}
+                className={styles.landingCtaButton}
+              >
+                Start Tour
+              </button>
+            </div>
+          </section>
+
+          <section className={styles.pickImagePane}>
+            {selectedRoute ? (
+              <RouteMap stops={selectedRoute.stops} currentStopIndex={0} myPos={myPos} />
+            ) : (
+              <div className={styles.pickImagePlaceholder} aria-hidden="true" />
+            )}
+          </section>
         </main>
       )}
 
@@ -709,7 +751,7 @@ async function startStopNarration() {
 
       )}
 
-      {step !== "walk" && step !== "landing" && (
+      {step !== "walk" && step !== "landing" && step !== "pickDuration" && (
         <footer className={styles.footer}>
           {jam ? `Jam: ${jam.id}` : "No jam loaded"}
         </footer>
