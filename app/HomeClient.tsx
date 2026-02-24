@@ -454,8 +454,8 @@ async function startStopNarration() {
 
   // ---------- UI ----------
   return (
-    <div className={`${styles.container} ${step === "walk" ? styles.containerWide : ""}`}>
-      {step !== "walk" && (
+    <div className={`${styles.container} ${step === "walk" || step === "landing" ? styles.containerWide : ""}`}>
+      {step !== "walk" && step !== "landing" && (
         <header className={styles.header}>
           <div>
             <div className={styles.brandTitle}>EchoJam</div>
@@ -482,25 +482,50 @@ async function startStopNarration() {
 
       {/* LANDING */}
       {step === "landing" && (
-        <main className={styles.section}>
-          <h2 className={styles.landingTitle}>Your journey starts here</h2>
-          <p className={styles.sectionBody}>
-            Create a personalized audio tour — just for you. Answer a few quick questions and we&apos;ll map the stories, stops, and surprises that fit your pace.
+        <main className={styles.landingLayout}>
+          <section className={styles.landingInfo}>
+            <div className={styles.landingBrand}>EchoJam</div>
+            <div className={styles.landingCopyBlock}>
+              <h1 className={styles.landingHeading}>A mixtape for the streets.</h1>
+              <p className={styles.landingCopy}>
+                Create a custom audio tour of your town - stitched together like a mix you&apos;d give someone you care
+                about. Because some places deserve more than directions.
+              </p>
+            </div>
 
-          </p>
+            <div className={styles.landingPopular}>Popular mix tours:</div>
 
-          <div className={styles.buttonRow}>
-            <button onClick={() => createJam()} className={`${styles.button} ${styles.buttonLarge}`}>
-              Start tour
+            <button className={styles.landingTourRow} type="button" onClick={() => createJam()}>
+              <div className={styles.landingTourText}>
+                <div className={styles.landingTourTitle}>Salem</div>
+              </div>
+              <span className={styles.landingArrow}>&#8250;</span>
             </button>
-            <button onClick={() => requestGeo()} className={`${styles.button} ${styles.buttonLarge}`}>
-              Enable location (optional)
-            </button>
-          </div>
 
-          <div className={styles.hint}>
-            If you already have a link, open it with <code>?jam=&lt;uuid&gt;</code>.
-          </div>
+            <div className={styles.landingTourRowMuted}>
+              <div className={styles.landingTourText}>
+                <div className={styles.landingTourTitleMuted}>Boston</div>
+                <div className={styles.landingTourSub}>Coming Soon...</div>
+              </div>
+            </div>
+
+            <div className={styles.landingTourRowMuted}>
+              <div className={styles.landingTourText}>
+                <div className={styles.landingTourTitleMuted}>Concord</div>
+                <div className={styles.landingTourSub}>Coming Soon...</div>
+              </div>
+            </div>
+
+            <div className={styles.landingCtaWrap}>
+              <button onClick={() => createJam()} className={styles.landingCtaButton}>
+                Create your own mix tour
+              </button>
+            </div>
+          </section>
+
+          <section className={styles.landingImagePane}>
+            <div className={styles.landingImagePlaceholder} aria-hidden="true" />
+          </section>
         </main>
       )}
 
@@ -684,7 +709,7 @@ async function startStopNarration() {
 
       )}
 
-      {step !== "walk" && (
+      {step !== "walk" && step !== "landing" && (
         <footer className={styles.footer}>
           {jam ? `Jam: ${jam.id}` : "No jam loaded"}
         </footer>
