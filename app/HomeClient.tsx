@@ -785,8 +785,16 @@ async function startStopNarration() {
             >
               <div className={styles.landingTourText}>
                 <div className={styles.landingTourTitle}>Salem</div>
+                <div className={styles.landingTourSub}>Historic seaport, witch-trial legacy</div>
               </div>
-              <span className={styles.landingArrow}>&#8250;</span>
+              <Image
+                src="/icons/chevron-right.svg"
+                alt=""
+                width={28}
+                height={28}
+                className={styles.landingArrowIcon}
+                aria-hidden="true"
+              />
             </button>
 
             <div className={styles.landingTourRowMuted}>
@@ -811,7 +819,17 @@ async function startStopNarration() {
           </section>
 
           <section className={styles.landingImagePane}>
-            <div className={styles.landingImagePlaceholder} aria-hidden="true" />
+            <video
+              className={styles.landingVideo}
+              autoPlay
+              loop
+              muted
+              playsInline
+              preload="auto"
+              aria-hidden="true"
+            >
+              <source src="/images/marketing/ginger-walking-remix-v2.mp4" type="video/mp4" />
+            </video>
           </section>
         </main>
       )}
@@ -857,7 +875,14 @@ async function startStopNarration() {
                       {r.durationLabel} • {r.stops.length} stops • {formatRouteMiles(getRouteMiles(r.stops))} walking
                     </div>
                   </div>
-                  <div className={styles.pickRouteArrow}>&#8250;</div>
+                  <Image
+                    src="/icons/chevron-right.svg"
+                    alt=""
+                    width={24}
+                    height={24}
+                    className={styles.pickRouteArrowIcon}
+                    aria-hidden="true"
+                  />
                 </button>
               ))}
               <button
@@ -904,7 +929,7 @@ async function startStopNarration() {
                 onClick={() => setStep("buildMix")}
                 className={styles.pickBuildMixButton}
               >
-                Build your own mix
+                Create your own mix tour
               </button>
             </div>
           </section>
@@ -992,13 +1017,19 @@ async function startStopNarration() {
                   <button
                     key={stop.id}
                     onClick={() => toggleBuilderStop(stop)}
-                    className={`${styles.pickRouteRow} ${active ? styles.pickRouteRowSelected : ""}`}
+                    className={`${styles.pickRouteRow} ${styles.pickRouteRowBuildMix} ${active ? styles.pickRouteRowSelected : ""}`}
                   >
+                    <div className={styles.pickRouteArrow}>{active ? "×" : "+"}</div>
                     <div className={styles.pickRouteMain}>
                       <div className={styles.pickRouteTitle}>{stop.title}</div>
-                      <div className={styles.pickRouteMeta}>{active ? "Selected" : "Tap to add stop"}</div>
+                      <div className={styles.stopRating} aria-label="4 out of 5 stars">
+                        <span className={styles.stopRatingFilled}>★</span>
+                        <span className={styles.stopRatingFilled}>★</span>
+                        <span className={styles.stopRatingFilled}>★</span>
+                        <span className={styles.stopRatingFilled}>★</span>
+                        <span className={styles.stopRatingEmpty}>★</span>
+                      </div>
                     </div>
-                    <div className={styles.pickRouteArrow}>{active ? "✓" : "+"}</div>
                   </button>
                 );
               })}
@@ -1080,7 +1111,14 @@ async function startStopNarration() {
           <div className={styles.mapHero}>
             <RouteMap stops={route.stops} currentStopIndex={currentStopIndex} myPos={myPos} />
             <button onClick={() => setStep("pickDuration")} className={styles.mapBackButton} aria-label="Back to routes">
-              &#9001;
+              <Image
+                src="/icons/arrow-left.svg"
+                alt=""
+                width={26}
+                height={26}
+                className={styles.mapBackIcon}
+                aria-hidden="true"
+              />
             </button>
             <a href={mapsUrl} target="_blank" rel="noreferrer" className={styles.mapViewButton}>
               View in maps
@@ -1169,7 +1207,14 @@ async function startStopNarration() {
                     onClick={() => setIsScriptModalOpen(false)}
                     aria-label="Close script"
                   >
-                    Close
+                    <Image
+                      src="/icons/x.svg"
+                      alt=""
+                      width={16}
+                      height={16}
+                      className={styles.scriptModalCloseIcon}
+                      aria-hidden="true"
+                    />
                   </button>
                   <div className={styles.scriptModalBody}>
                     {currentStopScript || "No script available for this stop yet."}

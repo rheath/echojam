@@ -30,6 +30,8 @@
   padding: 0;
   margin: 0;
   cursor: pointer;
+  text-align: left;
+  text-shadow: 0 0px 18px rgba(0, 0, 0, 0.9);
 }
 
 .mutedSmall {
@@ -177,13 +179,19 @@
 .landingTourSub {
   margin-top: 4px;
   font-size: 16px;
-  color: #d3d4d8;
+  color: #777;
 }
 
 .landingArrow {
   font-size: 54px;
   line-height: 1;
   color: #fff;
+}
+
+.landingArrowIcon {
+  width: 28px;
+  height: 28px;
+  filter: invert(1);
 }
 
 .landingCtaWrap {
@@ -206,6 +214,7 @@
 
 .landingImagePane {
   min-height: 100%;
+  background: #c9c9cc;
 }
 
 .landingImagePlaceholder {
@@ -213,6 +222,14 @@
   height: 100%;
   min-height: 100%;
   background: #c9c9cc;
+}
+
+.landingVideo {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .pickLayout {
@@ -289,6 +306,10 @@
   text-align: left;
 }
 
+.pickRouteRowBuildMix {
+  justify-content: flex-start;
+}
+
 .pickRouteRowSelected {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -322,6 +343,36 @@
   font-size: 44px;
   line-height: 1;
   opacity: 0.92;
+  width: 44px;
+  flex-shrink: 0;
+}
+
+.pickRouteArrowIcon {
+  width: 24px;
+  height: 24px;
+  filter: invert(1);
+  opacity: 0.92;
+}
+
+.stopRating {
+  margin-top: 4px;
+  display: flex;
+  gap: 2px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.stopStarFilled {
+  width: 14px;
+  height: 14px;
+  filter: brightness(0) saturate(100%) invert(82%) sepia(50%) saturate(706%) hue-rotate(347deg)
+    brightness(104%) contrast(104%);
+}
+
+.stopStarEmpty {
+  width: 14px;
+  height: 14px;
+  opacity: 0.45;
 }
 
 .pickPersonaRow {
@@ -573,6 +624,15 @@
   font-size: 30px;
   line-height: 1;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mapBackIcon {
+  width: 26px;
+  height: 26px;
+  filter: invert(1);
 }
 
 .mapViewButton {
@@ -764,6 +824,14 @@
   color: #16161d;
   font-size: 30px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nowPlayingIcon {
+  width: 28px;
+  height: 28px;
 }
 
 .scriptModalOverlay {
@@ -791,11 +859,22 @@
   position: absolute;
   top: 12px;
   left: 12px;
-  border: 1px solid #ccc;
-  background: #fff;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.1);
   color: #000;
-  padding: 5px;
+  padding: 0;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scriptModalCloseIcon {
+  width: 16px;
+  height: 16px;
 }
 
 .scriptModalBody {
@@ -1015,7 +1094,7 @@
   }
 
   .pickHeading {
-    font-size: 26px;
+    font-size: 44px;
   }
 
   .pickSectionLabel {
@@ -1023,7 +1102,7 @@
   }
 
   .pickRouteTitle {
-    font-size: 44px;
+    font-size: 24px;
   }
 
   .pickRouteArrow {
