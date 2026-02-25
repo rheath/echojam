@@ -147,6 +147,7 @@ const [generationStatusLabel, setGenerationStatusLabel] = useState("Queued");
 const [generationMessage, setGenerationMessage] = useState("Queued");
 const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
 const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
+const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -317,7 +318,17 @@ const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
     setJam(null);
     setCustomRoute(null);
     setIsScriptModalOpen(false);
+    setReturnToWalkOnClose(false);
     setStep("landing");
+  }
+
+  function closeRoutePicker() {
+    if (returnToWalkOnClose && jam?.route_id) {
+      setStep("walk");
+      setReturnToWalkOnClose(false);
+      return;
+    }
+    goHome();
   }
 
   function getCustomRouteId(routeRef: string | null | undefined) {
@@ -401,6 +412,7 @@ async function startStopNarration() {
 
   async function startTourFromSelection() {
     if (!selectedRouteId || !selectedPersona) return;
+    setReturnToWalkOnClose(false);
 
     if (!jam) {
       await createJam(selectedRouteId, selectedPersona);
@@ -696,7 +708,7 @@ async function startStopNarration() {
   }, [jam?.id]);
 
   useEffect(() => {
-    if (step !== "walk") return;
+    if (!["landing", "pickDuration", "buildMix", "generating", "walk"].includes(step)) return;
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [step]);
 
@@ -768,8 +780,7 @@ async function startStopNarration() {
             <div className={styles.landingCopyBlock}>
               <h1 className={styles.landingHeading}>A mixtape for the streets.</h1>
               <p className={styles.landingCopy}>
-                Create a custom audio tour of your town - stitched together like a mix you&apos;d give someone you care
-                about. Because some places deserve more than directions.
+                Create an audio mix tour of your town for someone special because some places deserve more than directions.
               </p>
             </div>
 
@@ -857,9 +868,14 @@ async function startStopNarration() {
       {step === "pickDuration" && (
         <main className={styles.pickLayout}>
           <section className={styles.pickInfo}>
-            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>MixTours</button>
             <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>How long do you have in {selectedCityLabel}?</h2>
+              <h2 className={styles.pickHeading}>
+                How long do you have in{" "}
+                <button type="button" className={styles.pickHeadingCityLink} onClick={goHome}>
+                  {selectedCityLabel}
+                </button>
+                ?
+              </h2>
             </div>
 
             <div className={styles.pickRouteList}>
@@ -941,6 +957,16 @@ async function startStopNarration() {
               myPos={myPos}
               cityCenter={selectedCityCenter}
             />
+            <button onClick={closeRoutePicker} className={styles.mapBackButton} aria-label="Close">
+              <Image
+                src="/icons/x.svg"
+                alt=""
+                width={26}
+                height={26}
+                className={styles.mapBackIcon}
+                aria-hidden="true"
+              />
+            </button>
           </section>
         </main>
       )}
@@ -948,9 +974,6 @@ async function startStopNarration() {
       {step === "buildMix" && (
         <main className={styles.pickLayout}>
           <section className={styles.pickInfo}>
-            <button type="button" onClick={() => setStep("pickDuration")} className={`${styles.brandLink} ${styles.landingBrand}`}>
-              MixTours
-            </button>
             <div className={styles.pickCopyBlock}>
               <h2 className={styles.pickHeading}>Create your own mix in {selectedCityLabel}</h2>
             </div>
@@ -1019,7 +1042,20 @@ async function startStopNarration() {
                     onClick={() => toggleBuilderStop(stop)}
                     className={`${styles.pickRouteRow} ${styles.pickRouteRowBuildMix} ${active ? styles.pickRouteRowSelected : ""}`}
                   >
-                    <div className={styles.pickRouteArrow}>{active ? "×" : "+"}</div>
+                    <div className={styles.pickRouteArrow}>
+                      {active ? (
+                        "×"
+                      ) : (
+                        <Image
+                          src="/icons/plus.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className={styles.pickRouteArrowIcon}
+                          aria-hidden="true"
+                        />
+                      )}
+                    </div>
                     <div className={styles.pickRouteMain}>
                       <div className={styles.pickRouteTitle}>{stop.title}</div>
                       <div className={styles.stopRating} aria-label="4 out of 5 stars">
@@ -1052,6 +1088,16 @@ async function startStopNarration() {
               myPos={myPos}
               cityCenter={selectedCityCenter}
             />
+            <button onClick={closeRoutePicker} className={styles.mapBackButton} aria-label="Close">
+              <Image
+                src="/icons/x.svg"
+                alt=""
+                width={26}
+                height={26}
+                className={styles.mapBackIcon}
+                aria-hidden="true"
+              />
+            </button>
           </section>
         </main>
       )}
@@ -1110,9 +1156,9 @@ async function startStopNarration() {
         <main className={styles.walkLayout}>
           <div className={styles.mapHero}>
             <RouteMap stops={route.stops} currentStopIndex={currentStopIndex} myPos={myPos} />
-            <button onClick={() => setStep("pickDuration")} className={styles.mapBackButton} aria-label="Back to routes">
+            <button onClick={goHome} className={styles.mapBackButton} aria-label="Close">
               <Image
-                src="/icons/arrow-left.svg"
+                src="/icons/x.svg"
                 alt=""
                 width={26}
                 height={26}
@@ -1147,7 +1193,16 @@ async function startStopNarration() {
 
               <div className={styles.walkActionRow}>
                 <button className={styles.pillButton} type="button" onClick={copyShareLink}>Add people</button>
-                <button className={styles.pillButton} type="button" onClick={() => setStep("pickDuration")}>Customize</button>
+                <button
+                  className={styles.pillButton}
+                  type="button"
+                  onClick={() => {
+                    setReturnToWalkOnClose(true);
+                    setStep("pickDuration");
+                  }}
+                >
+                  Customize
+                </button>
               </div>
 
               <div className={styles.stopList}>
