@@ -183,6 +183,8 @@ const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
 const [isGeneratingScriptForModal, setIsGeneratingScriptForModal] = useState(false);
 const [isGeneratingAudioForCurrentStop, setIsGeneratingAudioForCurrentStop] = useState(false);
 const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
+const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
+const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -207,12 +209,11 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
   const persona: Persona = (jam?.persona ?? "adult") as Persona;
 
   const currentStopIndex = useMemo(() => {
-    const idx = jam?.current_stop ?? 0;
-    if (!route) return 0;
-    return clamp(idx, 0, route.stops.length - 1);
-  }, [jam?.current_stop, route]);
+    if (!route || activeStopIndex === null) return null;
+    return clamp(activeStopIndex, 0, route.stops.length - 1);
+  }, [activeStopIndex, route]);
 
-  const currentStop = route ? route.stops[currentStopIndex] : null;
+  const currentStop = route && currentStopIndex !== null ? route.stops[currentStopIndex] : null;
   const currentStopScript = useMemo(() => {
     if (!currentStop) return "";
     return currentStop?.text?.[persona] || "";
@@ -459,6 +460,14 @@ async function startStopNarration() {
     // autoplay might still be blocked in some cases; user can press play manually
   }
 }
+
+  async function handleStopSelect(idx: number) {
+    if (!route) return;
+    const stop = route.stops[idx];
+    setActiveStopIndex(idx);
+    setPendingAutoplayStopId(stop?.id ?? null);
+    await updateJam({ current_stop: idx });
+  }
 
   async function toggleAudio() {
     const el = audioRef.current;
@@ -898,6 +907,35 @@ async function startStopNarration() {
   }, [currentStop?.id, persona]);
 
   useEffect(() => {
+    if (!pendingAutoplayStopId) return;
+    if (!currentStop || currentStop.id !== pendingAutoplayStopId) return;
+    if (!hasCurrentAudio) {
+      setPendingAutoplayStopId(null);
+      return;
+    }
+    const el = audioRef.current;
+    if (!el) return;
+    void el.play().catch(() => {
+      // ignore autoplay interruption errors
+    });
+    setPendingAutoplayStopId(null);
+  }, [pendingAutoplayStopId, currentStop, hasCurrentAudio]);
+
+  useEffect(() => {
+    if (step !== "walk") return;
+    setActiveStopIndex(null);
+    setPendingAutoplayStopId(null);
+    const el = audioRef.current;
+    if (el) {
+      el.pause();
+      el.currentTime = 0;
+    }
+    setIsPlaying(false);
+    setAudioTime(0);
+    setAudioDuration(0);
+  }, [step, route?.id]);
+
+  useEffect(() => {
     if (step !== "pickDuration") return;
     if (returnToWalkOnClose && jam?.route_id) {
       const routeId = salemRoutes.some((r) => r.id === jam.route_id) ? jam.route_id : null;
@@ -965,10 +1003,21 @@ async function startStopNarration() {
 
   const stopList = useMemo(() => {
     if (!route) return [];
+    const selectedIdx = currentStopIndex ?? -1;
     return route.stops.map((stop, idx) => {
+      if (selectedIdx < 0) {
+        return {
+          id: stop.id,
+          title: stop.title,
+          image: stop.images[0] ?? "/images/salem/placeholder-01.png",
+          subtitle: "Tap to start",
+          isActive: false,
+        };
+      }
+
       let subtitle = "At this location";
-      if (idx < currentStopIndex) subtitle = "Visited";
-      if (idx > currentStopIndex) {
+      if (idx < selectedIdx) subtitle = "Visited";
+      if (idx > selectedIdx) {
         const prev = route.stops[idx - 1];
         const meters = haversineMeters(prev.lat, prev.lng, stop.lat, stop.lng);
         subtitle = `${estimateWalkMinutes(meters)} min walk away`;
@@ -978,7 +1027,7 @@ async function startStopNarration() {
         title: stop.title,
         image: stop.images[0] ?? "/images/salem/placeholder-01.png",
         subtitle,
-        isActive: idx === currentStopIndex,
+        isActive: idx === selectedIdx,
       };
     });
   }, [route, currentStopIndex]);
@@ -1567,12 +1616,12 @@ async function startStopNarration() {
       )}
 
       {/* WALK */}
-      {step === "walk" && route && currentStop && (
+      {step === "walk" && route && (
         <main className={styles.walkLayout}>
           <div className={styles.mapHero}>
             <RouteMap
               stops={route.stops}
-              currentStopIndex={currentStopIndex}
+              currentStopIndex={currentStopIndex ?? -1}
               myPos={myPos}
               initialFitRoute
             />
@@ -1629,7 +1678,7 @@ async function startStopNarration() {
                 {stopList.map((stop, idx) => (
                   <button
                     key={stop.id}
-                    onClick={() => updateJam({ current_stop: idx })}
+                    onClick={() => void handleStopSelect(idx)}
                     className={`${styles.stopItem} ${stop.isActive ? styles.stopItemActive : ""}`}
                     type="button"
                   >
@@ -1665,8 +1714,9 @@ async function startStopNarration() {
                     type="button"
                     className={styles.nowPlayingTitleLink}
                     onClick={openScriptModal}
+                    disabled={!currentStop}
                   >
-                    {currentStop.title}
+                    {currentStop ? currentStop.title : "Select a stop to begin"}
                   </button>
                   <div className={styles.nowPlayingLinksRow}>
                     <div className={styles.nowPlayingSubtitle}>
