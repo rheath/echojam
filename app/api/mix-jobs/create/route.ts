@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { ensureCanonicalStopForCustom, upsertRouteStopMapping } from "@/lib/canonicalStops";
 import {
   generateScriptWithOpenAI,
   getSwitchConfig,
@@ -23,18 +24,6 @@ type CreateBody = {
   stops: StopInput[];
 };
 
-type StopAssetCache = Partial<
-  Record<
-    string,
-    {
-      script_adult?: string | null;
-      script_preteen?: string | null;
-      audio_url_adult?: string | null;
-      audio_url_preteen?: string | null;
-    }
-  >
->;
-
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -42,160 +31,144 @@ function getAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-function isGeneratedAudioUrl(url: string | null | undefined) {
-  return isUsableGeneratedAudioUrl(url);
-}
-
-async function loadReusableAssets(
-  admin: ReturnType<typeof getAdmin>,
-  stopIds: string[]
-): Promise<StopAssetCache> {
-  if (!stopIds.length) return {};
-  const { data } = await admin
-    .from("custom_route_stops")
-    .select("stop_id,script_adult,script_preteen,audio_url_adult,audio_url_preteen,created_at")
-    .in("stop_id", stopIds)
-    .order("created_at", { ascending: false });
-
-  const byStop: StopAssetCache = {};
-  for (const row of data ?? []) {
-    const stopId = row.stop_id as string;
-    if (!byStop[stopId]) byStop[stopId] = {};
-    const cached = byStop[stopId]!;
-
-    const scriptAdult = toNullableTrimmed(row.script_adult);
-    const scriptPreteen = toNullableTrimmed(row.script_preteen);
-    const audioAdult = toNullableTrimmed(row.audio_url_adult);
-    const audioPreteen = toNullableTrimmed(row.audio_url_preteen);
-
-    if (!cached.script_adult && scriptAdult) cached.script_adult = scriptAdult;
-    if (!cached.script_preteen && scriptPreteen) cached.script_preteen = scriptPreteen;
-    if (!cached.audio_url_adult && isGeneratedAudioUrl(audioAdult)) cached.audio_url_adult = audioAdult;
-    if (!cached.audio_url_preteen && isGeneratedAudioUrl(audioPreteen)) cached.audio_url_preteen = audioPreteen;
-  }
-  return byStop;
-}
-
-async function runGeneration(jobId: string, routeId: string, city: string, transportMode: TransportMode, lengthMinutes: number, stops: StopInput[]) {
+async function runGeneration(
+  jobId: string,
+  routeId: string,
+  city: string,
+  transportMode: TransportMode,
+  lengthMinutes: number,
+  persona: Persona,
+  stops: StopInput[]
+) {
   const admin = getAdmin();
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is required.");
   const switchConfig = await getSwitchConfig();
   const forceScript = shouldRegenerateScript(switchConfig.mode);
   const forceAudio = shouldRegenerateAudio(switchConfig.mode);
-  const reusableAssets = await loadReusableAssets(
-    admin,
-    Array.from(new Set(stops.map((s) => s.id)))
-  );
 
-  const personas: Persona[] = ["adult", "preteen"];
-  const totalUnits = personas.length * stops.length * 2;
+  const totalUnits = Math.max(1, stops.length * 2);
   let doneUnits = 0;
+  let warningCount = 0;
+  let audioReadyCount = 0;
+  let lastWarning = "";
 
-  const updateProgress = async (status: string, message: string) => {
+  const updateProgress = async (
+    status: "queued" | "generating_script" | "generating_audio" | "ready" | "ready_with_warnings" | "failed",
+    message: string
+  ) => {
     const progress = Math.min(99, Math.floor((doneUnits / totalUnits) * 100));
     await admin.from("mix_generation_jobs").update({ status, message, progress }).eq("id", jobId);
   };
 
-  await updateProgress("generating_script", "Generating scripts");
-  let warningCount = 0;
-  let lastWarning = "";
-  for (const persona of personas) {
-    for (let i = 0; i < stops.length; i += 1) {
-      const stop = stops[i];
-      const { data: current } = await admin
-        .from("custom_route_stops")
-        .select("script_adult,script_preteen")
-        .eq("route_id", routeId)
-        .eq("stop_id", stop.id)
-        .single();
-      const existingScript = toNullableTrimmed(
-        persona === "adult" ? current?.script_adult : current?.script_preteen
-      );
-      const reusableScript = toNullableTrimmed(
-        persona === "adult" ? reusableAssets[stop.id]?.script_adult : reusableAssets[stop.id]?.script_preteen
-      );
+  type RowState = {
+    stop: StopInput;
+    canonicalStopId: string;
+    script: string | null;
+    audioUrl: string | null;
+  };
+  const states: RowState[] = [];
 
-      let script = existingScript;
-      if (!script && !forceScript && reusableScript) {
-        script = reusableScript;
+  await updateProgress("generating_script", "Generating scripts");
+  for (let i = 0; i < stops.length; i += 1) {
+    const stop = stops[i];
+    const canonical = await ensureCanonicalStopForCustom(admin, city, stop);
+
+    await upsertRouteStopMapping(admin, "custom", routeId, stop.id, canonical.id, i);
+
+    const { data: assetRow } = await admin
+      .from("canonical_stop_assets")
+      .select("script,audio_url")
+      .eq("canonical_stop_id", canonical.id)
+      .eq("persona", persona)
+      .maybeSingle();
+
+    let script = !forceScript ? toNullableTrimmed(assetRow?.script) : null;
+    if (!script) {
+      try {
+        script = toNullableTrimmed(
+          await generateScriptWithOpenAI(apiKey, city, transportMode, lengthMinutes, persona, stop, i, stops.length)
+        );
+      } catch (e) {
+        warningCount += 1;
+        lastWarning = `Script generation failed for ${persona} at stop "${stop.title}": ${e instanceof Error ? e.message : "Unknown error"}`;
       }
-      if (!script || forceScript) {
-        try {
-          const generated = await generateScriptWithOpenAI(apiKey, city, transportMode, lengthMinutes, persona, stop, i, stops.length);
-          const normalizedGenerated = toNullableTrimmed(generated);
-          if (normalizedGenerated) script = normalizedGenerated;
-        } catch (e) {
-          warningCount += 1;
-          lastWarning = `Script generation failed for ${persona} at stop "${stop.title}": ${e instanceof Error ? e.message : "Unknown error"}`;
-        }
-      }
-      script = toNullableTrimmed(script);
-      const patch = persona === "adult" ? { script_adult: script } : { script_preteen: script };
-      await admin.from("custom_route_stops").update(patch).eq("route_id", routeId).eq("stop_id", stop.id);
-      doneUnits += 1;
-      await updateProgress("generating_script", `Generating scripts (${doneUnits}/${totalUnits})`);
     }
+
+    await admin.from("canonical_stop_assets").upsert(
+      {
+        canonical_stop_id: canonical.id,
+        persona,
+        script,
+        audio_url: toNullableTrimmed(assetRow?.audio_url),
+        status: script ? "ready" : "failed",
+        error: script ? null : lastWarning || "Script generation failed",
+      },
+      { onConflict: "canonical_stop_id,persona" }
+    );
+
+    const scriptPatch =
+      persona === "adult" ? { script_adult: script } : { script_preteen: script };
+    await admin.from("custom_route_stops").update(scriptPatch).eq("route_id", routeId).eq("stop_id", stop.id);
+
+    states.push({ stop, canonicalStopId: canonical.id, script, audioUrl: null });
+    doneUnits += 1;
+    await updateProgress("generating_script", `Generating scripts (${doneUnits}/${totalUnits})`);
   }
 
   await updateProgress("generating_audio", "Generating audio");
-  let audioGeneratedCount = 0;
-  for (const persona of personas) {
-    for (let i = 0; i < stops.length; i += 1) {
-      const stop = stops[i];
-      const { data: row } = await admin
-        .from("custom_route_stops")
-        .select("script_adult,script_preteen,audio_url_adult,audio_url_preteen")
-        .eq("route_id", routeId)
-        .eq("stop_id", stop.id)
-        .single();
-      const text = toNullableTrimmed(persona === "adult" ? row?.script_adult : row?.script_preteen);
+  for (const state of states) {
+    const replayUrl = toNullableTrimmed(switchConfig.replay_audio[state.stop.id]?.[persona]);
+    const { data: assetRow } = await admin
+      .from("canonical_stop_assets")
+      .select("script,audio_url")
+      .eq("canonical_stop_id", state.canonicalStopId)
+      .eq("persona", persona)
+      .maybeSingle();
 
-      const replayUrl = toNullableTrimmed(switchConfig.replay_audio[stop.id]?.[persona]);
-      const existingAudio = toNullableTrimmed(persona === "adult" ? row?.audio_url_adult : row?.audio_url_preteen);
-      const reusableAudio = toNullableTrimmed(
-        persona === "adult" ? reusableAssets[stop.id]?.audio_url_adult : reusableAssets[stop.id]?.audio_url_preteen
-      );
+    const currentScript = toNullableTrimmed(assetRow?.script) || state.script;
+    let audioUrl = !forceAudio ? toNullableTrimmed(assetRow?.audio_url) : null;
+    if (replayUrl) audioUrl = replayUrl;
 
-      let audioUrl: string | null = null;
-      if (replayUrl) {
-        audioUrl = replayUrl;
-      } else if (!forceAudio && isGeneratedAudioUrl(existingAudio)) {
-        audioUrl = existingAudio;
-      } else if (!forceAudio && reusableAudio) {
-        audioUrl = reusableAudio;
-      } else if (text) {
-        try {
-          const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, text);
-          const uploaded = await uploadNarrationAudio(audioBytes, routeId, persona, stop.id);
-          const normalizedUploaded = toNullableTrimmed(uploaded);
-          if (normalizedUploaded) {
-            audioUrl = normalizedUploaded;
-            audioGeneratedCount += 1;
-          } else {
-            warningCount += 1;
-            lastWarning = `Audio upload returned empty URL for ${persona} at stop "${stop.title}"`;
-          }
-        } catch (e) {
-          warningCount += 1;
-          const detail = e instanceof Error ? e.message : "Unknown error";
-          lastWarning = `Audio generation failed for ${persona} at stop "${stop.title}": ${detail}`;
-        }
-      } else {
+    if (!audioUrl && currentScript) {
+      try {
+        const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, currentScript);
+        audioUrl = toNullableTrimmed(
+          await uploadNarrationAudio(audioBytes, `custom-${routeId}`, persona, state.stop.id)
+        );
+      } catch (e) {
         warningCount += 1;
-        lastWarning = `Audio generation skipped for ${persona} at stop "${stop.title}" because script is missing`;
+        lastWarning = `Audio generation failed for ${persona} at stop "${state.stop.title}": ${e instanceof Error ? e.message : "Unknown error"}`;
       }
-      audioUrl = toNullableTrimmed(audioUrl);
-
-      const patch = persona === "adult" ? { audio_url_adult: audioUrl } : { audio_url_preteen: audioUrl };
-      await admin.from("custom_route_stops").update(patch).eq("route_id", routeId).eq("stop_id", stop.id);
-      doneUnits += 1;
-      await updateProgress("generating_audio", `Generating audio (${doneUnits}/${totalUnits})`);
+    } else if (!audioUrl && !currentScript) {
+      warningCount += 1;
+      lastWarning = `Audio generation skipped for ${persona} at stop "${state.stop.title}" because script is missing`;
     }
+
+    if (isUsableGeneratedAudioUrl(audioUrl)) audioReadyCount += 1;
+
+    await admin.from("canonical_stop_assets").upsert(
+      {
+        canonical_stop_id: state.canonicalStopId,
+        persona,
+        script: currentScript,
+        audio_url: audioUrl,
+        status: audioUrl ? "ready" : "failed",
+        error: audioUrl ? null : lastWarning || "Audio generation failed",
+      },
+      { onConflict: "canonical_stop_id,persona" }
+    );
+
+    const audioPatch =
+      persona === "adult" ? { audio_url_adult: audioUrl } : { audio_url_preteen: audioUrl };
+    await admin.from("custom_route_stops").update(audioPatch).eq("route_id", routeId).eq("stop_id", state.stop.id);
+
+    doneUnits += 1;
+    await updateProgress("generating_audio", `Generating audio (${doneUnits}/${totalUnits})`);
   }
 
-  if (audioGeneratedCount === 0) {
-    throw new Error(lastWarning || "Audio generation failed for all stops/personas.");
+  if (audioReadyCount === 0) {
+    throw new Error(lastWarning || `Audio generation failed for persona ${persona}.`);
   }
 
   await admin.from("custom_routes").update({ status: "ready" }).eq("id", routeId);
@@ -207,6 +180,7 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
       .eq("id", jobId);
     return;
   }
+
   await admin
     .from("mix_generation_jobs")
     .update({ status: "ready", progress: 100, message: "Tour ready", error: null })
@@ -257,10 +231,9 @@ export async function POST(req: Request) {
     if (routeErr || !route?.id) throw new Error(routeErr?.message || "Failed to create custom route");
 
     const routeId = route.id as string;
-    const routeRef = `custom:${routeId}`;
     await admin
       .from("jams")
-      .update({ route_id: routeRef, persona: body.persona, current_stop: 0, completed_at: null, preset_id: null })
+      .update({ route_id: `custom:${routeId}`, persona: body.persona, current_stop: 0, completed_at: null, preset_id: null })
       .eq("id", jamId);
 
     const inserts = body.stops.map((s, idx) => ({
@@ -288,7 +261,15 @@ export async function POST(req: Request) {
       .single();
     if (jobErr || !job?.id) throw new Error(jobErr?.message || "Failed to create mix generation job");
 
-    void runGeneration(job.id, routeId, body.city, body.transportMode, body.lengthMinutes, body.stops).catch(async (e) => {
+    void runGeneration(
+      job.id,
+      routeId,
+      body.city,
+      body.transportMode,
+      body.lengthMinutes,
+      body.persona,
+      body.stops
+    ).catch(async (e) => {
       await admin.from("custom_routes").update({ status: "failed" }).eq("id", routeId);
       await admin
         .from("mix_generation_jobs")
@@ -296,7 +277,7 @@ export async function POST(req: Request) {
         .eq("id", job.id);
     });
 
-    return NextResponse.json({ jamId, routeId, routeRef, jobId: job.id });
+    return NextResponse.json({ jamId, routeId, routeRef: `custom:${routeId}`, jobId: job.id });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to create mix job" }, { status: 500 });
   }

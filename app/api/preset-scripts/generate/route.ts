@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRouteById, type Persona } from "@/app/content/salemRoutes";
+import { ensureCanonicalStopForPreset, upsertRouteStopMapping } from "@/lib/canonicalStops";
 import { generateScriptWithOpenAI, getSwitchConfig, shouldRegenerateScript, toNullableTrimmed } from "@/lib/mixGeneration";
 
 type Body = {
@@ -24,20 +25,30 @@ export async function POST(req: Request) {
     if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
     const stopIndex = route.stops.findIndex((s) => s.id === body.stopId);
     if (stopIndex < 0) return NextResponse.json({ error: "Unknown stop for preset route" }, { status: 404 });
+
     const stop = route.stops[stopIndex];
+    const city = body.city ?? "salem";
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is required." }, { status: 500 });
 
     const admin = getAdmin();
+    const canonical = await ensureCanonicalStopForPreset(admin, city, {
+      id: stop.id,
+      title: stop.title,
+      lat: stop.lat,
+      lng: stop.lng,
+      image: stop.images[0] ?? "/images/salem/placeholder-01.png",
+    });
+    await upsertRouteStopMapping(admin, "preset", route.id, stop.id, canonical.id, stopIndex);
+
     const switchConfig = await getSwitchConfig();
     const forceScript = shouldRegenerateScript(switchConfig.mode);
 
     const { data: current } = await admin
-      .from("preset_route_stop_assets")
+      .from("canonical_stop_assets")
       .select("script,audio_url,status,error")
-      .eq("preset_route_id", body.routeId)
-      .eq("stop_id", body.stopId)
+      .eq("canonical_stop_id", canonical.id)
       .eq("persona", body.persona)
       .maybeSingle();
 
@@ -48,7 +59,7 @@ export async function POST(req: Request) {
 
     const generated = await generateScriptWithOpenAI(
       apiKey,
-      body.city ?? "salem",
+      city,
       "walk",
       parseInt(route.durationLabel, 10) || 30,
       body.persona,
@@ -62,20 +73,20 @@ export async function POST(req: Request) {
       stopIndex,
       route.stops.length
     );
+
     const script = toNullableTrimmed(generated);
     if (!script) return NextResponse.json({ error: "Generated script was empty" }, { status: 500 });
 
-    await admin.from("preset_route_stop_assets").upsert(
+    await admin.from("canonical_stop_assets").upsert(
       {
-        preset_route_id: body.routeId,
-        stop_id: body.stopId,
+        canonical_stop_id: canonical.id,
         persona: body.persona,
         script,
         audio_url: toNullableTrimmed(current?.audio_url),
         status: "ready",
         error: null,
       },
-      { onConflict: "preset_route_id,stop_id,persona" }
+      { onConflict: "canonical_stop_id,persona" }
     );
 
     return NextResponse.json({ script, reused: false });

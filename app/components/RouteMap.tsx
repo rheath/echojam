@@ -22,6 +22,9 @@ type Props = {
   initialFitRoute?: boolean;
 };
 
+// Toggle this back to true to restore the drawn route line.
+const SHOW_ROUTE_PATH = false;
+
 export default function RouteMap({
   stops,
   currentStopIndex,
@@ -36,6 +39,11 @@ export default function RouteMap({
   const [routeStatus, setRouteStatus] = useState<"loading" | "ready" | "failed">("loading");
 
   useEffect(() => {
+    if (!SHOW_ROUTE_PATH) {
+      setRouteCoords(null);
+      setRouteStatus("failed");
+      return;
+    }
     let cancelled = false;
     const controller = new AbortController();
 
@@ -108,33 +116,35 @@ export default function RouteMap({
         if (cancelled) return;
 
         if (stops.length) {
-          // Route line
-          map.addSource("route", {
-            type: "geojson",
-            data: routeGeoJSON(stops, null, "loading"),
-          });
+          if (SHOW_ROUTE_PATH) {
+            // Route line
+            map.addSource("route", {
+              type: "geojson",
+              data: routeGeoJSON(stops, null, "loading"),
+            });
 
-          map.addLayer({
-            id: "route-line-underlay",
-            type: "line",
-            source: "route",
-            paint: {
-              "line-color": "#ffffff",
-              "line-width": 8,
-              "line-opacity": 0.8,
-            },
-          });
+            map.addLayer({
+              id: "route-line-underlay",
+              type: "line",
+              source: "route",
+              paint: {
+                "line-color": "#ffffff",
+                "line-width": 8,
+                "line-opacity": 0.8,
+              },
+            });
 
-          map.addLayer({
-            id: "route-line",
-            type: "line",
-            source: "route",
-            paint: {
-              "line-color": "#2b1b3f",
-              "line-width": 5,
-              "line-opacity": 0.9,
-            },
-          });
+            map.addLayer({
+              id: "route-line",
+              type: "line",
+              source: "route",
+              paint: {
+                "line-color": "#2b1b3f",
+                "line-width": 5,
+                "line-opacity": 0.9,
+              },
+            });
+          }
 
           // Stops
           map.addSource("stops", {
@@ -260,8 +270,10 @@ export default function RouteMap({
     if (!map) return;
     if (!map.isStyleLoaded()) return;
 
-    const routeSrc = map.getSource("route") as GeoJSONSource | undefined;
-    routeSrc?.setData?.(routeGeoJSON(stops, routeCoords, routeStatus));
+    if (SHOW_ROUTE_PATH) {
+      const routeSrc = map.getSource("route") as GeoJSONSource | undefined;
+      routeSrc?.setData?.(routeGeoJSON(stops, routeCoords, routeStatus));
+    }
 
     const stopsSrc = map.getSource("stops") as GeoJSONSource | undefined;
     stopsSrc?.setData?.(stopsGeoJSON(stops, currentStopIndex));

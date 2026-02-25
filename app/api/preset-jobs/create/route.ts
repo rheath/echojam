@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRouteById } from "@/app/content/salemRoutes";
+import { ensureCanonicalStopForPreset, upsertRouteStopMapping } from "@/lib/canonicalStops";
 import {
   generateScriptWithOpenAI,
   getSwitchConfig,
+  isUsableGeneratedAudioUrl,
   shouldRegenerateAudio,
   shouldRegenerateScript,
   synthesizeSpeechWithOpenAI,
@@ -27,7 +29,14 @@ function getAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-async function runPresetGeneration(jobId: string, jamId: string, routeId: string, city: string, stops: StopInput[]) {
+async function runPresetGeneration(
+  jobId: string,
+  routeId: string,
+  city: string,
+  lengthMinutes: number,
+  persona: Persona,
+  stops: StopInput[]
+) {
   const admin = getAdmin();
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is required.");
@@ -35,9 +44,8 @@ async function runPresetGeneration(jobId: string, jamId: string, routeId: string
   const switchConfig = await getSwitchConfig();
   const forceScript = shouldRegenerateScript(switchConfig.mode);
   const forceAudio = shouldRegenerateAudio(switchConfig.mode);
-  const personas: Persona[] = ["adult", "preteen"];
 
-  const totalUnits = personas.length * stops.length * 2;
+  const totalUnits = Math.max(1, stops.length * 2);
   let doneUnits = 0;
   let warningCount = 0;
   let audioReadyCount = 0;
@@ -51,99 +59,103 @@ async function runPresetGeneration(jobId: string, jamId: string, routeId: string
     await admin.from("preset_generation_jobs").update({ status, message, progress }).eq("id", jobId);
   };
 
+  type RowState = {
+    stop: StopInput;
+    canonicalStopId: string;
+    script: string | null;
+  };
+  const states: RowState[] = [];
+
   await updateProgress("generating_script", "Generating scripts");
-  for (const persona of personas) {
-    for (let i = 0; i < stops.length; i += 1) {
-      const stop = stops[i];
-      const { data: current } = await admin
-        .from("preset_route_stop_assets")
-        .select("script,audio_url,status,error")
-        .eq("preset_route_id", routeId)
-        .eq("stop_id", stop.id)
-        .eq("persona", persona)
-        .maybeSingle();
+  for (let i = 0; i < stops.length; i += 1) {
+    const stop = stops[i];
+    const canonical = await ensureCanonicalStopForPreset(admin, city, stop);
+    await upsertRouteStopMapping(admin, "preset", routeId, stop.id, canonical.id, i);
 
-      let script = !forceScript ? toNullableTrimmed(current?.script) : null;
-      if (!script) {
-        try {
-          const generated = await generateScriptWithOpenAI(apiKey, city, "walk", 30, persona, stop, i, stops.length);
-          script = toNullableTrimmed(generated);
-        } catch (e) {
-          warningCount += 1;
-          lastWarning = `Script generation failed for ${persona} at "${stop.title}": ${e instanceof Error ? e.message : "Unknown error"}`;
-        }
+    const { data: current } = await admin
+      .from("canonical_stop_assets")
+      .select("script,audio_url")
+      .eq("canonical_stop_id", canonical.id)
+      .eq("persona", persona)
+      .maybeSingle();
+
+    let script = !forceScript ? toNullableTrimmed(current?.script) : null;
+    if (!script) {
+      try {
+        script = toNullableTrimmed(
+          await generateScriptWithOpenAI(apiKey, city, "walk", lengthMinutes, persona, stop, i, stops.length)
+        );
+      } catch (e) {
+        warningCount += 1;
+        lastWarning = `Script generation failed for ${persona} at "${stop.title}": ${e instanceof Error ? e.message : "Unknown error"}`;
       }
-
-      await admin.from("preset_route_stop_assets").upsert(
-        {
-          preset_route_id: routeId,
-          stop_id: stop.id,
-          persona,
-          script,
-          audio_url: toNullableTrimmed(current?.audio_url),
-          status: script ? "ready" : "failed",
-          error: script ? null : lastWarning || "Script generation failed",
-        },
-        { onConflict: "preset_route_id,stop_id,persona" }
-      );
-
-      doneUnits += 1;
-      await updateProgress("generating_script", `Generating scripts (${doneUnits}/${totalUnits})`);
     }
+
+    await admin.from("canonical_stop_assets").upsert(
+      {
+        canonical_stop_id: canonical.id,
+        persona,
+        script,
+        audio_url: toNullableTrimmed(current?.audio_url),
+        status: script ? "ready" : "failed",
+        error: script ? null : lastWarning || "Script generation failed",
+      },
+      { onConflict: "canonical_stop_id,persona" }
+    );
+
+    states.push({ stop, canonicalStopId: canonical.id, script });
+    doneUnits += 1;
+    await updateProgress("generating_script", `Generating scripts (${doneUnits}/${totalUnits})`);
   }
 
   await updateProgress("generating_audio", "Generating audio");
-  for (const persona of personas) {
-    for (let i = 0; i < stops.length; i += 1) {
-      const stop = stops[i];
-      const { data: current } = await admin
-        .from("preset_route_stop_assets")
-        .select("script,audio_url")
-        .eq("preset_route_id", routeId)
-        .eq("stop_id", stop.id)
-        .eq("persona", persona)
-        .maybeSingle();
+  for (const state of states) {
+    const replayUrl = toNullableTrimmed(switchConfig.replay_audio[state.stop.id]?.[persona]);
 
-      const replayUrl = toNullableTrimmed(switchConfig.replay_audio[stop.id]?.[persona]);
-      let audioUrl = !forceAudio ? toNullableTrimmed(current?.audio_url) : null;
-      if (replayUrl) audioUrl = replayUrl;
+    const { data: current } = await admin
+      .from("canonical_stop_assets")
+      .select("script,audio_url")
+      .eq("canonical_stop_id", state.canonicalStopId)
+      .eq("persona", persona)
+      .maybeSingle();
 
-      const script = toNullableTrimmed(current?.script);
-      if (!audioUrl && script) {
-        try {
-          const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, script);
-          audioUrl = toNullableTrimmed(await uploadNarrationAudio(audioBytes, `preset-${routeId}`, persona, stop.id));
-        } catch (e) {
-          warningCount += 1;
-          lastWarning = `Audio generation failed for ${persona} at "${stop.title}": ${e instanceof Error ? e.message : "Unknown error"}`;
-        }
-      } else if (!audioUrl && !script) {
+    const currentScript = toNullableTrimmed(current?.script) || state.script;
+    let audioUrl = !forceAudio ? toNullableTrimmed(current?.audio_url) : null;
+    if (replayUrl) audioUrl = replayUrl;
+
+    if (!audioUrl && currentScript) {
+      try {
+        const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, currentScript);
+        audioUrl = toNullableTrimmed(await uploadNarrationAudio(audioBytes, `preset-${routeId}`, persona, state.stop.id));
+      } catch (e) {
         warningCount += 1;
-        lastWarning = `Audio skipped for ${persona} at "${stop.title}" because script is missing`;
+        lastWarning = `Audio generation failed for ${persona} at "${state.stop.title}": ${e instanceof Error ? e.message : "Unknown error"}`;
       }
-
-      if (audioUrl) audioReadyCount += 1;
-
-      await admin.from("preset_route_stop_assets").upsert(
-        {
-          preset_route_id: routeId,
-          stop_id: stop.id,
-          persona,
-          script,
-          audio_url: audioUrl,
-          status: audioUrl ? "ready" : "failed",
-          error: audioUrl ? null : lastWarning || "Audio generation failed",
-        },
-        { onConflict: "preset_route_id,stop_id,persona" }
-      );
-
-      doneUnits += 1;
-      await updateProgress("generating_audio", `Generating audio (${doneUnits}/${totalUnits})`);
+    } else if (!audioUrl && !currentScript) {
+      warningCount += 1;
+      lastWarning = `Audio skipped for ${persona} at "${state.stop.title}" because script is missing`;
     }
+
+    if (isUsableGeneratedAudioUrl(audioUrl)) audioReadyCount += 1;
+
+    await admin.from("canonical_stop_assets").upsert(
+      {
+        canonical_stop_id: state.canonicalStopId,
+        persona,
+        script: currentScript,
+        audio_url: audioUrl,
+        status: audioUrl ? "ready" : "failed",
+        error: audioUrl ? null : lastWarning || "Audio generation failed",
+      },
+      { onConflict: "canonical_stop_id,persona" }
+    );
+
+    doneUnits += 1;
+    await updateProgress("generating_audio", `Generating audio (${doneUnits}/${totalUnits})`);
   }
 
   if (audioReadyCount === 0) {
-    throw new Error(lastWarning || "Audio generation failed for all preset stops/personas.");
+    throw new Error(lastWarning || `Audio generation failed for persona ${persona}.`);
   }
 
   if (warningCount > 0) {
@@ -219,7 +231,14 @@ export async function POST(req: Request) {
       image: s.images[0] ?? "/images/salem/placeholder-01.png",
     }));
 
-    void runPresetGeneration(job.id, resolvedJamId, route.id, body.city ?? "salem", stops).catch(async (e) => {
+    void runPresetGeneration(
+      job.id,
+      route.id,
+      body.city ?? "salem",
+      parseInt(route.durationLabel, 10) || 30,
+      body.persona,
+      stops
+    ).catch(async (e) => {
       await admin
         .from("preset_generation_jobs")
         .update({

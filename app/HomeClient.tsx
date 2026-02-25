@@ -551,7 +551,6 @@ async function startStopNarration() {
       setGenerationJobId(body.jobId);
       setGenerationJobKind("preset");
       router.replace(`/?jam=${jamId}`);
-      await loadJamById(jamId);
     } catch (e) {
       setGenerationJobKind(null);
       setErr(e instanceof Error ? e.message : "Failed to generate preset tour");
@@ -675,9 +674,6 @@ async function startStopNarration() {
       setGenerationStatusLabel("Queued");
       setGenerationMessage("Queued");
       router.replace(`/?jam=${body.jamId}`);
-      if (!jam || jam.id !== body.jamId) {
-        await loadJamById(body.jamId);
-      }
     } catch (e) {
       setGenerationJobKind(null);
       setErr(e instanceof Error ? e.message : "Failed to generate custom mix");
@@ -997,8 +993,8 @@ async function startStopNarration() {
             <div className={styles.landingCopyBlock}>
               <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets.</h1>
               <p className={styles.landingCopy}>
-               Experience any place through a different lens. More story. Less directions.
-              </p>
+               Wander with intention. Experience any place through a new lens. <strong>More story. Less directions.
+              </strong></p>
             </div>
 
             <div className={styles.landingPopular}>Popular MixTours:</div>
@@ -1547,7 +1543,7 @@ async function startStopNarration() {
               />
             </button>
             <a href={mapsUrl} target="_blank" rel="noreferrer" className={styles.mapViewButton}>
-              View in maps
+              View directions
             </a>
           </div>
           <div className={styles.rightRail}>
