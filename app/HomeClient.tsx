@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import { getRouteById, salemRoutes, type Persona, type RouteDef } from "@/app/content/salemRoutes";
+import { personaCatalog } from "@/lib/personas/catalog";
 import { getMaxStops, validateMixSelection } from "@/lib/mixConstraints";
 import dynamic from "next/dynamic";
 import styles from "./HomeClient.module.css";
@@ -219,6 +220,7 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
     }
     return Array.from(byId.values());
   }, [selectedCity]);
+  const activePersonaDisplayName = personaCatalog[persona].displayName;
   const maxStopsForSelection = useMemo(
     () => getMaxStops(selectedLengthMinutes, transportMode),
     [selectedLengthMinutes, transportMode]
@@ -655,9 +657,15 @@ async function startStopNarration() {
 
   useEffect(() => {
     if (step !== "pickDuration") return;
+    if (returnToWalkOnClose && jam?.route_id) {
+      const routeId = salemRoutes.some((r) => r.id === jam.route_id) ? jam.route_id : null;
+      setSelectedRouteId(routeId);
+      setSelectedPersona((jam.persona ?? null) as Persona | null);
+      return;
+    }
     setSelectedRouteId(null);
     setSelectedPersona(null);
-  }, [step]);
+  }, [step, returnToWalkOnClose, jam?.route_id, jam?.persona]);
 
   useEffect(() => {
     if (step !== "buildMix") return;
@@ -747,7 +755,7 @@ async function startStopNarration() {
   // ---------- UI ----------
   return (
     <div className={`${styles.container} ${step === "walk" || step === "landing" || step === "pickDuration" || step === "buildMix" || step === "generating" ? styles.containerWide : ""}`}>
-      {step !== "walk" && step !== "landing" && step !== "pickDuration" && (
+      {step !== "walk" && step !== "landing" && step !== "pickDuration" && step !== "buildMix" && (
         <header className={styles.header}>
           <div>
             <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.brandTitle}`}>MixTours</button>
@@ -778,13 +786,13 @@ async function startStopNarration() {
           <section className={styles.landingInfo}>
             <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>MixTours</button>
             <div className={styles.landingCopyBlock}>
-              <h1 className={styles.landingHeading}>A mixtape for the streets.</h1>
+              <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets.</h1>
               <p className={styles.landingCopy}>
-                Create an audio mix tour of your town for someone special because some places deserve more than directions.
+               Experience any place through a different lens. More story. Less directions.
               </p>
             </div>
 
-            <div className={styles.landingPopular}>Popular mix tours:</div>
+            <div className={styles.landingPopular}>Popular MixTours:</div>
 
             <button
               className={styles.landingTourRow}
@@ -824,7 +832,7 @@ async function startStopNarration() {
                 }}
                 className={styles.landingCtaButton}
               >
-                Create your own mix tour
+                Create a MixTour
               </button>
             </div>
           </section>
@@ -867,7 +875,59 @@ async function startStopNarration() {
       {/* PICK DURATION */}
       {step === "pickDuration" && (
         <main className={styles.pickLayout}>
-          <section className={styles.pickInfo}>
+          <section className={`${styles.pickInfo} ${styles.pickInfoSelectRoute}`}>
+            <button onClick={closeRoutePicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Close">
+              <Image
+                src="/icons/x.svg"
+                alt=""
+                width={26}
+                height={26}
+                className={styles.mapBackIconDark}
+                aria-hidden="true"
+              />
+            </button>
+            <h2 className={`${styles.pickHeading} ${styles.pickHeadingBelowClose}`}>What narrator do you want?</h2>
+            <div className={styles.pickPersonaRow}>
+              <button
+                onClick={() => setSelectedPersona("adult")}
+                className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
+              >
+                <div className={styles.pickNarratorWithAvatar}>
+                  <div className={styles.pickNarratorAvatarWrap}>
+                    <Image
+                      src={personaCatalog.adult.avatarSrc}
+                      alt={personaCatalog.adult.avatarAlt}
+                      fill
+                      className={styles.pickNarratorAvatar}
+                    />
+                  </div>
+                  <div>
+                    <div className={styles.pickRouteTitle}>{personaCatalog.adult.displayName}</div>
+                    <div className={styles.pickNarratorSub}>{personaCatalog.adult.description}</div>
+                  </div>
+                </div>
+              </button>
+              <button
+                onClick={() => setSelectedPersona("preteen")}
+                className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
+              >
+                <div className={styles.pickNarratorWithAvatar}>
+                  <div className={styles.pickNarratorAvatarWrap}>
+                    <Image
+                      src={personaCatalog.preteen.avatarSrc}
+                      alt={personaCatalog.preteen.avatarAlt}
+                      fill
+                      className={styles.pickNarratorAvatar}
+                    />
+                  </div>
+                  <div>
+                    <div className={styles.pickRouteTitle}>{personaCatalog.preteen.displayName}</div>
+                    <div className={styles.pickNarratorSub}>{personaCatalog.preteen.description}</div>
+                  </div>
+                </div>
+              </button>
+            </div>
+            <div className={styles.pickSectionDivider} />
             <div className={styles.pickCopyBlock}>
               <h2 className={styles.pickHeading}>
                 How long do you have in{" "}
@@ -885,20 +945,24 @@ async function startStopNarration() {
                   onClick={() => setSelectedRouteId(r.id)}
                   className={`${styles.pickRouteRow} ${selectedRouteId === r.id ? styles.pickRouteRowSelected : ""}`}
                 >
-                  <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>{r.title}</div>
-                    <div className={styles.pickRouteMeta}>
-                      {r.durationLabel} • {r.stops.length} stops • {formatRouteMiles(getRouteMiles(r.stops))} walking
+                  <div className={styles.pickRouteMainWithIcon}>
+                    <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                      <Image
+                        src="/icons/person-walking.svg"
+                        alt=""
+                        width={24}
+                        height={24}
+                        className={styles.pickRouteWalkIcon}
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <div className={styles.pickRouteMain}>
+                      <div className={styles.pickRouteTitle}>{r.title}</div>
+                      <div className={styles.pickRouteMeta}>
+                        {r.durationLabel} • {r.stops.length} stops • {formatRouteMiles(getRouteMiles(r.stops))}
+                      </div>
                     </div>
                   </div>
-                  <Image
-                    src="/icons/chevron-right.svg"
-                    alt=""
-                    width={24}
-                    height={24}
-                    className={styles.pickRouteArrowIcon}
-                    aria-hidden="true"
-                  />
                 </button>
               ))}
               <button
@@ -907,37 +971,31 @@ async function startStopNarration() {
                 aria-disabled="true"
                 className={`${styles.pickRouteRow} ${styles.pickRouteRowDisabled}`}
               >
-                <div className={styles.pickRouteMain}>
-                  <div className={styles.pickRouteTitle}>City Drive Thru</div>
-                  <div className={styles.pickRouteMeta}>Driving route • Coming soon</div>
+                <div className={styles.pickRouteMainWithIcon}>
+                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                    <Image
+                      src="/icons/car-front-fill.svg"
+                      alt=""
+                      width={24}
+                      height={24}
+                      className={styles.pickRouteWalkIcon}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className={styles.pickRouteMain}>
+                    <div className={styles.pickRouteTitle}>City Drive Thru</div>
+                    <div className={styles.pickRouteMeta}>Coming soon</div>
+                  </div>
                 </div>
-                <div className={styles.pickRouteArrow}>-</div>
               </button>
             </div>
-
-            <h2 className={`${styles.pickHeading} ${styles.pickNarratorHeading}`}>What narrator do you want?</h2>
-            <div className={styles.pickPersonaRow}>
-              <button
-                onClick={() => setSelectedPersona("adult")}
-                className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
-              >
-                <div className={styles.pickRouteTitle}>AI Historian</div>
-                <div className={styles.pickNarratorSub}>Lorem ispum</div>
-              </button>
-              <button
-                onClick={() => setSelectedPersona("preteen")}
-                className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
-              >
-                <div className={styles.pickRouteTitle}>AI Main Character</div>
-                <div className={styles.pickNarratorSub}>Lorem ispum</div>
-              </button>
-            </div>
+            <div className={styles.pickSectionDivider} />
 
             <div className={styles.pickDurationStartWrap}>
               <button
                 onClick={startTourFromSelection}
                 disabled={!selectedRouteId || !selectedPersona}
-                className={styles.landingCtaButton}
+                className={`${styles.landingCtaButton} ${styles.startTourButton}`}
               >
                 Start Tour
               </button>
@@ -945,7 +1003,7 @@ async function startStopNarration() {
                 onClick={() => setStep("buildMix")}
                 className={styles.pickBuildMixButton}
               >
-                Create your own mix tour
+                Create a MixTour
               </button>
             </div>
           </section>
@@ -956,14 +1014,15 @@ async function startStopNarration() {
               currentStopIndex={0}
               myPos={myPos}
               cityCenter={selectedCityCenter}
+              followCurrentStop={false}
             />
-            <button onClick={closeRoutePicker} className={styles.mapBackButton} aria-label="Close">
+            <button onClick={closeRoutePicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`} aria-label="Close">
               <Image
                 src="/icons/x.svg"
                 alt=""
                 width={26}
                 height={26}
-                className={styles.mapBackIcon}
+                className={styles.mapBackIconDark}
                 aria-hidden="true"
               />
             </button>
@@ -974,6 +1033,20 @@ async function startStopNarration() {
       {step === "buildMix" && (
         <main className={styles.pickLayout}>
           <section className={styles.pickInfo}>
+            <button
+              onClick={closeRoutePicker}
+              className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`}
+              aria-label="Close"
+            >
+              <Image
+                src="/icons/x.svg"
+                alt=""
+                width={26}
+                height={26}
+                className={styles.mapBackIconDark}
+                aria-hidden="true"
+              />
+            </button>
             <div className={styles.pickCopyBlock}>
               <h2 className={styles.pickHeading}>Create your own mix in {selectedCityLabel}</h2>
             </div>
@@ -984,19 +1057,47 @@ async function startStopNarration() {
                 onClick={() => setTransportMode("walk")}
                 className={`${styles.pickNarratorOption} ${transportMode === "walk" ? styles.pickNarratorOptionSelected : ""}`}
               >
-                <div className={styles.pickRouteTitle}>Walk</div>
-                <div className={styles.pickNarratorSub}>Curated walking route</div>
+                <div className={styles.pickRouteMainWithIcon}>
+                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                    <Image
+                      src="/icons/person-walking.svg"
+                      alt=""
+                      width={24}
+                      height={24}
+                      className={styles.pickRouteWalkIcon}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className={styles.pickRouteMain}>
+                    <div className={styles.pickRouteTitle}>Walk</div>
+                    <div className={styles.pickNarratorSub}>Curated walking route</div>
+                  </div>
+                </div>
               </button>
               <button
                 onClick={() => setTransportMode("drive")}
                 className={`${styles.pickNarratorOption} ${transportMode === "drive" ? styles.pickNarratorOptionSelected : ""}`}
               >
-                <div className={styles.pickRouteTitle}>Drive</div>
-                <div className={styles.pickNarratorSub}>City drive-through mix</div>
+                <div className={styles.pickRouteMainWithIcon}>
+                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                    <Image
+                      src="/icons/car-front-fill.svg"
+                      alt=""
+                      width={24}
+                      height={24}
+                      className={styles.pickRouteWalkIcon}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className={styles.pickRouteMain}>
+                    <div className={styles.pickRouteTitle}>Drive</div>
+                    <div className={styles.pickNarratorSub}>City drive-through mix</div>
+                  </div>
+                </div>
               </button>
             </div>
 
-            <div className={styles.pickSectionLabel}>Length of stay</div>
+            <div className={styles.pickSectionLabel}>Length of tour</div>
             <div className={styles.pickLengthRow}>
               {[15, 30, 60].map((min) => (
                 <button
@@ -1015,15 +1116,39 @@ async function startStopNarration() {
                 onClick={() => setSelectedPersona("adult")}
                 className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
               >
-                <div className={styles.pickRouteTitle}>AI Historian</div>
-                <div className={styles.pickNarratorSub}>Context and facts</div>
+                <div className={styles.pickNarratorWithAvatar}>
+                  <div className={styles.pickNarratorAvatarWrap}>
+                    <Image
+                      src={personaCatalog.adult.avatarSrc}
+                      alt={personaCatalog.adult.avatarAlt}
+                      fill
+                      className={styles.pickNarratorAvatar}
+                    />
+                  </div>
+                  <div>
+                    <div className={styles.pickRouteTitle}>{personaCatalog.adult.displayName}</div>
+                    <div className={styles.pickNarratorSub}>{personaCatalog.adult.description}</div>
+                  </div>
+                </div>
               </button>
               <button
                 onClick={() => setSelectedPersona("preteen")}
                 className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
               >
-                <div className={styles.pickRouteTitle}>AI Main Character</div>
-                <div className={styles.pickNarratorSub}>Story-led and playful</div>
+                <div className={styles.pickNarratorWithAvatar}>
+                  <div className={styles.pickNarratorAvatarWrap}>
+                    <Image
+                      src={personaCatalog.preteen.avatarSrc}
+                      alt={personaCatalog.preteen.avatarAlt}
+                      fill
+                      className={styles.pickNarratorAvatar}
+                    />
+                  </div>
+                  <div>
+                    <div className={styles.pickRouteTitle}>{personaCatalog.preteen.displayName}</div>
+                    <div className={styles.pickNarratorSub}>{personaCatalog.preteen.description}</div>
+                  </div>
+                </div>
               </button>
             </div>
 
@@ -1043,18 +1168,27 @@ async function startStopNarration() {
                     className={`${styles.pickRouteRow} ${styles.pickRouteRowBuildMix} ${active ? styles.pickRouteRowSelected : ""}`}
                   >
                     <div className={styles.pickRouteArrow}>
-                      {active ? (
-                        "×"
-                      ) : (
-                        <Image
-                          src="/icons/plus.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className={styles.pickRouteArrowIcon}
-                          aria-hidden="true"
-                        />
-                      )}
+                      <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                        {active ? (
+                          <Image
+                            src="/icons/x.svg"
+                            alt=""
+                            width={20}
+                            height={20}
+                            className={styles.pickRouteArrowIcon}
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <Image
+                            src="/icons/plus.svg"
+                            alt=""
+                            width={20}
+                            height={20}
+                            className={styles.pickRouteArrowIcon}
+                            aria-hidden="true"
+                          />
+                        )}
+                      </div>
                     </div>
                     <div className={styles.pickRouteMain}>
                       <div className={styles.pickRouteTitle}>{stop.title}</div>
@@ -1075,9 +1209,9 @@ async function startStopNarration() {
               <button
                 onClick={startCustomMixGeneration}
                 disabled={!selectionValidation.ok || !selectedPersona || isGeneratingMix}
-                className={styles.landingCtaButton}
+                className={`${styles.landingCtaButton} ${styles.startTourButton}`}
               >
-                Generate & Start Tour
+                Generate Tour
               </button>
             </div>
           </section>
@@ -1087,14 +1221,19 @@ async function startStopNarration() {
               currentStopIndex={0}
               myPos={myPos}
               cityCenter={selectedCityCenter}
+              followCurrentStop={false}
             />
-            <button onClick={closeRoutePicker} className={styles.mapBackButton} aria-label="Close">
+            <button
+              onClick={closeRoutePicker}
+              className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`}
+              aria-label="Close"
+            >
               <Image
                 src="/icons/x.svg"
                 alt=""
                 width={26}
                 height={26}
-                className={styles.mapBackIcon}
+                className={styles.mapBackIconDark}
                 aria-hidden="true"
               />
             </button>
@@ -1155,7 +1294,12 @@ async function startStopNarration() {
       {step === "walk" && route && currentStop && (
         <main className={styles.walkLayout}>
           <div className={styles.mapHero}>
-            <RouteMap stops={route.stops} currentStopIndex={currentStopIndex} myPos={myPos} />
+            <RouteMap
+              stops={route.stops}
+              currentStopIndex={currentStopIndex}
+              myPos={myPos}
+              initialFitRoute
+            />
             <button onClick={goHome} className={styles.mapBackButton} aria-label="Close">
               <Image
                 src="/icons/x.svg"
@@ -1182,7 +1326,7 @@ async function startStopNarration() {
                   aria-hidden="true"
                 />
                 <div className={styles.walkNarrator}>
-                  Narrated by {persona === "adult" ? "AI Historian" : "AI Main Character"}
+                  Narrated by {activePersonaDisplayName}
                 </div>
               </div>
             <h1 className={styles.walkHeadline}>{route.title}</h1>
@@ -1256,7 +1400,14 @@ async function startStopNarration() {
                   onClick={toggleAudio}
                   aria-label={isPlaying ? "Pause current stop" : "Play current stop"}
                 >
-                  {isPlaying ? "❚❚" : "▶"}
+                  <Image
+                    src={isPlaying ? "/icons/pause-fill.svg" : "/icons/play-fill.svg"}
+                    alt=""
+                    width={28}
+                    height={28}
+                    className={styles.nowPlayingIcon}
+                    aria-hidden="true"
+                  />
                 </button>
               </div>
             </div>

@@ -18,9 +18,18 @@ type Props = {
   currentStopIndex: number;
   myPos?: { lat: number; lng: number } | null;
   cityCenter?: { lat: number; lng: number } | null;
+  followCurrentStop?: boolean;
+  initialFitRoute?: boolean;
 };
 
-export default function RouteMap({ stops, currentStopIndex, myPos, cityCenter }: Props) {
+export default function RouteMap({
+  stops,
+  currentStopIndex,
+  myPos,
+  cityCenter,
+  followCurrentStop = true,
+  initialFitRoute = false,
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
@@ -151,8 +160,8 @@ export default function RouteMap({ stops, currentStopIndex, myPos, cityCenter }:
                 "match",
                 ["get", "status"],
                 "current",
-                10,
-                7,
+                12,
+                9,
               ],
               "circle-stroke-color": "#ffffff",
               "circle-stroke-width": 2,
@@ -166,7 +175,7 @@ export default function RouteMap({ stops, currentStopIndex, myPos, cityCenter }:
             source: "stops",
             layout: {
               "text-field": ["get", "label"],
-              "text-size": 11,
+              "text-size": 12,
               "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
             },
             paint: {
@@ -266,9 +275,25 @@ export default function RouteMap({ stops, currentStopIndex, myPos, cityCenter }:
     if (!map) return;
     if (!map.isStyleLoaded()) return;
 
+    if (initialFitRoute && currentStopIndex === 0) {
+      fitMapToRoute(map, routeCoords, stops);
+      return;
+    }
+
+    if (!followCurrentStop) return;
     const cur = stops[currentStopIndex];
     if (cur) map.easeTo({ center: [cur.lng, cur.lat], duration: 450 });
-  }, [stops, currentStopIndex]);
+  }, [stops, currentStopIndex, followCurrentStop, initialFitRoute, routeCoords]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!map.isStyleLoaded()) return;
+    if (followCurrentStop) return;
+    if (!stops.length) return;
+
+    fitMapToRoute(map, routeCoords, stops);
+  }, [followCurrentStop, routeCoords, stops]);
 
   return (
     <div className={styles.mapShell}>
@@ -382,6 +407,31 @@ function fitMapToPoints(map: MapLibreMap, stops: Stop[], myPos?: { lat: number; 
       [maxX, maxY],
     ],
     { padding: 40, duration: 0 }
+  );
+}
+
+function fitMapToRoute(map: MapLibreMap, routeCoords: [number, number][] | null, stops: Stop[]) {
+  const coords: [number, number][] = routeCoords?.length ? routeCoords : stops.map((s) => [s.lng, s.lat]);
+  if (!coords.length) return;
+
+  let minX = coords[0][0];
+  let minY = coords[0][1];
+  let maxX = coords[0][0];
+  let maxY = coords[0][1];
+
+  for (const [x, y] of coords) {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+
+  map.fitBounds(
+    [
+      [minX, minY],
+      [maxX, maxY],
+    ],
+    { padding: 56, duration: 350 }
   );
 }
 

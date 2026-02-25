@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { historianPersonaPrompt } from "@/lib/personas/historian";
-import { mainCharacterPersonaPrompt } from "@/lib/personas/mainCharacter";
+import { personaCatalog } from "@/lib/personas/catalog";
 
 export type Persona = "adult" | "preteen";
 export type StopInput = {
@@ -17,8 +16,8 @@ const VOICE_BY_PERSONA: Record<Persona, string> = {
 };
 
 const PERSONA_PROMPTS = {
-  adult: historianPersonaPrompt,
-  preteen: mainCharacterPersonaPrompt,
+  adult: personaCatalog.adult.prompt,
+  preteen: personaCatalog.preteen.prompt,
 } as const;
 
 export async function generateScriptWithOpenAI(
@@ -145,7 +144,7 @@ export async function uploadNarrationAudio(audioBytes: Uint8Array, routeId: stri
 
 export function fallbackScript(city: string, persona: Persona, stop: StopInput, index: number) {
   if (persona === "adult") {
-    const personaPrompt = historianPersonaPrompt;
+    const personaPrompt = PERSONA_PROMPTS.adult;
     return [
       personaPrompt.fallbackTemplate.line1(stop.title, city),
       personaPrompt.fallbackTemplate.line2,
@@ -153,7 +152,7 @@ export function fallbackScript(city: string, persona: Persona, stop: StopInput, 
       personaPrompt.fallbackTemplate.line4(index + 2),
     ].join(" ");
   }
-  const personaPrompt = mainCharacterPersonaPrompt;
+  const personaPrompt = PERSONA_PROMPTS.preteen;
   return [
     personaPrompt.fallbackTemplate.line1(stop.title),
     personaPrompt.fallbackTemplate.line2,

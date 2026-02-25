@@ -27,7 +27,7 @@ export type RouteDef = {
 export const salemRoutes: RouteDef[] = [
   {
     id: "salem-core-15",
-    title: "Quick Hits",
+    title: "Speed Walker",
     durationLabel: "15 min",
     description: "A tight loop of Salem’s essential landmarks—quick, iconic, easy.",
     stops: [

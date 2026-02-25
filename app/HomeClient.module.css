@@ -106,7 +106,7 @@
 }
 
 .landingBrand {
-  font-size: 44px;
+  font-size: 24px;
   font-weight: 700;
 }
 
@@ -116,7 +116,7 @@
 
 .landingHeading {
   margin: 0;
-  font-size: 44px;
+  font-size: 54px;
   line-height: 1.05;
   font-weight: 500;
 }
@@ -212,6 +212,11 @@
   cursor: pointer;
 }
 
+.startTourButton {
+  background: #ff5f92;
+  color: #16161d;
+}
+
 .landingImagePane {
   min-height: 100%;
   background: #c9c9cc;
@@ -244,17 +249,26 @@
   padding: 34px 32px 28px;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .pickCopyBlock {
   margin-top: 68px;
 }
 
+.pickInfoSelectRoute .pickCopyBlock {
+  margin-top: 36px;
+}
+
 .pickHeading {
   margin: 0;
-  font-size: 26px;
+  font-size: 44px;
   line-height: 1.05;
   font-weight: 700;
+}
+
+.pickHeadingBelowClose {
+  margin-top: 84px;
 }
 
 .pickHeadingCityLink {
@@ -299,6 +313,14 @@
   opacity: 0.82;
 }
 
+.pickSectionDivider {
+  width: calc(100% + 64px);
+  height: 3px;
+  background: #333;
+  margin: 22px 0;
+  margin-left: -32px;
+}
+
 .pickRouteList {
   margin-top: 10px;
 }
@@ -323,7 +345,7 @@
 }
 
 .pickRouteRowSelected {
-  background: rgba(255, 255, 255, 0.06);
+  background: transparent;
 }
 
 .pickRouteRowSelected .pickRouteTitle {
@@ -341,8 +363,32 @@
   gap: 4px;
 }
 
+.pickRouteMainWithIcon {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pickRouteIconCircle {
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pickRouteWalkIcon {
+  width: 24px;
+  height: 24px;
+  filter: invert(1);
+  opacity: 0.9;
+}
+
 .pickRouteTitle {
-  font-size: 36px;
+  font-size: 24px;
   font-weight: 700;
 }
 
@@ -355,7 +401,7 @@
   font-size: 44px;
   line-height: 1;
   opacity: 0.92;
-  width: 44px;
+  width: 52px;
   flex-shrink: 0;
 }
 
@@ -364,6 +410,12 @@
   height: 24px;
   filter: invert(1);
   opacity: 0.92;
+}
+
+.pickRouteToggleIcon {
+  font-size: 30px;
+  line-height: 1;
+  color: #fff;
 }
 
 .stopRating {
@@ -406,17 +458,44 @@
 }
 
 .pickNarratorOptionSelected {
-  background: rgba(255, 255, 255, 0.06);
+  background: transparent;
 }
 
 .pickNarratorOptionSelected .pickRouteTitle {
   color: #ff79a8;
 }
 
+.pickRouteList > :last-child {
+  border-bottom: 0;
+}
+
+.pickPersonaRow > :last-child {
+  border-bottom: 0;
+}
+
 .pickNarratorSub {
   margin-top: 4px;
   font-size: 16px;
   opacity: 0.82;
+}
+
+.pickNarratorWithAvatar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pickNarratorAvatarWrap {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.pickNarratorAvatar {
+  object-fit: cover;
 }
 
 .pickImagePane {
@@ -646,6 +725,31 @@
   width: 26px;
   height: 26px;
   filter: invert(1);
+}
+
+.mapBackButtonInverted {
+  background: rgba(24, 24, 31, 0.82);
+}
+
+.mapBackIconDark {
+  width: 26px;
+  height: 26px;
+  filter: invert(1);
+}
+
+.pickCloseButtonLeft {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 3;
+}
+
+.pickCloseButtonDesktop {
+  display: inline-flex;
+}
+
+.pickCloseButtonMapMobile {
+  display: none;
 }
 
 
@@ -1069,7 +1173,8 @@
     top: 18px;
     left: 24px;
     z-index: 1;
-    font-size: 44px;
+    font-size: 24px;
+    display:none;
   }
 
   .landingCopyBlock {
@@ -1077,7 +1182,7 @@
   }
 
   .landingHeading {
-    font-size: 44px;
+    font-size: 54px;
   }
 
   .landingPopular {
@@ -1106,6 +1211,14 @@
     min-height: 320px;
   }
 
+  .pickCloseButtonDesktop {
+    display: none;
+  }
+
+  .pickCloseButtonMapMobile {
+    display: inline-flex;
+  }
+
   .pickInfo {
     order: 2;
     padding: 20px 24px 30px;
@@ -1119,8 +1232,17 @@
     font-size: 44px;
   }
 
+  .pickHeadingBelowClose {
+    margin-top: 0;
+  }
+
   .pickSectionLabel {
     margin-top: 24px;
+  }
+
+  .pickSectionDivider {
+    width: calc(100% + 48px);
+    margin-left: -24px;
   }
 
   .pickRouteTitle {
@@ -1166,6 +1288,10 @@
 }
 
 @media (min-width: 1024px) {
+  .mapBackButtonInverted {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
   .walkLayout {
     display: grid;
     grid-template-columns: minmax(0, 59%) minmax(380px, 41%);

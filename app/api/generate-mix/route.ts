@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { personaCatalog } from "@/lib/personas/catalog";
 
 type Persona = "adult" | "preteen";
 type StopInput = {
@@ -31,7 +32,7 @@ async function generateScriptWithOpenAI(
   persona: Persona,
   stop: StopInput
 ) {
-  const personaLabel = persona === "adult" ? "AI Historian" : "AI Main Character";
+  const personaLabel = personaCatalog[persona].displayName;
   const prompt = [
     `You are ${personaLabel}.`,
     `City: ${city}.`,
@@ -124,7 +125,7 @@ async function uploadNarrationAudio(
 }
 
 function fallbackScript(city: string, persona: Persona, stop: StopInput, index: number) {
-  const voice = persona === "adult" ? "AI Historian" : "AI Main Character";
+  const voice = personaCatalog[persona].displayName;
   return `${voice} here. Stop ${index + 1} is ${stop.title} in ${city}. Notice one detail around you and imagine how this place connects to the city story.`;
 }
 
