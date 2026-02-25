@@ -195,10 +195,13 @@ export async function POST(req: Request) {
         .eq("id", jamId);
     }
 
+    const resolvedJamId = jamId;
+    if (!resolvedJamId) throw new Error("Failed to resolve jam id");
+
     const { data: job, error: jobErr } = await admin
       .from("preset_generation_jobs")
       .insert({
-        jam_id: jamId,
+        jam_id: resolvedJamId,
         preset_route_id: route.id,
         status: "queued",
         progress: 0,
@@ -216,7 +219,7 @@ export async function POST(req: Request) {
       image: s.images[0] ?? "/images/salem/placeholder-01.png",
     }));
 
-    void runPresetGeneration(job.id, jamId, route.id, body.city ?? "salem", stops).catch(async (e) => {
+    void runPresetGeneration(job.id, resolvedJamId, route.id, body.city ?? "salem", stops).catch(async (e) => {
       await admin
         .from("preset_generation_jobs")
         .update({
@@ -228,7 +231,7 @@ export async function POST(req: Request) {
         .eq("id", job.id);
     });
 
-    return NextResponse.json({ jamId, routeId: route.id, jobId: job.id });
+    return NextResponse.json({ jamId: resolvedJamId, routeId: route.id, jobId: job.id });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to create preset job" }, { status: 500 });
   }
