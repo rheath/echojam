@@ -1696,67 +1696,68 @@ async function startStopNarration() {
               </div>
             </div>
 
-            <div className={styles.nowPlayingBar}>
-              <audio ref={audioRef} preload="metadata" src={currentStopAudio} hidden />
-              <input
-                type="range"
-                min={0}
-                max={audioDuration || 0}
-                step={0.1}
-                value={Math.min(audioTime, audioDuration || audioTime)}
-                onChange={(e) => seekAudio(Number(e.target.value))}
-                disabled={!hasCurrentAudio}
-                className={`${styles.audioSeek} ${styles.nowPlayingSeek}`}
-              />
-              <div className={styles.nowPlayingContent}>
-                <div className={styles.nowPlayingMeta}>
-                  <button
-                    type="button"
-                    className={styles.nowPlayingTitleLink}
-                    onClick={openScriptModal}
-                    disabled={!currentStop}
-                  >
-                    {currentStop ? currentStop.title : "Select a stop to begin"}
-                  </button>
-                  <div className={styles.nowPlayingLinksRow}>
-                    <div className={styles.nowPlayingSubtitle}>
-                      {isGeneratingScriptForModal
-                        ? "Generating script..."
-                        : isGeneratingAudioForCurrentStop
-                          ? "Generating audio..."
-                          : hasCurrentAudio
-                            ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
-                            : "Audio not generated yet"}
-                    </div>
-                    {hasCurrentAudio ? (
-                      <a
-                        className={styles.nowPlayingInlineLink}
-                        href={currentStopAudio}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        View audio
-                      </a>
-                    ) : null}
-                  </div>
-                </div>
-                <button
-                  className={styles.nowPlayingButton}
-                  onClick={toggleAudio}
+            {currentStop && (
+              <div className={styles.nowPlayingBar}>
+                <audio ref={audioRef} preload="metadata" src={currentStopAudio} hidden />
+                <input
+                  type="range"
+                  min={0}
+                  max={audioDuration || 0}
+                  step={0.1}
+                  value={Math.min(audioTime, audioDuration || audioTime)}
+                  onChange={(e) => seekAudio(Number(e.target.value))}
                   disabled={!hasCurrentAudio}
-                  aria-label={isPlaying ? "Pause current stop" : "Play current stop"}
-                >
-                  <Image
-                    src={isPlaying ? "/icons/pause-fill.svg" : "/icons/play-fill.svg"}
-                    alt=""
-                    width={28}
-                    height={28}
-                    className={styles.nowPlayingIcon}
-                    aria-hidden="true"
-                  />
-                </button>
+                  className={`${styles.audioSeek} ${styles.nowPlayingSeek}`}
+                />
+                <div className={`${styles.nowPlayingContent} ${styles.nowPlayingContentEnter}`}>
+                  <div className={styles.nowPlayingMeta}>
+                    <button
+                      type="button"
+                      className={styles.nowPlayingTitleLink}
+                      onClick={openScriptModal}
+                    >
+                      {currentStop.title}
+                    </button>
+                    <div className={styles.nowPlayingLinksRow}>
+                      <div className={styles.nowPlayingSubtitle}>
+                        {isGeneratingScriptForModal
+                          ? "Generating script..."
+                          : isGeneratingAudioForCurrentStop
+                            ? "Generating audio..."
+                            : hasCurrentAudio
+                              ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
+                              : "Audio not generated yet"}
+                      </div>
+                      {hasCurrentAudio ? (
+                        <a
+                          className={styles.nowPlayingInlineLink}
+                          href={currentStopAudio}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          View audio
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                  <button
+                    className={styles.nowPlayingButton}
+                    onClick={toggleAudio}
+                    disabled={!hasCurrentAudio}
+                    aria-label={isPlaying ? "Pause current stop" : "Play current stop"}
+                  >
+                    <Image
+                      src={isPlaying ? "/icons/pause-fill.svg" : "/icons/play-fill.svg"}
+                      alt=""
+                      width={28}
+                      height={28}
+                      className={styles.nowPlayingIcon}
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
             {isScriptModalOpen && (
               <div className={styles.scriptModalOverlay} role="dialog" aria-modal="true" aria-label="Narration script">
                 <div className={styles.scriptModal}>

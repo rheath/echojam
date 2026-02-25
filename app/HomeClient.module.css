@@ -994,6 +994,21 @@
   padding: 12px 20px 16px;
 }
 
+.nowPlayingContentEnter {
+  animation: nowPlayingSlideUp 220ms ease-out;
+}
+
+@keyframes nowPlayingSlideUp {
+  from {
+    transform: translateY(18px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 .nowPlayingTitle {
   font-size: 24px;
   font-weight: 700;
