@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRouteById } from "@/app/content/salemRoutes";
 import { toNullableTrimmed } from "@/lib/mixGeneration";
-import { cityPlaceholderImage } from "@/lib/placesImages";
 
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -20,7 +19,6 @@ type MappingRow = {
 type CanonicalImageRow = {
   id: string;
   image_url: string | null;
-  fallback_image_url: string | null;
 };
 
 type AssetRow = {
@@ -42,7 +40,37 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
     const route = getRouteById(routeId);
     if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
 
-    const admin = getAdmin();
+    let admin: ReturnType<typeof getAdmin> | null = null;
+    try {
+      admin = getAdmin();
+    } catch (e) {
+      console.error("preset-routes: admin client unavailable", e);
+    }
+
+    if (!admin) {
+      const stops = route.stops.map((stop, index) => ({
+        stop_id: stop.id,
+        title: stop.title,
+        lat: stop.lat,
+        lng: stop.lng,
+        image_url: toNullableTrimmed(stop.images[0]) || "/images/salem/placeholder-01.png",
+        script_adult: null,
+        script_preteen: null,
+        audio_url_adult: null,
+        audio_url_preteen: null,
+        position: index,
+      }));
+      return NextResponse.json({
+        route: {
+          id: route.id,
+          title: route.title,
+          length_minutes: parseInt(route.durationLabel, 10) || 30,
+          transport_mode: "walk",
+          status: "ready",
+        },
+        stops,
+      });
+    }
 
     const { data: mappings, error: mapErr } = await admin
       .from("route_stop_mappings")
@@ -50,11 +78,13 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       .eq("route_kind", "preset")
       .eq("route_id", routeId)
       .order("position", { ascending: true });
-    if (mapErr) return NextResponse.json({ error: mapErr.message }, { status: 500 });
+    if (mapErr) {
+      console.error("preset-routes: mapping query failed", mapErr);
+    }
 
     const mappingByStop = new Map<string, MappingRow>();
     const canonicalIds = new Set<string>();
-    for (const row of (mappings ?? []) as MappingRow[]) {
+    for (const row of ((mappings ?? []) as MappingRow[])) {
       mappingByStop.set(row.stop_id, row);
       canonicalIds.add(row.canonical_stop_id);
     }
@@ -66,15 +96,21 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
         .from("canonical_stop_assets")
         .select("canonical_stop_id,persona,script,audio_url")
         .in("canonical_stop_id", Array.from(canonicalIds));
-      if (assetsErr) return NextResponse.json({ error: assetsErr.message }, { status: 500 });
-      assets = (assetRows ?? []) as AssetRow[];
+      if (assetsErr) {
+        console.error("preset-routes: assets query failed", assetsErr);
+      } else {
+        assets = (assetRows ?? []) as AssetRow[];
+      }
 
       const { data: imageRows, error: imagesErr } = await admin
         .from("canonical_stops")
-        .select("id,image_url,fallback_image_url")
+        .select("id,image_url")
         .in("id", Array.from(canonicalIds));
-      if (imagesErr) return NextResponse.json({ error: imagesErr.message }, { status: 500 });
-      canonicalImages = (imageRows ?? []) as CanonicalImageRow[];
+      if (imagesErr) {
+        console.error("preset-routes: canonical image query failed", imagesErr);
+      } else {
+        canonicalImages = (imageRows ?? []) as CanonicalImageRow[];
+      }
     }
 
     const assetsByCanonical = new Map<
@@ -111,8 +147,6 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
     for (const row of canonicalImages) {
       imageByCanonical.set(row.id, row);
     }
-    const placeholder = cityPlaceholderImage("salem");
-
     const { data: latestJob } = await admin
       .from("preset_generation_jobs")
       .select("status")
@@ -126,7 +160,6 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       const assetsForStop = mapping ? assetsByCanonical.get(mapping.canonical_stop_id) : null;
       const imageForStop = mapping ? imageByCanonical.get(mapping.canonical_stop_id) : null;
       const canonicalImage = toNullableTrimmed(imageForStop?.image_url);
-      const curatedFallback = toNullableTrimmed(imageForStop?.fallback_image_url);
       const routeImage = toNullableTrimmed(stop.images[0]);
 
       return {
@@ -136,9 +169,8 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
         lng: stop.lng,
         image_url:
           (isNonPlaceholderImage(canonicalImage) ? canonicalImage : null) ||
-          (isNonPlaceholderImage(curatedFallback) ? curatedFallback : null) ||
           routeImage ||
-          placeholder,
+          "/images/salem/placeholder-01.png",
         script_adult: assetsForStop?.script_adult ?? null,
         script_preteen: assetsForStop?.script_preteen ?? null,
         audio_url_adult: assetsForStop?.audio_url_adult ?? null,

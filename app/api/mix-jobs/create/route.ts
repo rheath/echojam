@@ -215,6 +215,25 @@ export async function POST(req: Request) {
       jamId = jam.id;
     }
 
+    const { data: activeJob } = await admin
+      .from("mix_generation_jobs")
+      .select("id,status")
+      .eq("jam_id", jamId)
+      .in("status", ["queued", "generating_script", "generating_audio"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (activeJob?.id) {
+      return NextResponse.json(
+        {
+          error: "A generation job is already in progress for this jam.",
+          jobId: activeJob.id,
+          status: activeJob.status,
+        },
+        { status: 429 }
+      );
+    }
+
     const { data: route, error: routeErr } = await admin
       .from("custom_routes")
       .insert({
