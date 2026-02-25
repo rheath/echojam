@@ -1274,8 +1274,8 @@ async function startStopNarration() {
       )}
 
       {step === "buildMix" && (
-        <main className={styles.pickLayout}>
-          <section className={styles.pickInfo}>
+        <main className={`${styles.pickLayout} ${styles.buildMixLayout}`}>
+          <section className={`${styles.pickInfo} ${styles.buildMixInfo}`}>
             <button
               onClick={closeRoutePicker}
               className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`}
@@ -1291,7 +1291,7 @@ async function startStopNarration() {
               />
             </button>
             <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>Create your own mix in {selectedCityLabel}</h2>
+              <h2 className={styles.pickHeading}>Create your own mix of {selectedCityLabel}</h2>
             </div>
 
             <div className={styles.pickSectionLabel}>Transportation</div>
@@ -1485,7 +1485,7 @@ async function startStopNarration() {
               </button>
             </div>
           </section>
-          <section className={styles.pickImagePane}>
+          <section className={`${styles.pickImagePane} ${styles.buildMixImagePane}`}>
             <RouteMap
               stops={builderSelectedStops}
               currentStopIndex={0}
@@ -1612,7 +1612,7 @@ async function startStopNarration() {
             </div>
 
               <div className={styles.walkActionRow}>
-                <button className={styles.pillButton} type="button" onClick={copyShareLink}>Add people</button>
+                <button className={styles.pillButton} type="button" onClick={copyShareLink}>Share to...</button>
                 <button
                   className={styles.pillButton}
                   type="button"
