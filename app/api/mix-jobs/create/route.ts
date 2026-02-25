@@ -29,10 +29,10 @@ type StopAssetCache = Partial<
   Record<
     string,
     {
-      script_adult?: string;
-      script_preteen?: string;
-      audio_url_adult?: string;
-      audio_url_preteen?: string;
+      script_adult?: string | null;
+      script_preteen?: string | null;
+      audio_url_adult?: string | null;
+      audio_url_preteen?: string | null;
     }
   >
 >;
@@ -49,9 +49,20 @@ function getAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+function toNullableTrimmed(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized ? normalized : null;
+}
+
+function getFallbackAudioUrl(persona: Persona) {
+  return persona === "adult" ? "/audio/adult-01.mp3" : "/audio/kid-01.mp3";
+}
+
 function isGeneratedAudioUrl(url: string | null | undefined) {
-  if (!url) return false;
-  return !url.startsWith("/audio/");
+  const normalized = toNullableTrimmed(url);
+  if (!normalized) return false;
+  return !normalized.startsWith("/audio/");
 }
 
 async function loadGenerationSwitch(): Promise<Required<GenerationSwitch>> {
@@ -86,10 +97,15 @@ async function loadReusableAssets(
     if (!byStop[stopId]) byStop[stopId] = {};
     const cached = byStop[stopId]!;
 
-    if (!cached.script_adult && row.script_adult) cached.script_adult = row.script_adult;
-    if (!cached.script_preteen && row.script_preteen) cached.script_preteen = row.script_preteen;
-    if (!cached.audio_url_adult && isGeneratedAudioUrl(row.audio_url_adult)) cached.audio_url_adult = row.audio_url_adult;
-    if (!cached.audio_url_preteen && isGeneratedAudioUrl(row.audio_url_preteen)) cached.audio_url_preteen = row.audio_url_preteen;
+    const scriptAdult = toNullableTrimmed(row.script_adult);
+    const scriptPreteen = toNullableTrimmed(row.script_preteen);
+    const audioAdult = toNullableTrimmed(row.audio_url_adult);
+    const audioPreteen = toNullableTrimmed(row.audio_url_preteen);
+
+    if (!cached.script_adult && scriptAdult) cached.script_adult = scriptAdult;
+    if (!cached.script_preteen && scriptPreteen) cached.script_preteen = scriptPreteen;
+    if (!cached.audio_url_adult && isGeneratedAudioUrl(audioAdult)) cached.audio_url_adult = audioAdult;
+    if (!cached.audio_url_preteen && isGeneratedAudioUrl(audioPreteen)) cached.audio_url_preteen = audioPreteen;
   }
   return byStop;
 }
@@ -125,10 +141,14 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
         .eq("route_id", routeId)
         .eq("stop_id", stop.id)
         .single();
-      const existingScript = persona === "adult" ? current?.script_adult : current?.script_preteen;
-      const reusableScript = persona === "adult" ? reusableAssets[stop.id]?.script_adult : reusableAssets[stop.id]?.script_preteen;
+      const existingScript = toNullableTrimmed(
+        persona === "adult" ? current?.script_adult : current?.script_preteen
+      );
+      const reusableScript = toNullableTrimmed(
+        persona === "adult" ? reusableAssets[stop.id]?.script_adult : reusableAssets[stop.id]?.script_preteen
+      );
 
-      let script = existingScript || "";
+      let script = existingScript;
       if (!script && !forceScript && reusableScript) {
         script = reusableScript;
       }
@@ -136,11 +156,13 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
         script = fallbackScript(city, persona, stop, i);
         try {
           const generated = await generateScriptWithOpenAI(apiKey, city, transportMode, lengthMinutes, persona, stop, i, stops.length);
-          if (generated) script = generated;
+          const normalizedGenerated = toNullableTrimmed(generated);
+          if (normalizedGenerated) script = normalizedGenerated;
         } catch {
           // fallback kept
         }
       }
+      script = toNullableTrimmed(script) ?? fallbackScript(city, persona, stop, i);
       const patch = persona === "adult" ? { script_adult: script } : { script_preteen: script };
       await admin.from("custom_route_stops").update(patch).eq("route_id", routeId).eq("stop_id", stop.id);
       doneUnits += 1;
@@ -161,31 +183,43 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
         .eq("route_id", routeId)
         .eq("stop_id", stop.id)
         .single();
-      const text = (persona === "adult" ? row?.script_adult : row?.script_preteen) || fallbackScript(city, persona, stop, i);
+      const text =
+        toNullableTrimmed(persona === "adult" ? row?.script_adult : row?.script_preteen) ||
+        fallbackScript(city, persona, stop, i);
 
-      const replayUrl = switchConfig.replay_audio[stop.id]?.[persona];
-      const existingAudio = persona === "adult" ? row?.audio_url_adult : row?.audio_url_preteen;
-      const reusableAudio = persona === "adult" ? reusableAssets[stop.id]?.audio_url_adult : reusableAssets[stop.id]?.audio_url_preteen;
+      const replayUrl = toNullableTrimmed(switchConfig.replay_audio[stop.id]?.[persona]);
+      const existingAudio = toNullableTrimmed(persona === "adult" ? row?.audio_url_adult : row?.audio_url_preteen);
+      const reusableAudio = toNullableTrimmed(
+        persona === "adult" ? reusableAssets[stop.id]?.audio_url_adult : reusableAssets[stop.id]?.audio_url_preteen
+      );
 
-      let audioUrl = "";
+      let audioUrl: string | null = null;
       if (replayUrl) {
         audioUrl = replayUrl;
       } else if (!forceAudio && isGeneratedAudioUrl(existingAudio)) {
-        audioUrl = existingAudio as string;
+        audioUrl = existingAudio;
       } else if (!forceAudio && reusableAudio) {
         audioUrl = reusableAudio;
       } else {
-        audioUrl = persona === "adult" ? "/audio/adult-01.mp3" : "/audio/kid-01.mp3";
+        audioUrl = getFallbackAudioUrl(persona);
         try {
           const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, text);
-          audioUrl = await uploadNarrationAudio(audioBytes, routeId, persona, stop.id);
-          audioGeneratedCount += 1;
+          const uploaded = await uploadNarrationAudio(audioBytes, routeId, persona, stop.id);
+          const normalizedUploaded = toNullableTrimmed(uploaded);
+          if (normalizedUploaded) {
+            audioUrl = normalizedUploaded;
+            audioGeneratedCount += 1;
+          } else {
+            audioFallbackCount += 1;
+            lastAudioError = `Audio upload returned empty URL for ${persona} at stop "${stop.title}"`;
+          }
         } catch (e) {
           audioFallbackCount += 1;
           const detail = e instanceof Error ? e.message : "Unknown error";
           lastAudioError = `Audio generation failed for ${persona} at stop "${stop.title}": ${detail}`;
         }
       }
+      audioUrl = toNullableTrimmed(audioUrl) || getFallbackAudioUrl(persona);
 
       const patch = persona === "adult" ? { audio_url_adult: audioUrl } : { audio_url_preteen: audioUrl };
       await admin.from("custom_route_stops").update(patch).eq("route_id", routeId).eq("stop_id", stop.id);
@@ -194,20 +228,22 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
     }
   }
 
-  if (audioFallbackCount > 0) {
-    throw new Error(
-      `${audioFallbackCount} audio segments failed and used fallback. ${lastAudioError || "OpenAI TTS failed."}`
-    );
-  }
-
   if (audioGeneratedCount === 0) {
     throw new Error(lastAudioError || "Audio generation failed for all stops/personas.");
   }
 
   await admin.from("custom_routes").update({ status: "ready" }).eq("id", routeId);
+  if (audioFallbackCount > 0) {
+    const warning = `${audioFallbackCount} audio segments failed and used fallback. ${lastAudioError || "OpenAI TTS failed."}`;
+    await admin
+      .from("mix_generation_jobs")
+      .update({ status: "ready_with_warnings", progress: 100, message: "Tour ready with warnings", error: warning })
+      .eq("id", jobId);
+    return;
+  }
   await admin
     .from("mix_generation_jobs")
-    .update({ status: "ready", progress: 100, message: "Tour ready" })
+    .update({ status: "ready", progress: 100, message: "Tour ready", error: null })
     .eq("id", jobId);
 }
 

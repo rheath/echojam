@@ -8,6 +8,12 @@ function getAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+function toNullableTrimmed(value: string | null | undefined) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized ? normalized : null;
+}
+
 export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }> }) {
   try {
     const { routeId } = await ctx.params;
@@ -27,7 +33,21 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       .order("position", { ascending: true });
     if (stopsErr) return NextResponse.json({ error: stopsErr.message }, { status: 500 });
 
-    return NextResponse.json({ route, stops: stops ?? [] });
+    const normalizedStops = (stops ?? []).map((stop) => {
+      const scriptAdult = toNullableTrimmed(stop.script_adult);
+      const scriptPreteen = toNullableTrimmed(stop.script_preteen);
+      const audioAdult = toNullableTrimmed(stop.audio_url_adult);
+      const audioPreteen = toNullableTrimmed(stop.audio_url_preteen);
+      return {
+        ...stop,
+        script_adult: scriptAdult,
+        script_preteen: scriptPreteen,
+        audio_url_adult: audioAdult || audioPreteen || "/audio/adult-01.mp3",
+        audio_url_preteen: audioPreteen || audioAdult || "/audio/kid-01.mp3",
+      };
+    });
+
+    return NextResponse.json({ route, stops: normalizedStops });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to load custom route" }, { status: 500 });
   }

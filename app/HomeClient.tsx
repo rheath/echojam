@@ -65,12 +65,25 @@ type CustomRouteResponse = {
 
 type MixJobResponse = {
   id: string;
-  status: "queued" | "generating_script" | "generating_audio" | "ready" | "failed";
+  status: "queued" | "generating_script" | "generating_audio" | "ready" | "ready_with_warnings" | "failed";
   progress: number;
   message: string | null;
   error: string | null;
   jam_id: string;
   route_id: string;
+};
+
+type ResolveLinksResponse = {
+  resolved: CustomMixStop[];
+  failed: Array<{ input: string; reason: string }>;
+  duplicatesSkipped: number;
+};
+
+type ResolveSummary = {
+  added: number;
+  skippedDuplicate: number;
+  skippedLimit: number;
+  failed: Array<{ input: string; reason: string }>;
 };
 
 function clamp(n: number, min: number, max: number) {
@@ -127,6 +140,10 @@ function formatAudioTime(seconds: number) {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+function getStopCoordKey(stop: { lat: number; lng: number }) {
+  return `${stop.lat.toFixed(6)},${stop.lng.toFixed(6)}`;
+}
+
 export default function HomeClient() {
   const [distanceToStopM, setDistanceToStopM] = useState<number | null>(null);
 const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
@@ -141,6 +158,9 @@ const [selectedCity, setSelectedCity] = useState<CityOption>("salem");
 const [transportMode, setTransportMode] = useState<TransportMode>("walk");
 const [selectedLengthMinutes, setSelectedLengthMinutes] = useState<number>(30);
 const [builderSelectedStops, setBuilderSelectedStops] = useState<CustomMixStop[]>([]);
+const [linkBatchInput, setLinkBatchInput] = useState("");
+const [isResolvingLinks, setIsResolvingLinks] = useState(false);
+const [resolveSummary, setResolveSummary] = useState<ResolveSummary | null>(null);
 const [isGeneratingMix, setIsGeneratingMix] = useState(false);
 const [generationJobId, setGenerationJobId] = useState<string | null>(null);
 const [generationProgress, setGenerationProgress] = useState(0);
@@ -220,6 +240,28 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
     }
     return Array.from(byId.values());
   }, [selectedCity]);
+  const buildMixDisplayStops = useMemo<CustomMixStop[]>(() => {
+    const merged: CustomMixStop[] = [];
+    const seen = new Set<string>();
+
+    for (const stop of builderSelectedStops) {
+      const key = stop.id || getStopCoordKey(stop);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(stop);
+    }
+
+    for (const stop of availableStopsForCity) {
+      const idKey = stop.id;
+      const coordKey = getStopCoordKey(stop);
+      if (seen.has(idKey) || seen.has(coordKey)) continue;
+      seen.add(idKey);
+      seen.add(coordKey);
+      merged.push(stop);
+    }
+
+    return merged;
+  }, [availableStopsForCity, builderSelectedStops]);
   const activePersonaDisplayName = personaCatalog[persona].displayName;
   const maxStopsForSelection = useMemo(
     () => getMaxStops(selectedLengthMinutes, transportMode),
@@ -343,6 +385,7 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
     if (status === "generating_script") return "Generating script";
     if (status === "generating_audio") return "Generating audio";
     if (status === "ready") return "Ready";
+    if (status === "ready_with_warnings") return "Ready with warnings";
     return "Failed";
   }
 
@@ -442,6 +485,70 @@ async function startStopNarration() {
       }
       return [...prev, stop];
     });
+  }
+
+  async function addStopsFromLinks() {
+    const links = linkBatchInput
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (!links.length) {
+      setErr("Paste at least one Google Maps link.");
+      return;
+    }
+
+    setErr(null);
+    setResolveSummary(null);
+    setIsResolvingLinks(true);
+
+    try {
+      const res = await fetch("/api/stops/resolve-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ city: selectedCity, links }),
+      });
+      const body = (await res.json()) as ResolveLinksResponse | { error?: string };
+      if (!res.ok || !("resolved" in body)) {
+        throw new Error(("error" in body && body.error) || "Failed to resolve links");
+      }
+
+      const nextStops = [...builderSelectedStops];
+      const selectedKeys = new Set(
+        builderSelectedStops.map((s) => getStopCoordKey(s))
+      );
+      let added = 0;
+      let skippedDuplicate = body.duplicatesSkipped;
+      let skippedLimit = 0;
+
+      for (const stop of body.resolved) {
+        const key = getStopCoordKey(stop);
+        if (selectedKeys.has(key)) {
+          skippedDuplicate += 1;
+          continue;
+        }
+        if (maxStopsForSelection > 0 && nextStops.length >= maxStopsForSelection) {
+          skippedLimit += 1;
+          continue;
+        }
+        selectedKeys.add(key);
+        nextStops.push(stop);
+        added += 1;
+      }
+
+      setBuilderSelectedStops(nextStops);
+      setResolveSummary({
+        added,
+        skippedDuplicate,
+        skippedLimit,
+        failed: body.failed,
+      });
+      setLinkBatchInput("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to add stops from links");
+    } finally {
+      setIsResolvingLinks(false);
+    }
   }
 
   async function startCustomMixGeneration() {
@@ -550,10 +657,13 @@ async function startStopNarration() {
         setGenerationStatusLabel(getGenerationStatusLabel(body.status));
         setGenerationMessage(body.message || "");
 
-        if (body.status === "ready") {
+        if (body.status === "ready" || body.status === "ready_with_warnings") {
           setGenerationJobId(null);
           await loadCustomRoute(`custom:${body.route_id}`);
           await loadJamById(body.jam_id);
+          if (body.status === "ready_with_warnings") {
+            setErr(body.error || body.message || "Tour is ready with warnings.");
+          }
           return;
         }
         if (body.status === "failed") {
@@ -1158,9 +1268,36 @@ async function startStopNarration() {
             <div className={styles.pickLimitHint}>
               Max {maxStopsForSelection || 0} stops for {selectedLengthMinutes} min {transportMode} tour.
             </div>
+            <div className={styles.buildMixLinkAddWrap}>
+              <textarea
+                value={linkBatchInput}
+                onChange={(e) => setLinkBatchInput(e.target.value)}
+                className={styles.buildMixLinkTextarea}
+                placeholder="Paste Google Maps links, one per line"
+                rows={4}
+              />
+              <button
+                type="button"
+                onClick={addStopsFromLinks}
+                disabled={isResolvingLinks}
+                className={styles.pickBuildMixButton}
+              >
+                {isResolvingLinks ? "Resolving links..." : "Add Stops from Links"}
+              </button>
+              {resolveSummary && (
+                <div className={styles.buildMixLinkSummary}>
+                  Added {resolveSummary.added}. Skipped duplicates {resolveSummary.skippedDuplicate}.
+                  {resolveSummary.skippedLimit > 0 ? ` Reached max and skipped ${resolveSummary.skippedLimit}.` : ""}
+                  {resolveSummary.failed.length > 0 ? ` Failed ${resolveSummary.failed.length} invalid/unreadable link(s).` : ""}
+                </div>
+              )}
+            </div>
             <div className={styles.pickRouteList}>
-              {availableStopsForCity.map((stop) => {
-                const active = builderSelectedStops.some((s) => s.id === stop.id);
+              {buildMixDisplayStops.map((stop) => {
+                const stopCoordKey = getStopCoordKey(stop);
+                const active = builderSelectedStops.some(
+                  (s) => s.id === stop.id || getStopCoordKey(s) === stopCoordKey
+                );
                 return (
                   <button
                     key={stop.id}

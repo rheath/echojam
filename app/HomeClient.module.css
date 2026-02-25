@@ -313,6 +313,32 @@
   opacity: 0.82;
 }
 
+.buildMixLinkAddWrap {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.buildMixLinkTextarea {
+  width: 100%;
+  border: 1px solid #34353b;
+  background: #12131a;
+  color: #f4f4f6;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+  padding: 10px 12px;
+  resize: vertical;
+  min-height: 96px;
+}
+
+.buildMixLinkSummary {
+  font-size: 14px;
+  opacity: 0.9;
+  line-height: 1.4;
+}
+
 .pickSectionDivider {
   width: calc(100% + 64px);
   height: 3px;
