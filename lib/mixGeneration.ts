@@ -1,13 +1,31 @@
 import { createClient } from "@supabase/supabase-js";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { personaCatalog } from "@/lib/personas/catalog";
 
 export type Persona = "adult" | "preteen";
+export type GenerationMode =
+  | "reuse_existing"
+  | "force_regenerate_all"
+  | "force_regenerate_script"
+  | "force_regenerate_audio";
+
+export type GenerationSwitch = {
+  mode?: GenerationMode;
+  replay_audio?: Record<string, Partial<Record<Persona, string>>>;
+};
+
 export type StopInput = {
   id: string;
   title: string;
   lat: number;
   lng: number;
   image: string;
+};
+
+const DEFAULT_SWITCH: Required<GenerationSwitch> = {
+  mode: "reuse_existing",
+  replay_audio: {},
 };
 
 const VOICE_BY_PERSONA: Record<Persona, string> = {
@@ -19,6 +37,41 @@ const PERSONA_PROMPTS = {
   adult: personaCatalog.adult.prompt,
   preteen: personaCatalog.preteen.prompt,
 } as const;
+
+export function toNullableTrimmed(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized ? normalized : null;
+}
+
+export function isUsableGeneratedAudioUrl(url: string | null | undefined) {
+  const normalized = toNullableTrimmed(url);
+  if (!normalized) return false;
+  return !normalized.startsWith("/audio/");
+}
+
+export function shouldRegenerateScript(mode: GenerationMode) {
+  return mode === "force_regenerate_all" || mode === "force_regenerate_script";
+}
+
+export function shouldRegenerateAudio(mode: GenerationMode) {
+  return mode === "force_regenerate_all" || mode === "force_regenerate_audio";
+}
+
+export async function getSwitchConfig(): Promise<Required<GenerationSwitch>> {
+  const fileName = process.env.MIX_GENERATION_SWITCH_FILE || "mix-generation-switch.json";
+  const filePath = path.join(process.cwd(), fileName);
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw) as GenerationSwitch;
+    return {
+      mode: parsed.mode || DEFAULT_SWITCH.mode,
+      replay_audio: parsed.replay_audio || {},
+    };
+  } catch {
+    return DEFAULT_SWITCH;
+  }
+}
 
 export async function generateScriptWithOpenAI(
   apiKey: string,

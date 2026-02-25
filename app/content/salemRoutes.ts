@@ -37,8 +37,8 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5196,
         lng: -70.8967,
         audio: {
-          adult: "/audio/adult-01.mp3",
-          preteen: "/audio/kid-01.mp3",
+          adult: "",
+          preteen: "",
         },
         text: {
           adult: "Welcome to Salem Common—your launch point for the city’s most iconic storylines.",
@@ -52,8 +52,8 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5232,
         lng: -70.8958,
         audio: {
-          adult: "/audio/adult-02.mp3",
-          preteen: "/audio/kid-02.mp3",
+          adult: "",
+          preteen: "",
         },
         text: {
           adult: "This stop focuses on memory, justice, and what Salem learned the hard way.",
@@ -67,8 +67,8 @@ export const salemRoutes: RouteDef[] = [
         lat: 42.5216,
         lng: -70.8955,
         audio: {
-          adult: "/audio/adult-01.mp3",
-          preteen: "/audio/kid-01.mp3",
+          adult: "",
+          preteen: "",
         },
         text: {
           adult: "Salem reinvented itself—again and again. This building watched a lot of it happen.",
@@ -90,7 +90,7 @@ export const salemRoutes: RouteDef[] = [
         title: "Start: Salem Common",
         lat: 42.5196,
         lng: -70.8967,
-        audio: { adult: "/audio/adult-01.mp3", preteen: "/audio/kid-01.mp3" },
+        audio: { adult: "", preteen: "" },
         images: ["/images/salem/placeholder-01.png"],
       },
       {
@@ -98,7 +98,7 @@ export const salemRoutes: RouteDef[] = [
         title: "Essex Street (placeholder)",
         lat: 42.5219,
         lng: -70.8939,
-        audio: { adult: "/audio/adult-02.mp3", preteen: "/audio/kid-02.mp3" },
+        audio: { adult: "", preteen: "" },
         images: ["/images/salem/placeholder-02.png"],
       },
       {
@@ -106,7 +106,7 @@ export const salemRoutes: RouteDef[] = [
         title: "Salem Maritime (placeholder)",
         lat: 42.5212,
         lng: -70.8877,
-        audio: { adult: "/audio/adult-01.mp3", preteen: "/audio/kid-01.mp3" },
+        audio: { adult: "", preteen: "" },
         images: ["/images/salem/placeholder-03.png"],
       },
       {
@@ -114,7 +114,7 @@ export const salemRoutes: RouteDef[] = [
         title: "Return / Wrap (placeholder)",
         lat: 42.5205,
         lng: -70.8949,
-        audio: { adult: "/audio/adult-02.mp3", preteen: "/audio/kid-02.mp3" },
+        audio: { adult: "", preteen: "" },
         images: ["/images/salem/placeholder-01.png"],
       },
     ],
@@ -131,7 +131,7 @@ export const salemRoutes: RouteDef[] = [
         title: "Start: Salem Common",
         lat: 42.5196,
         lng: -70.8967,
-        audio: { adult: "/audio/adult-01.mp3", preteen: "/audio/kid-01.mp3" },
+        audio: { adult: "", preteen: "" },
         images: ["/images/salem/placeholder-01.png"],
       },
       {
@@ -139,7 +139,7 @@ export const salemRoutes: RouteDef[] = [
         title: "Architecture / Streetscape (placeholder)",
         lat: 42.5226,
         lng: -70.8946,
-        audio: { adult: "/audio/adult-02.mp3", preteen: "/audio/kid-02.mp3" },
+        audio: { adult: "", preteen: "" },
         images: ["/images/salem/placeholder-02.png"],
       },
       {
@@ -147,7 +147,7 @@ export const salemRoutes: RouteDef[] = [
         title: "Maritime Layer (placeholder)",
         lat: 42.5212,
         lng: -70.8877,
-        audio: { adult: "/audio/adult-01.mp3", preteen: "/audio/kid-01.mp3" },
+        audio: { adult: "", preteen: "" },
         images: ["/images/salem/placeholder-03.png"],
       },
       {
@@ -155,7 +155,7 @@ export const salemRoutes: RouteDef[] = [
         title: "Trials Layer (placeholder)",
         lat: 42.5232,
         lng: -70.8958,
-        audio: { adult: "/audio/adult-02.mp3", preteen: "/audio/kid-02.mp3" },
+        audio: { adult: "", preteen: "" },
         images: ["/images/salem/placeholder-01.png"],
       },
       {
@@ -163,7 +163,7 @@ export const salemRoutes: RouteDef[] = [
         title: "Modern Salem (placeholder)",
         lat: 42.5199,
         lng: -70.8951,
-        audio: { adult: "/audio/adult-01.mp3", preteen: "/audio/kid-01.mp3" },
+        audio: { adult: "", preteen: "" },
         images: ["/images/salem/placeholder-02.png"],
       },
       {
@@ -171,8 +171,16 @@ export const salemRoutes: RouteDef[] = [
         title: "Wrap (placeholder)",
         lat: 42.5205,
         lng: -70.8949,
-        audio: { adult: "/audio/adult-02.mp3", preteen: "/audio/kid-02.mp3" },
+        audio: { adult: "", preteen: "" },
         images: ["/images/salem/placeholder-03.png"],
+      },
+      {
+        id: "deep-07",
+        title: "Joshua Ward House",
+        lat: 42.5205115,
+        lng: -70.8955978,
+        audio: { adult: "", preteen: "" },
+        images: ["/images/salem/placeholder-02.png"],
       },
     ],
   },

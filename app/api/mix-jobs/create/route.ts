@@ -1,8 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fallbackScript, generateScriptWithOpenAI, synthesizeSpeechWithOpenAI, uploadNarrationAudio, type Persona, type StopInput } from "@/lib/mixGeneration";
+import {
+  generateScriptWithOpenAI,
+  getSwitchConfig,
+  isUsableGeneratedAudioUrl,
+  shouldRegenerateAudio,
+  shouldRegenerateScript,
+  synthesizeSpeechWithOpenAI,
+  toNullableTrimmed,
+  type Persona,
+  type StopInput,
+  uploadNarrationAudio,
+} from "@/lib/mixGeneration";
 import { validateMixSelection, type TransportMode } from "@/lib/mixConstraints";
 
 type CreateBody = {
@@ -12,17 +21,6 @@ type CreateBody = {
   lengthMinutes: number;
   persona: Persona;
   stops: StopInput[];
-};
-
-type GenerationMode =
-  | "reuse_existing"
-  | "force_regenerate_all"
-  | "force_regenerate_script"
-  | "force_regenerate_audio";
-
-type GenerationSwitch = {
-  mode?: GenerationMode;
-  replay_audio?: Record<string, Partial<Record<Persona, string>>>;
 };
 
 type StopAssetCache = Partial<
@@ -37,11 +35,6 @@ type StopAssetCache = Partial<
   >
 >;
 
-const DEFAULT_SWITCH: Required<GenerationSwitch> = {
-  mode: "reuse_existing",
-  replay_audio: {},
-};
-
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -49,35 +42,8 @@ function getAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-function toNullableTrimmed(value: string | null | undefined): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim();
-  return normalized ? normalized : null;
-}
-
-function getFallbackAudioUrl(persona: Persona) {
-  return persona === "adult" ? "/audio/adult-01.mp3" : "/audio/kid-01.mp3";
-}
-
 function isGeneratedAudioUrl(url: string | null | undefined) {
-  const normalized = toNullableTrimmed(url);
-  if (!normalized) return false;
-  return !normalized.startsWith("/audio/");
-}
-
-async function loadGenerationSwitch(): Promise<Required<GenerationSwitch>> {
-  const fileName = process.env.MIX_GENERATION_SWITCH_FILE || "mix-generation-switch.json";
-  const filePath = path.join(process.cwd(), fileName);
-  try {
-    const raw = await fs.readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw) as GenerationSwitch;
-    return {
-      mode: parsed.mode || DEFAULT_SWITCH.mode,
-      replay_audio: parsed.replay_audio || {},
-    };
-  } catch {
-    return DEFAULT_SWITCH;
-  }
+  return isUsableGeneratedAudioUrl(url);
 }
 
 async function loadReusableAssets(
@@ -114,9 +80,9 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
   const admin = getAdmin();
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is required.");
-  const switchConfig = await loadGenerationSwitch();
-  const forceScript = switchConfig.mode === "force_regenerate_all" || switchConfig.mode === "force_regenerate_script";
-  const forceAudio = switchConfig.mode === "force_regenerate_all" || switchConfig.mode === "force_regenerate_audio";
+  const switchConfig = await getSwitchConfig();
+  const forceScript = shouldRegenerateScript(switchConfig.mode);
+  const forceAudio = shouldRegenerateAudio(switchConfig.mode);
   const reusableAssets = await loadReusableAssets(
     admin,
     Array.from(new Set(stops.map((s) => s.id)))
@@ -132,6 +98,8 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
   };
 
   await updateProgress("generating_script", "Generating scripts");
+  let warningCount = 0;
+  let lastWarning = "";
   for (const persona of personas) {
     for (let i = 0; i < stops.length; i += 1) {
       const stop = stops[i];
@@ -153,16 +121,16 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
         script = reusableScript;
       }
       if (!script || forceScript) {
-        script = fallbackScript(city, persona, stop, i);
         try {
           const generated = await generateScriptWithOpenAI(apiKey, city, transportMode, lengthMinutes, persona, stop, i, stops.length);
           const normalizedGenerated = toNullableTrimmed(generated);
           if (normalizedGenerated) script = normalizedGenerated;
-        } catch {
-          // fallback kept
+        } catch (e) {
+          warningCount += 1;
+          lastWarning = `Script generation failed for ${persona} at stop "${stop.title}": ${e instanceof Error ? e.message : "Unknown error"}`;
         }
       }
-      script = toNullableTrimmed(script) ?? fallbackScript(city, persona, stop, i);
+      script = toNullableTrimmed(script);
       const patch = persona === "adult" ? { script_adult: script } : { script_preteen: script };
       await admin.from("custom_route_stops").update(patch).eq("route_id", routeId).eq("stop_id", stop.id);
       doneUnits += 1;
@@ -172,8 +140,6 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
 
   await updateProgress("generating_audio", "Generating audio");
   let audioGeneratedCount = 0;
-  let audioFallbackCount = 0;
-  let lastAudioError = "";
   for (const persona of personas) {
     for (let i = 0; i < stops.length; i += 1) {
       const stop = stops[i];
@@ -183,9 +149,7 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
         .eq("route_id", routeId)
         .eq("stop_id", stop.id)
         .single();
-      const text =
-        toNullableTrimmed(persona === "adult" ? row?.script_adult : row?.script_preteen) ||
-        fallbackScript(city, persona, stop, i);
+      const text = toNullableTrimmed(persona === "adult" ? row?.script_adult : row?.script_preteen);
 
       const replayUrl = toNullableTrimmed(switchConfig.replay_audio[stop.id]?.[persona]);
       const existingAudio = toNullableTrimmed(persona === "adult" ? row?.audio_url_adult : row?.audio_url_preteen);
@@ -200,8 +164,7 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
         audioUrl = existingAudio;
       } else if (!forceAudio && reusableAudio) {
         audioUrl = reusableAudio;
-      } else {
-        audioUrl = getFallbackAudioUrl(persona);
+      } else if (text) {
         try {
           const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, text);
           const uploaded = await uploadNarrationAudio(audioBytes, routeId, persona, stop.id);
@@ -210,16 +173,19 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
             audioUrl = normalizedUploaded;
             audioGeneratedCount += 1;
           } else {
-            audioFallbackCount += 1;
-            lastAudioError = `Audio upload returned empty URL for ${persona} at stop "${stop.title}"`;
+            warningCount += 1;
+            lastWarning = `Audio upload returned empty URL for ${persona} at stop "${stop.title}"`;
           }
         } catch (e) {
-          audioFallbackCount += 1;
+          warningCount += 1;
           const detail = e instanceof Error ? e.message : "Unknown error";
-          lastAudioError = `Audio generation failed for ${persona} at stop "${stop.title}": ${detail}`;
+          lastWarning = `Audio generation failed for ${persona} at stop "${stop.title}": ${detail}`;
         }
+      } else {
+        warningCount += 1;
+        lastWarning = `Audio generation skipped for ${persona} at stop "${stop.title}" because script is missing`;
       }
-      audioUrl = toNullableTrimmed(audioUrl) || getFallbackAudioUrl(persona);
+      audioUrl = toNullableTrimmed(audioUrl);
 
       const patch = persona === "adult" ? { audio_url_adult: audioUrl } : { audio_url_preteen: audioUrl };
       await admin.from("custom_route_stops").update(patch).eq("route_id", routeId).eq("stop_id", stop.id);
@@ -229,12 +195,12 @@ async function runGeneration(jobId: string, routeId: string, city: string, trans
   }
 
   if (audioGeneratedCount === 0) {
-    throw new Error(lastAudioError || "Audio generation failed for all stops/personas.");
+    throw new Error(lastWarning || "Audio generation failed for all stops/personas.");
   }
 
   await admin.from("custom_routes").update({ status: "ready" }).eq("id", routeId);
-  if (audioFallbackCount > 0) {
-    const warning = `${audioFallbackCount} audio segments failed and used fallback. ${lastAudioError || "OpenAI TTS failed."}`;
+  if (warningCount > 0) {
+    const warning = `${warningCount} generation warnings. ${lastWarning || ""}`.trim();
     await admin
       .from("mix_generation_jobs")
       .update({ status: "ready_with_warnings", progress: 100, message: "Tour ready with warnings", error: warning })

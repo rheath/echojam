@@ -42,8 +42,8 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
         ...stop,
         script_adult: scriptAdult,
         script_preteen: scriptPreteen,
-        audio_url_adult: audioAdult || audioPreteen || "/audio/adult-01.mp3",
-        audio_url_preteen: audioPreteen || audioAdult || "/audio/kid-01.mp3",
+        audio_url_adult: audioAdult,
+        audio_url_preteen: audioPreteen,
       };
     });
 

@@ -53,9 +53,5 @@ alter table public.custom_route_stops
 -- After running in Supabase SQL editor, run this to refresh PostgREST schema cache:
 -- select pg_notify('pgrst', 'reload schema');
 
--- Optional immediate playback stabilization (only if you want DB-level fallback values now):
--- update public.custom_route_stops
--- set
---   audio_url_adult = coalesce(audio_url_adult, '/audio/adult-01.mp3'),
---   audio_url_preteen = coalesce(audio_url_preteen, '/audio/kid-01.mp3')
--- where audio_url_adult is null or audio_url_preteen is null;
+-- Optional note:
+-- For generated-only mode, keep missing audio as NULL and surface a UI "audio not generated yet" state.

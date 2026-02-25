@@ -47,7 +47,7 @@ type CustomRouteResponse = {
     title: string;
     length_minutes: number;
     transport_mode: TransportMode;
-    status: "generating" | "ready" | "failed";
+    status: "queued" | "generating" | "generating_script" | "generating_audio" | "ready" | "ready_with_warnings" | "failed";
   };
   stops: Array<{
     stop_id: string;
@@ -72,6 +72,8 @@ type MixJobResponse = {
   jam_id: string;
   route_id: string;
 };
+
+type GenerationJobKind = "custom" | "preset";
 
 type ResolveLinksResponse = {
   resolved: CustomMixStop[];
@@ -163,11 +165,13 @@ const [isResolvingLinks, setIsResolvingLinks] = useState(false);
 const [resolveSummary, setResolveSummary] = useState<ResolveSummary | null>(null);
 const [isGeneratingMix, setIsGeneratingMix] = useState(false);
 const [generationJobId, setGenerationJobId] = useState<string | null>(null);
+const [generationJobKind, setGenerationJobKind] = useState<GenerationJobKind | null>(null);
 const [generationProgress, setGenerationProgress] = useState(0);
 const [generationStatusLabel, setGenerationStatusLabel] = useState("Queued");
 const [generationMessage, setGenerationMessage] = useState("Queued");
 const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
 const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
+const [isGeneratingScriptForModal, setIsGeneratingScriptForModal] = useState(false);
 const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
 
   const router = useRouter();
@@ -200,8 +204,13 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
   const currentStop = route ? route.stops[currentStopIndex] : null;
   const currentStopScript = useMemo(() => {
     if (!currentStop) return "";
-    return currentStop?.text?.[persona] || currentStop?.text?.adult || currentStop?.text?.preteen || "";
+    return currentStop?.text?.[persona] || "";
   }, [currentStop, persona]);
+  const currentStopAudio = useMemo(() => {
+    if (!currentStop) return "";
+    return (currentStop.audio[persona] || "").trim();
+  }, [currentStop, persona]);
+  const hasCurrentAudio = currentStopAudio.length > 0;
   const routeMilesLabel = useMemo(() => {
     if (!route) return "";
     return formatRouteMiles(getRouteMiles(route.stops));
@@ -297,7 +306,7 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
   }
 
   // ---------- Supabase: create jam ----------
-  async function createJam(routeId?: string, personaValue: Persona = "adult") {
+  async function createJam(routeId?: string, personaValue: Persona = "adult", opts?: { skipStep?: boolean }) {
     setErr(null);
 
     // If routeId provided we can jump straight to walk; otherwise we’ll go to pickDuration.
@@ -325,15 +334,21 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
       .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms")
       .single();
 
-    if (error) return setErr(error.message);
+    if (error) {
+      setErr(error.message);
+      return null;
+    }
 
     setJam(data as JamRow);
 
     // Put it in URL like your existing flow
     router.replace(`/?jam=${data.id}`);
 
-    if (!routeId) setStep("pickDuration");
-    else setStep("walk");
+    if (!opts?.skipStep) {
+      if (!routeId) setStep("pickDuration");
+      else setStep("walk");
+    }
+    return data.id as string;
   }
 
   // ---------- Supabase: update jam ----------
@@ -361,6 +376,8 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
     router.replace("/");
     setJam(null);
     setCustomRoute(null);
+    setGenerationJobId(null);
+    setGenerationJobKind(null);
     setIsScriptModalOpen(false);
     setReturnToWalkOnClose(false);
     setStep("landing");
@@ -389,14 +406,17 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
     return "Failed";
   }
 
-  const loadCustomRoute = useCallback(async (routeRef: string) => {
+  const loadResolvedRoute = useCallback(async (routeRef: string) => {
     const customRouteId = getCustomRouteId(routeRef);
-    if (!customRouteId) {
+    const isCustom = Boolean(customRouteId);
+    const presetRoute = getRouteById(routeRef);
+    if (!isCustom && !presetRoute) {
       setCustomRoute(null);
       return;
     }
-    const res = await fetch(`/api/custom-routes/${customRouteId}`);
-    if (!res.ok) throw new Error("Failed to load custom route");
+    const endpoint = isCustom ? `/api/custom-routes/${customRouteId}` : `/api/preset-routes/${routeRef}`;
+    const res = await fetch(endpoint);
+    if (!res.ok) throw new Error(`Failed to load ${isCustom ? "custom" : "preset"} route`);
     const payload = (await res.json()) as CustomRouteResponse;
     const nextRoute: RouteDef = {
       id: routeRef,
@@ -410,12 +430,12 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
         lng: s.lng,
         images: [s.image_url || "/images/salem/placeholder-01.png"],
         audio: {
-          adult: s.audio_url_adult || s.audio_url_preteen || "/audio/adult-01.mp3",
-          preteen: s.audio_url_preteen || s.audio_url_adult || "/audio/kid-01.mp3",
+          adult: s.audio_url_adult || "",
+          preteen: s.audio_url_preteen || "",
         },
         text: {
-          adult: s.script_adult || s.script_preteen || "",
-          preteen: s.script_preteen || s.script_adult || "",
+          adult: s.script_adult || "",
+          preteen: s.script_preteen || "",
         },
       })),
     };
@@ -426,18 +446,17 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
 async function startStopNarration() {
   // attempt to play (will work because button click is a user gesture)
   const el = audioRef.current;
-  if (el) {
-    try {
-      await el.play();
-    } catch {
-      // autoplay might still be blocked in some cases; user can press play manually
-    }
+  if (!el || !hasCurrentAudio) return;
+  try {
+    await el.play();
+  } catch {
+    // autoplay might still be blocked in some cases; user can press play manually
   }
 }
 
   async function toggleAudio() {
     const el = audioRef.current;
-    if (!el) return;
+    if (!el || !hasCurrentAudio) return;
     try {
       if (el.paused) await el.play();
       else el.pause();
@@ -453,24 +472,91 @@ async function startStopNarration() {
     setAudioTime(nextTime);
   }
 
+  async function openScriptModal() {
+    if (!currentStop || !jam?.route_id) return;
+    if (currentStopScript) {
+      setIsScriptModalOpen(true);
+      return;
+    }
+    const isPresetRoute = !jam.route_id.startsWith("custom:");
+    if (!isPresetRoute) {
+      setIsScriptModalOpen(true);
+      return;
+    }
+
+    try {
+      setErr(null);
+      setIsGeneratingScriptForModal(true);
+      const res = await fetch("/api/preset-scripts/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          routeId: jam.route_id,
+          stopId: currentStop.id,
+          persona,
+          city: selectedCity,
+        }),
+      });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(body.error || "Failed to generate script");
+      await loadResolvedRoute(jam.route_id);
+      setIsScriptModalOpen(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to generate script");
+    } finally {
+      setIsGeneratingScriptForModal(false);
+    }
+  }
+
   // ---------- Step transitions ----------
 
   async function startTourFromSelection() {
     if (!selectedRouteId || !selectedPersona) return;
     setReturnToWalkOnClose(false);
+    setErr(null);
+    setStep("generating");
+    setGenerationProgress(0);
+    setGenerationStatusLabel("Queued");
+    setGenerationMessage("Queued");
 
-    if (!jam) {
-      await createJam(selectedRouteId, selectedPersona);
-      return;
+    let jamId = jam?.id ?? null;
+    if (!jamId) {
+      jamId = await createJam(selectedRouteId, selectedPersona, { skipStep: true });
+      if (!jamId) {
+        setStep("pickDuration");
+        return;
+      }
+    } else {
+      await updateJam({
+        route_id: selectedRouteId,
+        persona: selectedPersona,
+        current_stop: 0,
+        completed_at: null,
+      });
     }
 
-    await updateJam({
-      route_id: selectedRouteId,
-      persona: selectedPersona,
-      current_stop: 0,
-      completed_at: null,
-    });
-    setStep("walk");
+    try {
+      const res = await fetch("/api/preset-jobs/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jamId,
+          routeId: selectedRouteId,
+          persona: selectedPersona,
+          city: selectedCity,
+        }),
+      });
+      const body = (await res.json()) as { error?: string; jobId?: string };
+      if (!res.ok || !body.jobId) throw new Error(body.error || "Failed to create preset generation job");
+      setGenerationJobId(body.jobId);
+      setGenerationJobKind("preset");
+      router.replace(`/?jam=${jamId}`);
+      await loadJamById(jamId);
+    } catch (e) {
+      setGenerationJobKind(null);
+      setErr(e instanceof Error ? e.message : "Failed to generate preset tour");
+      setStep("pickDuration");
+    }
   }
 
   function toggleBuilderStop(stop: CustomMixStop) {
@@ -584,6 +670,7 @@ async function startStopNarration() {
         throw new Error("Missing generation job metadata");
       }
       setGenerationJobId(body.jobId);
+      setGenerationJobKind("custom");
       setGenerationProgress(0);
       setGenerationStatusLabel("Queued");
       setGenerationMessage("Queued");
@@ -592,6 +679,7 @@ async function startStopNarration() {
         await loadJamById(body.jamId);
       }
     } catch (e) {
+      setGenerationJobKind(null);
       setErr(e instanceof Error ? e.message : "Failed to generate custom mix");
       setStep("buildMix");
     } finally {
@@ -610,6 +698,8 @@ async function startStopNarration() {
     if (!jamIdFromUrl) {
       setJam(null);
       setCustomRoute(null);
+      setGenerationJobId(null);
+      setGenerationJobKind(null);
       setStep("landing");
       return;
     }
@@ -620,15 +710,15 @@ async function startStopNarration() {
     let cancelled = false;
     async function run() {
       const routeRef = jam?.route_id ?? null;
-      if (!routeRef?.startsWith("custom:")) {
+      if (!routeRef) {
         setCustomRoute(null);
         return;
       }
       try {
-        await loadCustomRoute(routeRef);
+        await loadResolvedRoute(routeRef);
       } catch (e) {
         if (!cancelled) {
-          setErr(e instanceof Error ? e.message : "Failed to load custom route");
+          setErr(e instanceof Error ? e.message : "Failed to load route assets");
           setCustomRoute(null);
         }
       }
@@ -637,15 +727,19 @@ async function startStopNarration() {
     return () => {
       cancelled = true;
     };
-  }, [jam?.route_id, loadCustomRoute]);
+  }, [jam?.route_id, loadResolvedRoute]);
 
   useEffect(() => {
-    if (step !== "generating" || !generationJobId) return;
+    if (step !== "generating" || !generationJobId || !generationJobKind) return;
     let cancelled = false;
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/mix-jobs/${generationJobId}`, { cache: "no-store" });
+        const endpoint =
+          generationJobKind === "custom"
+            ? `/api/mix-jobs/${generationJobId}`
+            : `/api/preset-jobs/${generationJobId}`;
+        const res = await fetch(endpoint, { cache: "no-store" });
         const body = (await res.json()) as MixJobResponse | { error?: string };
         if (!res.ok || !("status" in body)) {
           throw new Error(("error" in body && body.error) || "Failed to poll generation status");
@@ -659,7 +753,9 @@ async function startStopNarration() {
 
         if (body.status === "ready" || body.status === "ready_with_warnings") {
           setGenerationJobId(null);
-          await loadCustomRoute(`custom:${body.route_id}`);
+          setGenerationJobKind(null);
+          const routeRef = generationJobKind === "custom" ? `custom:${body.route_id}` : body.route_id;
+          await loadResolvedRoute(routeRef);
           await loadJamById(body.jam_id);
           if (body.status === "ready_with_warnings") {
             setErr(body.error || body.message || "Tour is ready with warnings.");
@@ -668,6 +764,7 @@ async function startStopNarration() {
         }
         if (body.status === "failed") {
           setGenerationJobId(null);
+          setGenerationJobKind(null);
           setErr(body.error || body.message || "Generation failed");
           setGenerationProgress(100);
           setGenerationStatusLabel("Failed");
@@ -676,6 +773,7 @@ async function startStopNarration() {
       } catch (e) {
         if (!cancelled) {
           setGenerationJobId(null);
+          setGenerationJobKind(null);
           const message = e instanceof Error ? e.message : "Failed to poll generation status";
           setErr(message);
           setGenerationProgress(100);
@@ -694,7 +792,7 @@ async function startStopNarration() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [step, generationJobId, loadCustomRoute]);
+  }, [step, generationJobId, generationJobKind, loadResolvedRoute]);
 
 // ---------- watchPosition ----------
   useEffect(() => {
@@ -784,6 +882,7 @@ async function startStopNarration() {
     setTransportMode("walk");
     setSelectedLengthMinutes(30);
     setGenerationJobId(null);
+    setGenerationJobKind(null);
     setGenerationProgress(0);
     setGenerationStatusLabel("Queued");
     setGenerationMessage("Queued");
@@ -976,8 +1075,8 @@ async function startStopNarration() {
       </div>
     </div>
 
-    <button onClick={startStopNarration} className={styles.button}>
-      Start stop
+    <button onClick={startStopNarration} className={styles.button} disabled={!hasCurrentAudio}>
+      {hasCurrentAudio ? "Start stop" : "Audio pending"}
     </button>
   </div>
 )}
@@ -1403,7 +1502,7 @@ async function startStopNarration() {
                   <div className={styles.pickDurationStartWrap}>
                     <button
                       type="button"
-                      onClick={startCustomMixGeneration}
+                      onClick={generationJobKind === "preset" ? startTourFromSelection : startCustomMixGeneration}
                       disabled={isGeneratingMix}
                       className={styles.landingCtaButton}
                     >
@@ -1411,10 +1510,10 @@ async function startStopNarration() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setStep("buildMix")}
+                      onClick={() => setStep(generationJobKind === "preset" ? "pickDuration" : "buildMix")}
                       className={styles.pickBuildMixButton}
                     >
-                      Back to editor
+                      {generationJobKind === "preset" ? "Back to routes" : "Back to editor"}
                     </button>
                   </div>
                 )}
@@ -1509,7 +1608,7 @@ async function startStopNarration() {
             </div>
 
             <div className={styles.nowPlayingBar}>
-              <audio ref={audioRef} preload="metadata" src={currentStop.audio[persona]} hidden />
+              <audio ref={audioRef} preload="metadata" src={currentStopAudio} hidden />
               <input
                 type="range"
                 min={0}
@@ -1517,6 +1616,7 @@ async function startStopNarration() {
                 step={0.1}
                 value={Math.min(audioTime, audioDuration || audioTime)}
                 onChange={(e) => seekAudio(Number(e.target.value))}
+                disabled={!hasCurrentAudio}
                 className={`${styles.audioSeek} ${styles.nowPlayingSeek}`}
               />
               <div className={styles.nowPlayingContent}>
@@ -1524,17 +1624,40 @@ async function startStopNarration() {
                   <button
                     type="button"
                     className={styles.nowPlayingTitleLink}
-                    onClick={() => setIsScriptModalOpen(true)}
+                    onClick={openScriptModal}
                   >
                     {currentStop.title}
                   </button>
                   <div className={styles.nowPlayingSubtitle}>
-                    {formatAudioTime(audioTime)} / {formatAudioTime(audioDuration)}
+                    {hasCurrentAudio ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}` : "Audio not generated yet"}
+                  </div>
+                  <div className={styles.nowPlayingLinksRow}>
+                    <button
+                      type="button"
+                      className={styles.nowPlayingInlineLink}
+                      onClick={openScriptModal}
+                      disabled={isGeneratingScriptForModal}
+                    >
+                      {isGeneratingScriptForModal ? "Generating script..." : "View script"}
+                    </button>
+                    {hasCurrentAudio ? (
+                      <a
+                        className={styles.nowPlayingInlineLink}
+                        href={currentStopAudio}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open audio
+                      </a>
+                    ) : (
+                      <span className={styles.nowPlayingInlineLinkDisabled}>Open audio</span>
+                    )}
                   </div>
                 </div>
                 <button
                   className={styles.nowPlayingButton}
                   onClick={toggleAudio}
+                  disabled={!hasCurrentAudio}
                   aria-label={isPlaying ? "Pause current stop" : "Play current stop"}
                 >
                   <Image
@@ -1567,7 +1690,7 @@ async function startStopNarration() {
                     />
                   </button>
                   <div className={styles.scriptModalBody}>
-                    {currentStopScript || "No script available for this stop yet."}
+                    {currentStopScript || (isGeneratingScriptForModal ? "Generating script..." : "No generated script for this stop yet.")}
                   </div>
                 </div>
               </div>

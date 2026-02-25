@@ -952,6 +952,8 @@
   font-size: 24px;
   font-weight: 700;
   cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .nowPlayingSubtitle {
@@ -967,6 +969,31 @@
   gap: 6px;
 }
 
+.nowPlayingLinksRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nowPlayingInlineLink {
+  border: 0;
+  background: transparent;
+  color: #f4f4f6;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.nowPlayingInlineLinkDisabled {
+  color: #9a9aa4;
+  font-size: 14px;
+  text-decoration: none;
+}
+
 .nowPlayingButton {
   width: 60px;
   height: 60px;
@@ -979,6 +1006,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.nowPlayingButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .nowPlayingIcon {

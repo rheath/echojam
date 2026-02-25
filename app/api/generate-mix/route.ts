@@ -124,11 +124,6 @@ async function uploadNarrationAudio(
   return `data:audio/mpeg;base64,${base64}`;
 }
 
-function fallbackScript(city: string, persona: Persona, stop: StopInput, index: number) {
-  const voice = personaCatalog[persona].displayName;
-  return `${voice} here. Stop ${index + 1} is ${stop.title} in ${city}. Notice one detail around you and imagine how this place connects to the city story.`;
-}
-
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
@@ -150,7 +145,7 @@ export async function POST(req: Request) {
     for (const persona of personas) {
       for (let i = 0; i < body.stops.length; i += 1) {
         const stop = body.stops[i];
-        let script = fallbackScript(body.city, persona, stop, i);
+        let script = "";
         try {
           const generated = await generateScriptWithOpenAI(
             apiKey,
@@ -160,17 +155,19 @@ export async function POST(req: Request) {
             persona,
             stop
           );
-          if (generated) script = generated;
+          if (generated) script = generated.trim();
         } catch {
-          // fallback script is used
+          // generated-only mode: keep empty script on failure
         }
 
-        let audioUrl = persona === "adult" ? "/audio/adult-01.mp3" : "/audio/kid-01.mp3";
-        try {
-          const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, script);
-          audioUrl = await uploadNarrationAudio(audioBytes, jamLikeId, persona, stop.id);
-        } catch {
-          // keep placeholder audio as fallback
+        let audioUrl = "";
+        if (script) {
+          try {
+            const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, script);
+            audioUrl = await uploadNarrationAudio(audioBytes, jamLikeId, persona, stop.id);
+          } catch {
+            // no placeholder fallback: keep empty when generation fails
+          }
         }
 
         narrations[persona].push({
