@@ -1127,7 +1127,14 @@ async function startStopNarration() {
           <div className={styles.rightRail}>
             <div className={styles.walkCard}>
               <div className={styles.walkMetaRow}>
-                <div className={styles.walkDot} />
+                <Image
+                  src="/icons/stars.svg"
+                  alt=""
+                  width={24}
+                  height={24}
+                  className={styles.walkNarratorIcon}
+                  aria-hidden="true"
+                />
                 <div className={styles.walkNarrator}>
                   Narrated by {persona === "adult" ? "AI Historian" : "AI Main Character"}
                 </div>

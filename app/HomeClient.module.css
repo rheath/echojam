@@ -666,6 +666,13 @@
   background: #c8c8cc;
 }
 
+.walkNarratorIcon {
+  width: 24px;
+  height: 24px;
+  filter: invert(1);
+  opacity: 0.9;
+}
+
 .walkNarrator {
   font-size: 20px;
   opacity: 0.86;
