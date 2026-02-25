@@ -88,6 +88,15 @@ type ResolveSummary = {
   failed: Array<{ input: string; reason: string }>;
 };
 
+const GENERATION_STATUS_LABELS: Record<MixJobResponse["status"], string> = {
+  queued: "Queued",
+  generating_script: "Creating the curated story",
+  generating_audio: "Recording the audio",
+  ready: "Ready",
+  ready_with_warnings: "Ready with warnings",
+  failed: "Failed",
+};
+
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
@@ -167,11 +176,12 @@ const [isGeneratingMix, setIsGeneratingMix] = useState(false);
 const [generationJobId, setGenerationJobId] = useState<string | null>(null);
 const [generationJobKind, setGenerationJobKind] = useState<GenerationJobKind | null>(null);
 const [generationProgress, setGenerationProgress] = useState(0);
-const [generationStatusLabel, setGenerationStatusLabel] = useState("Queued");
+const [generationStatusLabel, setGenerationStatusLabel] = useState(GENERATION_STATUS_LABELS.queued);
 const [generationMessage, setGenerationMessage] = useState("Queued");
 const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
 const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
 const [isGeneratingScriptForModal, setIsGeneratingScriptForModal] = useState(false);
+const [isGeneratingAudioForCurrentStop, setIsGeneratingAudioForCurrentStop] = useState(false);
 const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
 
   const router = useRouter();
@@ -187,6 +197,7 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
   const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
 
   const jamIdFromUrl = searchParams.get("jam");
+  const debugStepFromUrl = searchParams.get("debugStep");
 
   // Derive route + stop from jam
   const route: RouteDef | null = useMemo(
@@ -398,12 +409,7 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
   }
 
   function getGenerationStatusLabel(status: MixJobResponse["status"]) {
-    if (status === "queued") return "Queued";
-    if (status === "generating_script") return "Generating script";
-    if (status === "generating_audio") return "Generating audio";
-    if (status === "ready") return "Ready";
-    if (status === "ready_with_warnings") return "Ready with warnings";
-    return "Failed";
+    return GENERATION_STATUS_LABELS[status];
   }
 
   const loadResolvedRoute = useCallback(async (routeRef: string) => {
@@ -474,37 +480,56 @@ async function startStopNarration() {
 
   async function openScriptModal() {
     if (!currentStop || !jam?.route_id) return;
-    if (currentStopScript) {
-      setIsScriptModalOpen(true);
-      return;
-    }
+    setIsScriptModalOpen(true);
     const isPresetRoute = !jam.route_id.startsWith("custom:");
-    if (!isPresetRoute) {
-      setIsScriptModalOpen(true);
-      return;
-    }
+    const customRouteId = isPresetRoute ? null : getCustomRouteId(jam.route_id);
+    if (!isPresetRoute && !customRouteId) return;
 
     try {
       setErr(null);
-      setIsGeneratingScriptForModal(true);
-      const res = await fetch("/api/preset-scripts/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          routeId: jam.route_id,
-          stopId: currentStop.id,
-          persona,
-          city: selectedCity,
-        }),
-      });
-      const body = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(body.error || "Failed to generate script");
-      await loadResolvedRoute(jam.route_id);
-      setIsScriptModalOpen(true);
+      const needsScript = !currentStopScript;
+      const needsAudio = !hasCurrentAudio;
+
+      if (needsScript) {
+        setIsGeneratingScriptForModal(true);
+        const scriptRes = await fetch(isPresetRoute ? "/api/preset-scripts/generate" : "/api/custom-scripts/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            routeId: isPresetRoute ? jam.route_id : customRouteId,
+            stopId: currentStop.id,
+            persona,
+            city: selectedCity,
+          }),
+        });
+        const scriptBody = (await scriptRes.json()) as { error?: string };
+        if (!scriptRes.ok) throw new Error(scriptBody.error || "Failed to generate script");
+      }
+
+      if (needsAudio) {
+        setIsGeneratingAudioForCurrentStop(true);
+        const audioRes = await fetch(isPresetRoute ? "/api/preset-audio/generate" : "/api/custom-audio/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            routeId: isPresetRoute ? jam.route_id : customRouteId,
+            stopId: currentStop.id,
+            persona,
+            city: selectedCity,
+          }),
+        });
+        const audioBody = (await audioRes.json()) as { error?: string };
+        if (!audioRes.ok) throw new Error(audioBody.error || "Failed to generate audio");
+      }
+
+      if (needsScript || needsAudio) {
+        await loadResolvedRoute(jam.route_id);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to generate script");
     } finally {
       setIsGeneratingScriptForModal(false);
+      setIsGeneratingAudioForCurrentStop(false);
     }
   }
 
@@ -516,7 +541,7 @@ async function startStopNarration() {
     setErr(null);
     setStep("generating");
     setGenerationProgress(0);
-    setGenerationStatusLabel("Queued");
+    setGenerationStatusLabel(GENERATION_STATUS_LABELS.queued);
     setGenerationMessage("Queued");
 
     let jamId = jam?.id ?? null;
@@ -671,7 +696,7 @@ async function startStopNarration() {
       setGenerationJobId(body.jobId);
       setGenerationJobKind("custom");
       setGenerationProgress(0);
-      setGenerationStatusLabel("Queued");
+      setGenerationStatusLabel(GENERATION_STATUS_LABELS.queued);
       setGenerationMessage("Queued");
       router.replace(`/?jam=${body.jamId}`);
     } catch (e) {
@@ -691,6 +716,19 @@ async function startStopNarration() {
 
   // ---------- Init: load jam from URL ----------
   useEffect(() => {
+    if (debugStepFromUrl === "generating") {
+      setErr(null);
+      setJam(null);
+      setCustomRoute(null);
+      setGenerationJobId(null);
+      setGenerationJobKind(null);
+      setGenerationProgress(42);
+      setGenerationStatusLabel(GENERATION_STATUS_LABELS.generating_script);
+      setGenerationMessage("Debug preview mode");
+      setStep("generating");
+      return;
+    }
+
     if (!jamIdFromUrl) {
       setJam(null);
       setCustomRoute(null);
@@ -700,7 +738,7 @@ async function startStopNarration() {
       return;
     }
     loadJamById(jamIdFromUrl);
-  }, [jamIdFromUrl]);
+  }, [jamIdFromUrl, debugStepFromUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -763,7 +801,7 @@ async function startStopNarration() {
           setGenerationJobKind(null);
           setErr(body.error || body.message || "Generation failed");
           setGenerationProgress(100);
-          setGenerationStatusLabel("Failed");
+          setGenerationStatusLabel(GENERATION_STATUS_LABELS.failed);
           setGenerationMessage(body.error || body.message || "Generation failed");
         }
       } catch (e) {
@@ -773,7 +811,7 @@ async function startStopNarration() {
           const message = e instanceof Error ? e.message : "Failed to poll generation status";
           setErr(message);
           setGenerationProgress(100);
-          setGenerationStatusLabel("Failed");
+          setGenerationStatusLabel(GENERATION_STATUS_LABELS.failed);
           setGenerationMessage(message);
         }
       }
@@ -880,7 +918,7 @@ async function startStopNarration() {
     setGenerationJobId(null);
     setGenerationJobKind(null);
     setGenerationProgress(0);
-    setGenerationStatusLabel("Queued");
+    setGenerationStatusLabel(GENERATION_STATUS_LABELS.queued);
     setGenerationMessage("Queued");
   }, [step]);
 
@@ -960,7 +998,7 @@ async function startStopNarration() {
   // ---------- UI ----------
   return (
     <div className={`${styles.container} ${step === "walk" || step === "landing" || step === "pickDuration" || step === "buildMix" || step === "generating" ? styles.containerWide : ""}`}>
-      {step !== "walk" && step !== "landing" && step !== "pickDuration" && step !== "buildMix" && (
+      {step !== "walk" && step !== "landing" && step !== "pickDuration" && step !== "buildMix" && step !== "generating" && (
         <header className={styles.header}>
           <div>
             <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.brandTitle}`}>MixTours</button>
@@ -993,11 +1031,11 @@ async function startStopNarration() {
             <div className={styles.landingCopyBlock}>
               <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets.</h1>
               <p className={styles.landingCopy}>
-               Wander with intention. Experience any place through a curated lens. <strong>More story. Less directions.
+               Wander with intention. Experience places through a curated lens. <strong>More story. Less directions.
               </strong></p>
             </div>
 
-            <div className={styles.landingPopular}>Popular MixTours:</div>
+            <div className={styles.landingPopular}>Popular Tour Mixes:</div>
 
             <button
               className={styles.landingTourRow}
@@ -1037,7 +1075,7 @@ async function startStopNarration() {
                 }}
                 className={styles.landingCtaButton}
               >
-                Create a MixTour
+                Create your own mix
               </button>
             </div>
           </section>
@@ -1208,7 +1246,7 @@ async function startStopNarration() {
                 onClick={() => setStep("buildMix")}
                 className={styles.pickBuildMixButton}
               >
-                Create a MixTour
+                Create your own mix
               </button>
             </div>
           </section>
@@ -1474,14 +1512,23 @@ async function startStopNarration() {
       )}
 
       {step === "generating" && (
-        <main className={styles.pickLayout}>
-          <section className={styles.pickInfo}>
-            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>MixTours</button>
-            <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>Generating your mix...</h2>
-              <p className={styles.pickCopy}>
-                We are creating AI narration and preparing audio for your selected stops. This can take a few moments.
-              </p>
+        <main className={styles.generatingLayout}>
+          <video
+            className={styles.generatingVideo}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+            aria-hidden="true"
+          >
+            <source src="/images/marketing/ginger-walking-remix-v2.mp4" type="video/mp4" />
+          </video>
+          <div className={styles.generatingOverlay} aria-hidden="true" />
+          <section className={styles.generatingPanel}>
+            <div className={styles.generatingCopyBlock}>
+              <h2 className={styles.generatingHeading}>Mixing your tour...</h2>
+              
               <div className={styles.generationStatusWrap}>
                 <div className={styles.generationStatusLine}>
                   <span>{generationStatusLabel}</span>
@@ -1515,9 +1562,6 @@ async function startStopNarration() {
                 )}
               </div>
             </div>
-          </section>
-          <section className={styles.pickImagePane}>
-            <div className={styles.pickImagePlaceholder} aria-hidden="true" />
           </section>
         </main>
       )}
@@ -1624,18 +1668,16 @@ async function startStopNarration() {
                   >
                     {currentStop.title}
                   </button>
-                  <div className={styles.nowPlayingSubtitle}>
-                    {hasCurrentAudio ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}` : "Audio not generated yet"}
-                  </div>
                   <div className={styles.nowPlayingLinksRow}>
-                    <button
-                      type="button"
-                      className={styles.nowPlayingInlineLink}
-                      onClick={openScriptModal}
-                      disabled={isGeneratingScriptForModal}
-                    >
-                      {isGeneratingScriptForModal ? "Generating script..." : "View script"}
-                    </button>
+                    <div className={styles.nowPlayingSubtitle}>
+                      {isGeneratingScriptForModal
+                        ? "Generating script..."
+                        : isGeneratingAudioForCurrentStop
+                          ? "Generating audio..."
+                          : hasCurrentAudio
+                            ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
+                            : "Audio not generated yet"}
+                    </div>
                     {hasCurrentAudio ? (
                       <a
                         className={styles.nowPlayingInlineLink}
@@ -1643,11 +1685,9 @@ async function startStopNarration() {
                         target="_blank"
                         rel="noreferrer"
                       >
-                        Open audio
+                        View audio
                       </a>
-                    ) : (
-                      <span className={styles.nowPlayingInlineLinkDisabled}>Open audio</span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
                 <button

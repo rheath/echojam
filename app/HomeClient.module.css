@@ -538,7 +538,60 @@
 
 .generationStatusWrap {
   margin-top: 20px;
-  max-width: 420px;
+  width: 100%;
+  max-width: none;
+}
+
+.generatingLayout {
+  min-height: 100vh;
+  background: #07080c;
+  color: #f4f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 32px;
+  position: relative;
+  overflow: hidden;
+}
+
+.generatingVideo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+.generatingOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 1;
+}
+
+.generatingPanel {
+  width: min(40vw, 620px);
+  position: relative;
+  z-index: 2;
+}
+
+.generatingCopyBlock {
+  margin-top: 0;
+}
+
+.generatingHeading {
+  margin: 0;
+  font-size: 44px;
+  line-height: 1.05;
+  font-weight: 700;
+}
+
+.generatingCopy {
+  margin: 10px 0 0;
+  font-size: 17px;
+  line-height: 1.45;
+  opacity: 0.95;
 }
 
 .generationStatusLine {
@@ -972,7 +1025,9 @@
 .nowPlayingLinksRow {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
+  min-height: 20px;
 }
 
 .nowPlayingInlineLink {
@@ -986,12 +1041,6 @@
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
-}
-
-.nowPlayingInlineLinkDisabled {
-  color: #9a9aa4;
-  font-size: 14px;
-  text-decoration: none;
 }
 
 .nowPlayingButton {
@@ -1262,6 +1311,14 @@
 
   .pickLayout {
     grid-template-columns: 1fr;
+  }
+
+  .generatingLayout {
+    padding: 20px 24px 30px;
+  }
+
+  .generatingPanel {
+    width: 100%;
   }
 
   .pickImagePane {
