@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRouteById } from "@/app/content/salemRoutes";
 import { ensureCanonicalStopForPreset, upsertRouteStopMapping } from "@/lib/canonicalStops";
+import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
 import {
   generateScriptWithOpenAI,
   getSwitchConfig,
@@ -182,6 +183,7 @@ export async function POST(req: Request) {
     const body = (await req.json()) as CreateBody;
     const route = getRouteById(body.routeId);
     if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
+    const city = normalizePresetCity(body.city);
 
     const admin = getAdmin();
     let jamId = body.jamId ?? null;
@@ -242,18 +244,12 @@ export async function POST(req: Request) {
       .single();
     if (jobErr || !job?.id) throw new Error(jobErr?.message || "Failed to create preset generation job");
 
-    const stops: StopInput[] = route.stops.map((s) => ({
-      id: s.id,
-      title: s.title,
-      lat: s.lat,
-      lng: s.lng,
-      image: s.images[0] ?? "/images/salem/placeholder-01.png",
-    }));
+    const stops: StopInput[] = buildPresetStopsWithOverview(route.stops, city);
 
     void runPresetGeneration(
       job.id,
       route.id,
-      body.city ?? "salem",
+      city,
       parseInt(route.durationLabel, 10) || 30,
       body.persona,
       stops

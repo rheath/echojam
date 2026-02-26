@@ -234,22 +234,54 @@ export async function POST(req: Request) {
       );
     }
 
-    const { data: route, error: routeErr } = await admin
+    const routeTitle = `${body.city[0].toUpperCase()}${body.city.slice(1)} Custom Mix`;
+    const { data: existingRoute } = await admin
       .from("custom_routes")
-      .insert({
-        jam_id: jamId,
-        city: body.city,
-        transport_mode: body.transportMode,
-        length_minutes: body.lengthMinutes,
-        title: `${body.city[0].toUpperCase()}${body.city.slice(1)} Custom Mix`,
-        narrator_default: body.persona,
-        status: "generating",
-      })
       .select("id")
-      .single();
-    if (routeErr || !route?.id) throw new Error(routeErr?.message || "Failed to create custom route");
+      .eq("jam_id", jamId)
+      .maybeSingle();
 
-    const routeId = route.id as string;
+    let routeId = existingRoute?.id as string | undefined;
+    if (routeId) {
+      const { error: updateRouteErr } = await admin
+        .from("custom_routes")
+        .update({
+          city: body.city,
+          transport_mode: body.transportMode,
+          length_minutes: body.lengthMinutes,
+          title: routeTitle,
+          narrator_default: body.persona,
+          status: "generating",
+        })
+        .eq("id", routeId);
+      if (updateRouteErr) throw new Error(updateRouteErr.message || "Failed to update custom route");
+    } else {
+      const { data: route, error: routeErr } = await admin
+        .from("custom_routes")
+        .insert({
+          jam_id: jamId,
+          city: body.city,
+          transport_mode: body.transportMode,
+          length_minutes: body.lengthMinutes,
+          title: routeTitle,
+          narrator_default: body.persona,
+          status: "generating",
+        })
+        .select("id")
+        .single();
+      if (routeErr || !route?.id) throw new Error(routeErr?.message || "Failed to create custom route");
+      routeId = route.id as string;
+    }
+    if (!routeId) throw new Error("Failed to resolve custom route id");
+
+    const { error: deleteStopsErr } = await admin.from("custom_route_stops").delete().eq("route_id", routeId);
+    if (deleteStopsErr) throw new Error(deleteStopsErr.message || "Failed to clear previous custom route stops");
+    const { error: deleteMappingsErr } = await admin
+      .from("route_stop_mappings")
+      .delete()
+      .eq("route_kind", "custom")
+      .eq("route_id", routeId);
+    if (deleteMappingsErr) throw new Error(deleteMappingsErr.message || "Failed to clear previous custom route mappings");
     await admin
       .from("jams")
       .update({ route_id: `custom:${routeId}`, persona: body.persona, current_stop: 0, completed_at: null, preset_id: null })

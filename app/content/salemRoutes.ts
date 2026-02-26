@@ -6,6 +6,7 @@ export type Stop = {
   title: string;
   lat: number;
   lng: number;
+  isOverview?: boolean;
 
   // Audio is preferred; text is a fallback (and helpful during dev).
   audio: Record<Persona, string>;

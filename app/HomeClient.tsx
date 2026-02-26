@@ -59,6 +59,7 @@ type CustomRouteResponse = {
     script_preteen: string | null;
     audio_url_adult: string | null;
     audio_url_preteen: string | null;
+    is_overview?: boolean;
     position: number;
   }>;
 };
@@ -189,8 +190,10 @@ const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
 const [isGeneratingScriptForModal, setIsGeneratingScriptForModal] = useState(false);
 const [isGeneratingAudioForCurrentStop, setIsGeneratingAudioForCurrentStop] = useState(false);
 const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
+const [isEditingStopsFromWalk, setIsEditingStopsFromWalk] = useState(false);
 const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
 const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null>(null);
+const previousStepRef = useRef<FlowStep>("landing");
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -308,6 +311,11 @@ const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null
     }
     return totalMeters / 1609.344;
   }, [builderSelectedStops]);
+  const hasOffRouteAddsInEdit = useMemo(() => {
+    if (!isEditingStopsFromWalk || !route) return false;
+    const routeStopIds = new Set(route.stops.map((s) => s.id));
+    return builderSelectedStops.some((s) => !routeStopIds.has(s.id));
+  }, [isEditingStopsFromWalk, route, builderSelectedStops]);
 
   // ---------- Supabase: load jam ----------
   async function loadJamById(id: string) {
@@ -437,20 +445,24 @@ const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null
       setCustomRoute(null);
       return;
     }
-    const endpoint = isCustom ? `/api/custom-routes/${customRouteId}` : `/api/preset-routes/${routeRef}`;
+    const endpoint = isCustom
+      ? `/api/custom-routes/${customRouteId}`
+      : `/api/preset-routes/${routeRef}?city=${encodeURIComponent(selectedCity)}`;
     const res = await fetch(endpoint);
     if (!res.ok) throw new Error(`Failed to load ${isCustom ? "custom" : "preset"} route`);
     const payload = (await res.json()) as CustomRouteResponse;
+    const landmarkStops = payload.stops.filter((s) => !s.is_overview);
     const nextRoute: RouteDef = {
       id: routeRef,
       title: payload.route.title,
       durationLabel: `${payload.route.length_minutes} min`,
-      description: `${payload.route.transport_mode === "drive" ? "Drive" : "Walk"} • ${payload.stops.length} stops`,
+      description: `${payload.route.transport_mode === "drive" ? "Drive" : "Walk"} • ${landmarkStops.length} stops`,
       stops: payload.stops.map((s, idx) => ({
         id: s.stop_id || `custom-${idx}`,
         title: s.title,
         lat: s.lat,
         lng: s.lng,
+        isOverview: Boolean(s.is_overview),
         images: [s.image_url || "/images/salem/placeholder-01.png"],
         audio: {
           adult: s.audio_url_adult || "",
@@ -463,7 +475,7 @@ const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null
       })),
     };
     setCustomRoute(nextRoute);
-  }, []);
+  }, [selectedCity]);
 
   // ---------- "Start stop” handler ----------
 async function startStopNarration() {
@@ -494,6 +506,15 @@ async function startStopNarration() {
     } catch {
       // ignore play interruption errors
     }
+  }
+
+  async function playPauseFromWalkAction() {
+    if (!route || route.stops.length === 0) return;
+    if (currentStopIndex === null) {
+      await handleStopSelect(0);
+      return;
+    }
+    await toggleAudio();
   }
 
   function seekAudio(nextTime: number) {
@@ -562,6 +583,16 @@ async function startStopNarration() {
 
   async function startTourFromSelection() {
     if (!selectedRouteId || !selectedPersona) return;
+    if (
+      returnToWalkOnClose &&
+      jam?.id &&
+      jam.route_id === selectedRouteId &&
+      (jam.persona ?? "adult") === selectedPersona
+    ) {
+      setReturnToWalkOnClose(false);
+      setStep("walk");
+      return;
+    }
     setReturnToWalkOnClose(false);
     setErr(null);
     setStep("generating");
@@ -596,7 +627,13 @@ async function startStopNarration() {
           city: selectedCity,
         }),
       });
-      const body = (await res.json()) as { error?: string; jobId?: string };
+      const body = (await res.json()) as { error?: string; jobId?: string; status?: string };
+      if (res.status === 429 && body.jobId) {
+        setGenerationJobId(body.jobId);
+        setGenerationJobKind("preset");
+        router.replace(`/?jam=${jamId}`);
+        return;
+      }
       if (!res.ok || !body.jobId) throw new Error(body.error || "Failed to create preset generation job");
       setGenerationJobId(body.jobId);
       setGenerationJobKind("preset");
@@ -686,9 +723,10 @@ async function startStopNarration() {
     }
   }
 
-  async function startCustomMixGeneration() {
-    if (!builderSelectedStops.length || !selectedPersona) return;
-    const validation = validateMixSelection(30, "walk", builderSelectedStops.length);
+  async function startCustomMixGeneration(stopsOverride?: CustomMixStop[]) {
+    const stopsToGenerate = stopsOverride ?? builderSelectedStops;
+    if (!stopsToGenerate.length || !selectedPersona) return;
+    const validation = validateMixSelection(30, "walk", stopsToGenerate.length);
     if (!validation.ok) {
       setErr(validation.message);
       return;
@@ -708,7 +746,7 @@ async function startStopNarration() {
           transportMode: "walk",
           lengthMinutes: 30,
           persona: selectedPersona,
-          stops: builderSelectedStops,
+          stops: stopsToGenerate,
         }),
       });
       const body = (await res.json()) as { error?: string; jamId?: string; jobId?: string };
@@ -731,6 +769,64 @@ async function startStopNarration() {
     } finally {
       setIsGeneratingMix(false);
     }
+  }
+
+  function openEditStopsFromWalk() {
+    if (!route) return;
+    const baseStops: CustomMixStop[] = route.stops.map((s) => ({
+      id: s.id,
+      title: s.title,
+      lat: s.lat,
+      lng: s.lng,
+      image: s.images[0] ?? "/images/salem/placeholder-01.png",
+    }));
+    setErr(null);
+    setIsEditingStopsFromWalk(true);
+    setReturnToWalkOnClose(true);
+    setBuilderSelectedStops(baseStops);
+    setSelectedPersona((jam?.persona ?? selectedPersona ?? "adult") as Persona);
+    setStep("buildMix");
+  }
+
+  async function saveEditedStopsFromWalk() {
+    if (!route) return;
+    if (hasOffRouteAddsInEdit) {
+      setIsEditingStopsFromWalk(false);
+      setReturnToWalkOnClose(false);
+      await startCustomMixGeneration(builderSelectedStops);
+      return;
+    }
+    const stopById = new Map(route.stops.map((s) => [s.id, s]));
+    const selectedIds = new Set(builderSelectedStops.map((s) => s.id));
+    const overviewStop = route.stops.find((s) => s.isOverview);
+    const nextStops = builderSelectedStops
+      .map((s) => stopById.get(s.id))
+      .filter((s): s is NonNullable<typeof s> => Boolean(s));
+
+    if (overviewStop && !selectedIds.has(overviewStop.id)) {
+      nextStops.unshift(overviewStop);
+    }
+
+    if (nextStops.filter((s) => !s.isOverview).length < 2) {
+      setErr("Choose at least 2 stops.");
+      return;
+    }
+
+    const nextLandmarkCount = nextStops.filter((s) => !s.isOverview).length;
+    const nextDescription =
+      route.description.includes("stops")
+        ? route.description.replace(/\d+\s+stops?/, `${nextLandmarkCount} stops`)
+        : route.description;
+
+    setCustomRoute({
+      ...route,
+      description: nextDescription,
+      stops: nextStops,
+    });
+    setActiveStopIndex(null);
+    setIsEditingStopsFromWalk(false);
+    setReturnToWalkOnClose(false);
+    setStep("walk");
   }
 
   async function restartWalk() {
@@ -958,6 +1054,7 @@ async function startStopNarration() {
 
   useEffect(() => {
     if (step !== "pickDuration") return;
+    const cameFromLanding = previousStepRef.current === "landing";
     if (returnToWalkOnClose && jam?.route_id) {
       const routeId = salemRoutes.some((r) => r.id === jam.route_id) ? jam.route_id : null;
       setSelectedRouteId(routeId);
@@ -965,19 +1062,25 @@ async function startStopNarration() {
       return;
     }
     setSelectedRouteId(null);
-    setSelectedPersona(null);
+    if (cameFromLanding) setSelectedPersona("adult");
   }, [step, returnToWalkOnClose, jam?.route_id, jam?.persona]);
 
   useEffect(() => {
+    previousStepRef.current = step;
+  }, [step]);
+
+  useEffect(() => {
     if (step !== "buildMix") return;
-    setBuilderSelectedStops([]);
-    setSelectedPersona("adult");
+    if (!isEditingStopsFromWalk) {
+      setBuilderSelectedStops([]);
+      setSelectedPersona("adult");
+    }
     setGenerationJobId(null);
     setGenerationJobKind(null);
     setGenerationProgress(0);
     setGenerationStatusLabel(GENERATION_STATUS_LABELS.queued);
     setGenerationMessage("Queued");
-  }, [step]);
+  }, [step, isEditingStopsFromWalk]);
 
   useEffect(() => {
     if (!jam?.id) {
@@ -1037,6 +1140,7 @@ async function startStopNarration() {
         return {
           id: stop.id,
           title: stop.title,
+          isOverview: Boolean(stop.isOverview),
           image: stop.images[0] ?? "/images/salem/placeholder-01.png",
           subtitle: getInitialStopSubtitle(distanceFromUserM, fallbackMinutes),
           isActive: false,
@@ -1053,6 +1157,7 @@ async function startStopNarration() {
       return {
         id: stop.id,
         title: stop.title,
+        isOverview: Boolean(stop.isOverview),
         image: stop.images[0] ?? "/images/salem/placeholder-01.png",
         subtitle,
         isActive: idx === selectedIdx,
@@ -1510,13 +1615,13 @@ async function startStopNarration() {
               })}
             </div>
 
-            <div className={styles.pickDurationStartWrap}>
-              <button
-                onClick={startCustomMixGeneration}
+              <div className={styles.pickDurationStartWrap}>
+                <button
+                onClick={isEditingStopsFromWalk ? saveEditedStopsFromWalk : startCustomMixGeneration}
                 disabled={!selectionValidation.ok || !selectedPersona || isGeneratingMix}
                 className={`${styles.landingCtaButton} ${styles.startTourButton}`}
               >
-                Generate Tour
+                {isEditingStopsFromWalk ? (hasOffRouteAddsInEdit ? "Save & Regenerate" : "Save") : "Generate Tour"}
               </button>
             </div>
           </section>
@@ -1628,14 +1733,14 @@ async function startStopNarration() {
           <div className={styles.rightRail}>
             <div className={styles.walkCard}>
               <div className={styles.walkMetaRow}>
-                <Image
-                  src="/icons/stars.svg"
-                  alt=""
-                  width={24}
-                  height={24}
-                  className={styles.walkNarratorIcon}
-                  aria-hidden="true"
-                />
+                <div className={styles.walkNarratorAvatarWrap}>
+                  <Image
+                    src={personaCatalog[persona].avatarSrc}
+                    alt={personaCatalog[persona].avatarAlt}
+                    fill
+                    className={styles.walkNarratorAvatar}
+                  />
+                </div>
                 <div className={styles.walkNarrator}>
                   Narrated by {activePersonaDisplayName}
                 </div>
@@ -1658,10 +1763,30 @@ async function startStopNarration() {
                 >
                   Customize
                 </button>
+                <button
+                  className={styles.nowPlayingButton}
+                  type="button"
+                  onClick={() => void playPauseFromWalkAction()}
+                  disabled={route.stops.length === 0 || (currentStopIndex !== null && !hasCurrentAudio)}
+                  aria-label={isPlaying ? "Pause current stop" : "Play current stop"}
+                >
+                  <Image
+                    src={isPlaying ? "/icons/pause-fill.svg" : "/icons/play-fill.svg"}
+                    alt=""
+                    width={28}
+                    height={28}
+                    className={styles.nowPlayingIcon}
+                    aria-hidden="true"
+                  />
+                </button>
               </div>
 
               <div className={styles.stopList}>
-                {stopList.map((stop, idx) => (
+                {stopList.map((stop, idx) => {
+                  const landmarkNumber = stop.isOverview
+                    ? null
+                    : stopList.slice(0, idx + 1).filter((s) => !s.isOverview).length;
+                  return (
                   <button
                     key={stop.id}
                     onClick={() => void handleStopSelect(idx)}
@@ -1673,13 +1798,21 @@ async function startStopNarration() {
                     </div>
                     <div className={styles.stopText}>
                       <div className={`${styles.stopTitle} ${stop.isActive ? styles.stopTitleActive : ""}`}>
-                        {idx + 1}. {stop.title}
+                        {stop.isOverview ? stop.title : `${landmarkNumber}. ${stop.title}`}
                       </div>
                       <div className={styles.stopSubtitle}>{stop.subtitle}</div>
                     </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
+              <button
+                type="button"
+                onClick={openEditStopsFromWalk}
+                className={`${styles.pickBuildMixButton} ${styles.editStopsButton}`}
+              >
+                Edit Stops
+              </button>
             </div>
 
             {currentStop && (
@@ -1727,7 +1860,7 @@ async function startStopNarration() {
                     </div>
                   </div>
                   <button
-                    className={styles.nowPlayingButton}
+                    className={`${styles.nowPlayingButton} ${styles.nowPlayingBarButton}`}
                     onClick={toggleAudio}
                     disabled={!hasCurrentAudio}
                     aria-label={isPlaying ? "Pause current stop" : "Play current stop"}
@@ -1737,7 +1870,7 @@ async function startStopNarration() {
                       alt=""
                       width={28}
                       height={28}
-                      className={styles.nowPlayingIcon}
+                      className={`${styles.nowPlayingIcon} ${styles.nowPlayingBarIcon}`}
                       aria-hidden="true"
                     />
                   </button>

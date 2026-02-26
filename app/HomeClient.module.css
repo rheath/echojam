@@ -727,6 +727,11 @@
   cursor: pointer;
 }
 
+.editStopsButton {
+  margin-top: 16px;
+  width: 100%;
+}
+
 .pickLengthRow {
   margin-top: 10px;
   display: flex;
@@ -891,6 +896,19 @@
   opacity: 0.9;
 }
 
+.walkNarratorAvatarWrap {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.walkNarratorAvatar {
+  object-fit: cover;
+}
+
 .walkNarrator {
   font-size: 20px;
   opacity: 0.86;
@@ -921,13 +939,13 @@
 }
 
 .pillButton {
-  flex: 0 0 170px;
-  width: 170px;
+  flex: 0 0 auto;
+  width: auto;
   border: 0;
   border-radius: 999px;
   background: #4a4a52;
   color: #fff;
-  padding: 8px 12px;
+  padding: 8px 32px;
   font-size: 16px;
   white-space: nowrap;
   cursor: pointer;
@@ -1100,6 +1118,19 @@
 .nowPlayingIcon {
   width: 28px;
   height: 28px;
+}
+
+.nowPlayingBarButton {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  padding: 0;
+}
+
+.nowPlayingBarIcon {
+  filter: invert(1);
 }
 
 .scriptModalOverlay {

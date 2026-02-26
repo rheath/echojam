@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRouteById } from "@/app/content/salemRoutes";
 import { toNullableTrimmed } from "@/lib/mixGeneration";
+import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
 
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -34,11 +35,13 @@ function isNonPlaceholderImage(value: string | null | undefined) {
   return !normalized.toLowerCase().includes("/placeholder-");
 }
 
-export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ routeId: string }> }) {
   try {
     const { routeId } = await ctx.params;
     const route = getRouteById(routeId);
     if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
+    const city = normalizePresetCity(new URL(req.url).searchParams.get("city"));
+    const presetStops = buildPresetStopsWithOverview(route.stops, city);
 
     let admin: ReturnType<typeof getAdmin> | null = null;
     try {
@@ -48,16 +51,17 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
     }
 
     if (!admin) {
-      const stops = route.stops.map((stop, index) => ({
+      const stops = presetStops.map((stop, index) => ({
         stop_id: stop.id,
         title: stop.title,
         lat: stop.lat,
         lng: stop.lng,
-        image_url: toNullableTrimmed(stop.images[0]) || "/images/salem/placeholder-01.png",
+        image_url: toNullableTrimmed(stop.image) || "/images/salem/placeholder-01.png",
         script_adult: null,
         script_preteen: null,
         audio_url_adult: null,
         audio_url_preteen: null,
+        is_overview: Boolean(stop.isOverview),
         position: index,
       }));
       return NextResponse.json({
@@ -155,12 +159,12 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       .limit(1)
       .maybeSingle();
 
-    const stops = route.stops.map((stop, index) => {
+    const stops = presetStops.map((stop, index) => {
       const mapping = mappingByStop.get(stop.id);
       const assetsForStop = mapping ? assetsByCanonical.get(mapping.canonical_stop_id) : null;
       const imageForStop = mapping ? imageByCanonical.get(mapping.canonical_stop_id) : null;
       const canonicalImage = toNullableTrimmed(imageForStop?.image_url);
-      const routeImage = toNullableTrimmed(stop.images[0]);
+      const routeImage = toNullableTrimmed(stop.image);
 
       return {
         stop_id: stop.id,
@@ -175,6 +179,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
         script_preteen: assetsForStop?.script_preteen ?? null,
         audio_url_adult: assetsForStop?.audio_url_adult ?? null,
         audio_url_preteen: assetsForStop?.audio_url_preteen ?? null,
+        is_overview: Boolean(stop.isOverview),
         position: index,
       };
     });

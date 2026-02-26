@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getRouteById, type Persona } from "@/app/content/salemRoutes";
 import { ensureCanonicalStopForPreset, upsertRouteStopMapping } from "@/lib/canonicalStops";
 import { generateScriptWithOpenAI, getSwitchConfig, shouldRegenerateScript, toNullableTrimmed } from "@/lib/mixGeneration";
+import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
 
 type Body = {
   routeId: string;
@@ -23,11 +24,12 @@ export async function POST(req: Request) {
     const body = (await req.json()) as Body;
     const route = getRouteById(body.routeId);
     if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
-    const stopIndex = route.stops.findIndex((s) => s.id === body.stopId);
+    const city = normalizePresetCity(body.city);
+    const stops = buildPresetStopsWithOverview(route.stops, city);
+    const stopIndex = stops.findIndex((s) => s.id === body.stopId);
     if (stopIndex < 0) return NextResponse.json({ error: "Unknown stop for preset route" }, { status: 404 });
 
-    const stop = route.stops[stopIndex];
-    const city = body.city ?? "salem";
+    const stop = stops[stopIndex];
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is required." }, { status: 500 });
@@ -68,10 +70,10 @@ export async function POST(req: Request) {
         title: stop.title,
         lat: stop.lat,
         lng: stop.lng,
-        image: stop.images[0] ?? "/images/salem/placeholder-01.png",
+        image: stop.image,
       },
       stopIndex,
-      route.stops.length
+      stops.length
     );
 
     const script = toNullableTrimmed(generated);
