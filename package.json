@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "NODE_ENV=production node server.js",
+    "start": "NODE_ENV=production /opt/alt/alt-nodejs22/root/bin/node server.js",
     "lint": "eslint"
   },
   "dependencies": {
