@@ -1,7 +1,7 @@
 "use client";
  
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import { getRouteById, salemRoutes, type Persona, type RouteDef } from "@/app/content/salemRoutes";
@@ -187,7 +187,6 @@ const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
 const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null>(null);
 
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const [err, setErr] = useState<string | null>(null);
   const [jam, setJam] = useState<JamRow | null>(null);
@@ -198,8 +197,19 @@ const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null
   const [geoAllowed, setGeoAllowed] = useState<boolean | null>(null);
   const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
 
-  const jamIdFromUrl = searchParams.get("jam");
-  const debugStepFromUrl = searchParams.get("debugStep");
+  const [jamIdFromUrl, setJamIdFromUrl] = useState<string | null>(null);
+  const [debugStepFromUrl, setDebugStepFromUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const syncFromLocation = () => {
+      const params = new URLSearchParams(window.location.search);
+      setJamIdFromUrl(params.get("jam"));
+      setDebugStepFromUrl(params.get("debugStep"));
+    };
+    syncFromLocation();
+    window.addEventListener("popstate", syncFromLocation);
+    return () => window.removeEventListener("popstate", syncFromLocation);
+  }, []);
 
   // Derive route + stop from jam
   const route: RouteDef | null = useMemo(
