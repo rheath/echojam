@@ -1617,7 +1617,13 @@ async function startStopNarration() {
 
               <div className={styles.pickDurationStartWrap}>
                 <button
-                onClick={isEditingStopsFromWalk ? saveEditedStopsFromWalk : startCustomMixGeneration}
+                onClick={() => {
+                  if (isEditingStopsFromWalk) {
+                    void saveEditedStopsFromWalk();
+                    return;
+                  }
+                  void startCustomMixGeneration();
+                }}
                 disabled={!selectionValidation.ok || !selectedPersona || isGeneratingMix}
                 className={`${styles.landingCtaButton} ${styles.startTourButton}`}
               >
@@ -1685,7 +1691,13 @@ async function startStopNarration() {
                   <div className={styles.pickDurationStartWrap}>
                     <button
                       type="button"
-                      onClick={generationJobKind === "preset" ? startTourFromSelection : startCustomMixGeneration}
+                      onClick={() => {
+                        if (generationJobKind === "preset") {
+                          void startTourFromSelection();
+                          return;
+                        }
+                        void startCustomMixGeneration();
+                      }}
                       disabled={isGeneratingMix}
                       className={styles.landingCtaButton}
                     >

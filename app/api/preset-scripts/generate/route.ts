@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       title: stop.title,
       lat: stop.lat,
       lng: stop.lng,
-      image: stop.images[0] ?? "/images/salem/placeholder-01.png",
+      image: stop.image,
     });
     await upsertRouteStopMapping(admin, "preset", route.id, stop.id, canonical.id, stopIndex);
 
