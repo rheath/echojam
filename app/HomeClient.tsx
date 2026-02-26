@@ -174,8 +174,6 @@ const [connectedCount, setConnectedCount] = useState(0);
 const [selectedRouteId, setSelectedRouteId] = useState<RouteDef["id"] | null>(null);
 const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
 const [selectedCity, setSelectedCity] = useState<CityOption>("salem");
-const [transportMode, setTransportMode] = useState<TransportMode>("walk");
-const [selectedLengthMinutes, setSelectedLengthMinutes] = useState<number>(30);
 const [builderSelectedStops, setBuilderSelectedStops] = useState<CustomMixStop[]>([]);
 const [linkBatchInput, setLinkBatchInput] = useState("");
 const [isResolvingLinks, setIsResolvingLinks] = useState(false);
@@ -293,13 +291,23 @@ const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null
   }, [availableStopsForCity, builderSelectedStops]);
   const activePersonaDisplayName = personaCatalog[persona].displayName;
   const maxStopsForSelection = useMemo(
-    () => getMaxStops(selectedLengthMinutes, transportMode),
-    [selectedLengthMinutes, transportMode]
+    () => getMaxStops(),
+    []
   );
   const selectionValidation = useMemo(
-    () => validateMixSelection(selectedLengthMinutes, transportMode, builderSelectedStops.length),
-    [selectedLengthMinutes, transportMode, builderSelectedStops.length]
+    () => validateMixSelection(30, "walk", builderSelectedStops.length),
+    [builderSelectedStops.length]
   );
+  const selectedStopsDistanceMiles = useMemo(() => {
+    if (builderSelectedStops.length < 2) return 0;
+    let totalMeters = 0;
+    for (let i = 1; i < builderSelectedStops.length; i += 1) {
+      const prev = builderSelectedStops[i - 1];
+      const next = builderSelectedStops[i];
+      totalMeters += haversineMeters(prev.lat, prev.lng, next.lat, next.lng);
+    }
+    return totalMeters / 1609.344;
+  }, [builderSelectedStops]);
 
   // ---------- Supabase: load jam ----------
   async function loadJamById(id: string) {
@@ -605,9 +613,9 @@ async function startStopNarration() {
     setBuilderSelectedStops((prev) => {
       const exists = prev.some((s) => s.id === stop.id);
       if (exists) return prev.filter((s) => s.id !== stop.id);
-      const nextMaxStops = getMaxStops(selectedLengthMinutes, transportMode);
+      const nextMaxStops = getMaxStops();
       if (nextMaxStops > 0 && prev.length >= nextMaxStops) {
-        setErr(`Select at most ${nextMaxStops} stops for ${selectedLengthMinutes} min ${transportMode} tours.`);
+        setErr(`Select at most ${nextMaxStops} stops.`);
         return prev;
       }
       return [...prev, stop];
@@ -680,7 +688,7 @@ async function startStopNarration() {
 
   async function startCustomMixGeneration() {
     if (!builderSelectedStops.length || !selectedPersona) return;
-    const validation = validateMixSelection(selectedLengthMinutes, transportMode, builderSelectedStops.length);
+    const validation = validateMixSelection(30, "walk", builderSelectedStops.length);
     if (!validation.ok) {
       setErr(validation.message);
       return;
@@ -697,8 +705,8 @@ async function startStopNarration() {
         body: JSON.stringify({
           jamId: jam?.id ?? null,
           city: selectedCity,
-          transportMode,
-          lengthMinutes: selectedLengthMinutes,
+          transportMode: "walk",
+          lengthMinutes: 30,
           persona: selectedPersona,
           stops: builderSelectedStops,
         }),
@@ -964,8 +972,6 @@ async function startStopNarration() {
     if (step !== "buildMix") return;
     setBuilderSelectedStops([]);
     setSelectedPersona("adult");
-    setTransportMode("walk");
-    setSelectedLengthMinutes(30);
     setGenerationJobId(null);
     setGenerationJobKind(null);
     setGenerationProgress(0);
@@ -1240,6 +1246,29 @@ async function startStopNarration() {
                   </div>
                 </div>
               </button>
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                className={`${styles.pickNarratorOption} ${styles.pickNarratorOptionDisabled}`}
+              >
+                <div className={styles.pickNarratorWithAvatar}>
+                  <div className={styles.pickNarratorAvatarWrap}>
+                    <Image
+                      src="/icons/stars.svg"
+                      alt=""
+                      width={24}
+                      height={24}
+                      className={styles.pickNarratorFutureIcon}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div>
+                    <div className={styles.pickRouteTitle}>Create your own narrator</div>
+                    <div className={styles.pickNarratorSub}>This will cost money</div>
+                  </div>
+                </div>
+              </button>
             </div>
             <div className={styles.pickSectionDivider} />
             <div className={styles.pickCopyBlock}>
@@ -1281,9 +1310,8 @@ async function startStopNarration() {
               ))}
               <button
                 type="button"
-                disabled
-                aria-disabled="true"
-                className={`${styles.pickRouteRow} ${styles.pickRouteRowDisabled}`}
+                onClick={() => setStep("buildMix")}
+                className={styles.pickRouteRow}
               >
                 <div className={styles.pickRouteMainWithIcon}>
                   <div className={styles.pickRouteIconCircle} aria-hidden="true">
@@ -1297,8 +1325,8 @@ async function startStopNarration() {
                     />
                   </div>
                   <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>City Drive Thru</div>
-                    <div className={styles.pickRouteMeta}>Coming soon</div>
+                    <div className={styles.pickRouteTitle}>Create your own mix</div>
+                    <div className={styles.pickRouteMeta}>Shape your story with up to 9 stops</div>
                   </div>
                 </div>
               </button>
@@ -1312,12 +1340,6 @@ async function startStopNarration() {
                 className={`${styles.landingCtaButton} ${styles.startTourButton}`}
               >
                 Start Tour
-              </button>
-              <button
-                onClick={() => setStep("buildMix")}
-                className={styles.pickBuildMixButton}
-              >
-                Create your own mix
               </button>
             </div>
           </section>
@@ -1365,65 +1387,6 @@ async function startStopNarration() {
               <h2 className={styles.pickHeading}>Create your own mix of {selectedCityLabel}</h2>
             </div>
 
-            <div className={styles.pickSectionLabel}>Transportation</div>
-            <div className={styles.pickPersonaRow}>
-              <button
-                onClick={() => setTransportMode("walk")}
-                className={`${styles.pickNarratorOption} ${transportMode === "walk" ? styles.pickNarratorOptionSelected : ""}`}
-              >
-                <div className={styles.pickRouteMainWithIcon}>
-                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                    <Image
-                      src="/icons/person-walking.svg"
-                      alt=""
-                      width={24}
-                      height={24}
-                      className={styles.pickRouteWalkIcon}
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>Walk</div>
-                    <div className={styles.pickNarratorSub}>Curated walking route</div>
-                  </div>
-                </div>
-              </button>
-              <button
-                onClick={() => setTransportMode("drive")}
-                className={`${styles.pickNarratorOption} ${transportMode === "drive" ? styles.pickNarratorOptionSelected : ""}`}
-              >
-                <div className={styles.pickRouteMainWithIcon}>
-                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                    <Image
-                      src="/icons/car-front-fill.svg"
-                      alt=""
-                      width={24}
-                      height={24}
-                      className={styles.pickRouteWalkIcon}
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>Drive</div>
-                    <div className={styles.pickNarratorSub}>City drive-through mix</div>
-                  </div>
-                </div>
-              </button>
-            </div>
-
-            <div className={styles.pickSectionLabel}>Length of tour</div>
-            <div className={styles.pickLengthRow}>
-              {[15, 30, 60].map((min) => (
-                <button
-                  key={min}
-                  onClick={() => setSelectedLengthMinutes(min)}
-                  className={`${styles.pickLengthButton} ${selectedLengthMinutes === min ? styles.pickLengthButtonSelected : ""}`}
-                >
-                  {min} min
-                </button>
-              ))}
-            </div>
-
             <div className={styles.pickSectionLabel}>Narrator</div>
             <div className={styles.pickPersonaRow}>
               <button
@@ -1467,10 +1430,11 @@ async function startStopNarration() {
             </div>
 
             <div className={styles.pickSectionLabel}>
-              Choose stops ({builderSelectedStops.length}/{maxStopsForSelection || 0} selected)
+              Shape your story with up to 9 stops 
             </div>
+      
             <div className={styles.pickLimitHint}>
-              Max {maxStopsForSelection || 0} stops for {selectedLengthMinutes} min {transportMode} tour.
+              {builderSelectedStops.length}/{maxStopsForSelection || 0} selected  for {formatRouteMiles(selectedStopsDistanceMiles)}
             </div>
             <div className={styles.buildMixLinkAddWrap}>
               <textarea
