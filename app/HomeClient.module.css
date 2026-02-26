@@ -491,6 +491,11 @@
   color: #ff79a8;
 }
 
+.pickNarratorOptionDisabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .pickRouteList > :last-child {
   border-bottom: 0;
 }
@@ -518,10 +523,21 @@
   border-radius: 999px;
   overflow: hidden;
   flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .pickNarratorAvatar {
   object-fit: cover;
+}
+
+.pickNarratorFutureIcon {
+  width: 24px;
+  height: 24px;
+  filter: invert(1);
+  opacity: 0.9;
 }
 
 .pickImagePane {
