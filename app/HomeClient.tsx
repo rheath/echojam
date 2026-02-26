@@ -849,7 +849,6 @@ async function startStopNarration() {
   useEffect(() => {
   if (step !== "walk") return;
   if (!navigator.geolocation) return;
-  if (!currentStop) return;
 
   // If user never enabled geo, don't nag; banner will stay hidden.
   let watchId: number | null = null;
@@ -860,6 +859,12 @@ async function startStopNarration() {
         const nextPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         setMyPos(nextPos);
         setGeoAllowed(true);
+
+        if (!currentStop) {
+          setDistanceToStopM(null);
+          setProximity("far");
+          return;
+        }
 
         const meters = haversineMeters(nextPos.lat, nextPos.lng, currentStop.lat, currentStop.lng);
         setDistanceToStopM(meters);
