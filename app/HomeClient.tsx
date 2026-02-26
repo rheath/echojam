@@ -131,6 +131,14 @@ function estimateWalkMinutes(meters: number) {
   return Math.max(1, Math.round(seconds / 60));
 }
 
+function getInitialStopSubtitle(distanceToStopM: number | null, fallbackMinutes: number) {
+  if (distanceToStopM !== null) {
+    if (distanceToStopM < 50) return "at this location";
+    return `${estimateWalkMinutes(distanceToStopM)} mins away`;
+  }
+  return `${fallbackMinutes} mins away`;
+}
+
 function getRouteMiles(stops: RouteDef["stops"]) {
   if (stops.length < 2) return 0;
   let totalMeters = 0;
@@ -1006,11 +1014,20 @@ async function startStopNarration() {
     const selectedIdx = currentStopIndex ?? -1;
     return route.stops.map((stop, idx) => {
       if (selectedIdx < 0) {
+        const fallbackMinutes =
+          idx === 0
+            ? 1
+            : estimateWalkMinutes(
+                haversineMeters(route.stops[idx - 1].lat, route.stops[idx - 1].lng, stop.lat, stop.lng)
+              );
+        const distanceFromUserM = myPos
+          ? haversineMeters(myPos.lat, myPos.lng, stop.lat, stop.lng)
+          : null;
         return {
           id: stop.id,
           title: stop.title,
           image: stop.images[0] ?? "/images/salem/placeholder-01.png",
-          subtitle: "Tap to start",
+          subtitle: getInitialStopSubtitle(distanceFromUserM, fallbackMinutes),
           isActive: false,
         };
       }
@@ -1030,7 +1047,7 @@ async function startStopNarration() {
         isActive: idx === selectedIdx,
       };
     });
-  }, [route, currentStopIndex]);
+  }, [route, currentStopIndex, myPos]);
 
   const mapsUrl = useMemo(() => {
     if (!route || route.stops.length < 2) return "#";
