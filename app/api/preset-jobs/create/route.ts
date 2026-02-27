@@ -51,6 +51,13 @@ async function runPresetGeneration(
   let warningCount = 0;
   let audioReadyCount = 0;
   let lastWarning = "";
+  const stopPositionById = new Map<string, number>();
+  for (let i = 0; i < stops.length; i += 1) {
+    stopPositionById.set(stops[i].id, i);
+  }
+  const overviewStops = stops.filter((stop) => stop.id.startsWith("preset-overview-"));
+  const landmarkStops = stops.filter((stop) => !stop.id.startsWith("preset-overview-"));
+  const orderedStops = [...overviewStops, ...landmarkStops];
 
   const updateProgress = async (
     status: "queued" | "generating_script" | "generating_audio" | "ready" | "ready_with_warnings" | "failed",
@@ -67,11 +74,11 @@ async function runPresetGeneration(
   };
   const states: RowState[] = [];
 
-  await updateProgress("generating_script", "Generating scripts");
-  for (let i = 0; i < stops.length; i += 1) {
-    const stop = stops[i];
+  await updateProgress("generating_script", "Generating scripts (Overview first)");
+  for (const stop of orderedStops) {
     const canonical = await ensureCanonicalStopForPreset(admin, city, stop);
-    await upsertRouteStopMapping(admin, "preset", routeId, stop.id, canonical.id, i);
+    const originalPosition = stopPositionById.get(stop.id) ?? 0;
+    await upsertRouteStopMapping(admin, "preset", routeId, stop.id, canonical.id, originalPosition);
 
     const { data: current } = await admin
       .from("canonical_stop_assets")
@@ -84,7 +91,16 @@ async function runPresetGeneration(
     if (!script) {
       try {
         script = toNullableTrimmed(
-          await generateScriptWithOpenAI(apiKey, city, "walk", lengthMinutes, persona, stop, i, stops.length)
+          await generateScriptWithOpenAI(
+            apiKey,
+            city,
+            "walk",
+            lengthMinutes,
+            persona,
+            stop,
+            originalPosition,
+            stops.length
+          )
         );
       } catch (e) {
         warningCount += 1;
@@ -109,7 +125,8 @@ async function runPresetGeneration(
     await updateProgress("generating_script", `Generating scripts (${doneUnits}/${totalUnits})`);
   }
 
-  await updateProgress("generating_audio", "Generating audio");
+  await updateProgress("generating_audio", "Generating audio (Overview first)");
+  let overviewAudioReady = overviewStops.length === 0;
   for (const state of states) {
     const replayUrl = toNullableTrimmed(switchConfig.replay_audio[state.stop.id]?.[persona]);
 
@@ -138,6 +155,9 @@ async function runPresetGeneration(
     }
 
     if (isUsableGeneratedAudioUrl(audioUrl)) audioReadyCount += 1;
+    if (state.stop.id.startsWith("preset-overview-") && isUsableGeneratedAudioUrl(audioUrl)) {
+      overviewAudioReady = true;
+    }
 
     await admin.from("canonical_stop_assets").upsert(
       {
@@ -153,6 +173,10 @@ async function runPresetGeneration(
 
     doneUnits += 1;
     await updateProgress("generating_audio", `Generating audio (${doneUnits}/${totalUnits})`);
+  }
+
+  if (!overviewAudioReady) {
+    throw new Error(`Overview audio not ready for persona ${persona}.`);
   }
 
   if (audioReadyCount === 0) {

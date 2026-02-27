@@ -320,17 +320,67 @@
   gap: 10px;
 }
 
+.buildMixLinkRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .buildMixLinkTextarea {
   width: 100%;
+  flex: 1 1 auto;
   border: 1px solid #34353b;
-  background: #12131a;
-  color: #f4f4f6;
+  background: #fff;
+  color: #111;
   font: inherit;
   font-size: 15px;
   line-height: 1.4;
-  padding: 10px 12px;
-  resize: vertical;
-  min-height: 96px;
+  padding: 14px 12px;
+  resize: none;
+  height: 52px;
+  min-height: 52px;
+  max-height: 52px;
+  border-radius: 30px;
+}
+
+.buildMixLinkAddButton {
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  border: 0;
+  background: #ff5f92;
+  color: #16161d;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.buildMixLinkAddButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.buildMixLinkAddIcon {
+  width: 22px;
+  height: 22px;
+  filter: invert(1);
+}
+
+.buildMixLinkAddLoading {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  animation: buildMixLinkSpin 0.8s linear infinite;
+}
+
+@keyframes buildMixLinkSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .buildMixLinkSummary {
@@ -367,7 +417,8 @@
 }
 
 .pickRouteRowBuildMix {
-  justify-content: flex-start;
+  justify-content: space-between;
+  cursor: default;
 }
 
 .pickRouteRowSelected {
@@ -387,12 +438,18 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .pickRouteMainWithIcon {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 12px;
+  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .pickRouteIconCircle {
@@ -425,10 +482,21 @@
 
 .pickRouteArrow {
   font-size: 44px;
-  line-height: 1;
+  line-height: 0;
   opacity: 0.92;
   width: 52px;
   flex-shrink: 0;
+}
+
+.pickRouteToggleButton {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
 .pickRouteArrowIcon {
@@ -483,6 +551,13 @@
   cursor: pointer;
 }
 
+.pickNarratorOptionContent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .pickNarratorOptionSelected {
   background: transparent;
 }
@@ -514,6 +589,17 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pickRowArrow {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .pickNarratorAvatarWrap {
@@ -717,6 +803,18 @@
   flex-wrap: wrap;
 }
 
+.buildMixStickyCtaWrap {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  margin-top: auto;
+  width: calc(100% + 64px);
+  margin-left: -32px;
+  padding: 12px 32px 16px;
+  border-top: 1px solid #2b2b33;
+  background: #0a0a10;
+}
+
 .pickBuildMixButton {
   border: 1px solid #5a5b61;
   border-radius: 999px;
@@ -905,6 +1003,14 @@
   flex-shrink: 0;
 }
 
+.walkNarratorAvatarButton {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
 .walkNarratorAvatar {
   object-fit: cover;
 }
@@ -912,6 +1018,21 @@
 .walkNarrator {
   font-size: 20px;
   opacity: 0.86;
+}
+
+.walkNarratorButton {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.walkNarratorActiveName {
+  color: #ff5f92;
 }
 
 .walkHeadline {
@@ -936,6 +1057,10 @@
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+.walkActionRow .nowPlayingButton {
+  margin-left: auto;
 }
 
 .pillButton {
@@ -1405,6 +1530,10 @@
     padding: 20px 24px 30px;
   }
 
+  .buildMixInfo {
+    padding-bottom: 120px;
+  }
+
   .pickCopyBlock {
     margin-top: 0;
   }
@@ -1427,7 +1556,7 @@
   }
 
   .pickRouteTitle {
-    font-size: 24px;
+    font-size: 20px;
   }
 
   .pickRouteArrow {
@@ -1438,6 +1567,18 @@
     margin-top: 24px;
     display: flex;
     justify-content: center;
+  }
+
+  .buildMixStickyCtaWrap {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    margin: 0;
+    padding: 12px 24px calc(16px + env(safe-area-inset-bottom));
+    justify-content: center;
+    z-index: 60;
   }
 
   .walkLayout {

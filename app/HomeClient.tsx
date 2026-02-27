@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import { getRouteById, salemRoutes, type Persona, type RouteDef } from "@/app/content/salemRoutes";
+import { buildPresetOverviewStop, isPresetOverviewStopId } from "@/lib/presetOverview";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { getMaxStops, validateMixSelection } from "@/lib/mixConstraints";
 import dynamic from "next/dynamic";
@@ -165,6 +166,30 @@ function getStopCoordKey(stop: { lat: number; lng: number }) {
   return `${stop.lat.toFixed(6)},${stop.lng.toFixed(6)}`;
 }
 
+function stopMatches(a: CustomMixStop, b: CustomMixStop) {
+  return a.id === b.id || getStopCoordKey(a) === getStopCoordKey(b);
+}
+
+function mergeUniqueStops(primary: CustomMixStop[], secondary: CustomMixStop[]) {
+  const merged: CustomMixStop[] = [];
+  for (const stop of primary) {
+    if (merged.some((m) => stopMatches(m, stop))) continue;
+    merged.push(stop);
+  }
+  for (const stop of secondary) {
+    if (merged.some((m) => stopMatches(m, stop))) continue;
+    merged.push(stop);
+  }
+  return merged;
+}
+
+function prioritizeOverviewById<T extends { id: string }>(stops: T[]) {
+  const overview = stops.filter((stop) => isPresetOverviewStopId(stop.id));
+  if (overview.length === 0) return stops;
+  const rest = stops.filter((stop) => !isPresetOverviewStopId(stop.id));
+  return [...overview, ...rest];
+}
+
 export default function HomeClient() {
   const [distanceToStopM, setDistanceToStopM] = useState<number | null>(null);
 const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
@@ -178,6 +203,7 @@ const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
 const [pickDurationPage, setPickDurationPage] = useState<PickDurationPage>("narrator");
 const [selectedCity, setSelectedCity] = useState<CityOption>("salem");
 const [builderSelectedStops, setBuilderSelectedStops] = useState<CustomMixStop[]>([]);
+const [buildMixOrderedStops, setBuildMixOrderedStops] = useState<CustomMixStop[]>([]);
 const [linkBatchInput, setLinkBatchInput] = useState("");
 const [isResolvingLinks, setIsResolvingLinks] = useState(false);
 const [resolveSummary, setResolveSummary] = useState<ResolveSummary | null>(null);
@@ -256,8 +282,16 @@ const previousStepRef = useRef<FlowStep>("landing");
     [selectedCity]
   );
   const availableStopsForCity = useMemo<CustomMixStop[]>(() => {
-    if (selectedCity !== "salem") return [];
+    const overview = buildPresetOverviewStop(selectedCity);
     const byId = new Map<string, CustomMixStop>();
+    byId.set(overview.id, {
+      id: overview.id,
+      title: overview.title,
+      lat: overview.lat,
+      lng: overview.lng,
+      image: overview.image,
+    });
+    if (selectedCity !== "salem") return Array.from(byId.values());
     for (const r of salemRoutes) {
       for (const s of r.stops) {
         if (byId.has(s.id)) continue;
@@ -272,28 +306,7 @@ const previousStepRef = useRef<FlowStep>("landing");
     }
     return Array.from(byId.values());
   }, [selectedCity]);
-  const buildMixDisplayStops = useMemo<CustomMixStop[]>(() => {
-    const merged: CustomMixStop[] = [];
-    const seen = new Set<string>();
-
-    for (const stop of builderSelectedStops) {
-      const key = stop.id || getStopCoordKey(stop);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      merged.push(stop);
-    }
-
-    for (const stop of availableStopsForCity) {
-      const idKey = stop.id;
-      const coordKey = getStopCoordKey(stop);
-      if (seen.has(idKey) || seen.has(coordKey)) continue;
-      seen.add(idKey);
-      seen.add(coordKey);
-      merged.push(stop);
-    }
-
-    return merged;
-  }, [availableStopsForCity, builderSelectedStops]);
+  const buildMixDisplayStops = buildMixOrderedStops;
   const activePersonaDisplayName = personaCatalog[persona].displayName;
   const maxStopsForSelection = useMemo(
     () => getMaxStops(),
@@ -470,27 +483,31 @@ const previousStepRef = useRef<FlowStep>("landing");
     if (!res.ok) throw new Error(`Failed to load ${isCustom ? "custom" : "preset"} route`);
     const payload = (await res.json()) as CustomRouteResponse;
     const landmarkStops = payload.stops.filter((s) => !s.is_overview);
+    const mappedStops: RouteDef["stops"] = payload.stops.map((s, idx) => {
+      const stopId = s.stop_id || `custom-${idx}`;
+      return {
+      id: stopId,
+      title: s.title,
+      lat: s.lat,
+      lng: s.lng,
+      isOverview: Boolean(s.is_overview) || isPresetOverviewStopId(stopId),
+      images: [s.image_url || "/images/salem/placeholder-01.png"],
+      audio: {
+        adult: s.audio_url_adult || "",
+        preteen: s.audio_url_preteen || "",
+      },
+      text: {
+        adult: s.script_adult || "",
+        preteen: s.script_preteen || "",
+      },
+    };
+    });
     const nextRoute: RouteDef = {
       id: routeRef,
       title: payload.route.title,
       durationLabel: `${payload.route.length_minutes} min`,
       description: `${payload.route.transport_mode === "drive" ? "Drive" : "Walk"} • ${landmarkStops.length} stops`,
-      stops: payload.stops.map((s, idx) => ({
-        id: s.stop_id || `custom-${idx}`,
-        title: s.title,
-        lat: s.lat,
-        lng: s.lng,
-        isOverview: Boolean(s.is_overview),
-        images: [s.image_url || "/images/salem/placeholder-01.png"],
-        audio: {
-          adult: s.audio_url_adult || "",
-          preteen: s.audio_url_preteen || "",
-        },
-        text: {
-          adult: s.script_adult || "",
-          preteen: s.script_preteen || "",
-        },
-      })),
+      stops: prioritizeOverviewById(mappedStops),
     };
     setCustomRoute(nextRoute);
   }, [selectedCity]);
@@ -599,13 +616,12 @@ async function startStopNarration() {
 
   // ---------- Step transitions ----------
 
-  async function startTourFromSelection() {
-    if (!selectedRouteId || !selectedPersona) return;
+  async function startPresetTour(routeId: RouteDef["id"], personaSelection: Persona) {
     if (
       returnToWalkOnClose &&
       jam?.id &&
-      jam.route_id === selectedRouteId &&
-      (jam.persona ?? "adult") === selectedPersona
+      jam.route_id === routeId &&
+      (jam.persona ?? "adult") === personaSelection
     ) {
       setReturnToWalkOnClose(false);
       setStep("walk");
@@ -620,15 +636,15 @@ async function startStopNarration() {
 
     let jamId = jam?.id ?? null;
     if (!jamId) {
-      jamId = await createJam(selectedRouteId, selectedPersona, { skipStep: true });
+      jamId = await createJam(routeId, personaSelection, { skipStep: true });
       if (!jamId) {
         setStep("pickDuration");
         return;
       }
     } else {
       await updateJam({
-        route_id: selectedRouteId,
-        persona: selectedPersona,
+        route_id: routeId,
+        persona: personaSelection,
         current_stop: 0,
         completed_at: null,
       });
@@ -640,8 +656,8 @@ async function startStopNarration() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jamId,
-          routeId: selectedRouteId,
-          persona: selectedPersona,
+          routeId,
+          persona: personaSelection,
           city: selectedCity,
         }),
       });
@@ -661,6 +677,17 @@ async function startStopNarration() {
       setErr(e instanceof Error ? e.message : "Failed to generate preset tour");
       setStep("pickDuration");
     }
+  }
+
+  async function startTourFromSelection() {
+    if (!selectedRouteId || !selectedPersona) return;
+    await startPresetTour(selectedRouteId, selectedPersona);
+  }
+
+  async function startTourFromRoute(routeId: RouteDef["id"]) {
+    if (!selectedPersona) return;
+    setSelectedRouteId(routeId);
+    await startPresetTour(routeId, selectedPersona);
   }
 
   function toggleBuilderStop(stop: CustomMixStop) {
@@ -684,7 +711,7 @@ async function startStopNarration() {
       .filter(Boolean);
 
     if (!links.length) {
-      setErr("Paste at least one Google Maps link.");
+      setErr("Paste in a Google Maps link");
       return;
     }
 
@@ -704,6 +731,7 @@ async function startStopNarration() {
       }
 
       const nextStops = [...builderSelectedStops];
+      const prependedStops: CustomMixStop[] = [];
       const selectedKeys = new Set(
         builderSelectedStops.map((s) => getStopCoordKey(s))
       );
@@ -723,10 +751,19 @@ async function startStopNarration() {
         }
         selectedKeys.add(key);
         nextStops.push(stop);
+        prependedStops.push(stop);
         added += 1;
       }
 
       setBuilderSelectedStops(nextStops);
+      if (prependedStops.length > 0) {
+        setBuildMixOrderedStops((prev) => {
+          const withoutPrepended = prev.filter(
+            (existing) => !prependedStops.some((incoming) => stopMatches(existing, incoming))
+          );
+          return [...prependedStops, ...withoutPrepended];
+        });
+      }
       setResolveSummary({
         added,
         skippedDuplicate,
@@ -742,7 +779,7 @@ async function startStopNarration() {
   }
 
   async function startCustomMixGeneration(stopsOverride?: CustomMixStop[]) {
-    const stopsToGenerate = stopsOverride ?? builderSelectedStops;
+    const stopsToGenerate = prioritizeOverviewById(stopsOverride ?? builderSelectedStops);
     if (!stopsToGenerate.length || !selectedPersona) return;
     const validation = validateMixSelection(30, "walk", stopsToGenerate.length);
     if (!validation.ok) {
@@ -802,6 +839,7 @@ async function startStopNarration() {
     setIsEditingStopsFromWalk(true);
     setReturnToWalkOnClose(true);
     setBuilderSelectedStops(baseStops);
+    setBuildMixOrderedStops(mergeUniqueStops(baseStops, availableStopsForCity));
     setSelectedPersona((jam?.persona ?? selectedPersona ?? "adult") as Persona);
     setStep("buildMix");
   }
@@ -815,15 +853,11 @@ async function startStopNarration() {
       return;
     }
     const stopById = new Map(route.stops.map((s) => [s.id, s]));
-    const selectedIds = new Set(builderSelectedStops.map((s) => s.id));
-    const overviewStop = route.stops.find((s) => s.isOverview);
-    const nextStops = builderSelectedStops
+    const nextStops = prioritizeOverviewById(
+      builderSelectedStops
       .map((s) => stopById.get(s.id))
-      .filter((s): s is NonNullable<typeof s> => Boolean(s));
-
-    if (overviewStop && !selectedIds.has(overviewStop.id)) {
-      nextStops.unshift(overviewStop);
-    }
+      .filter((s): s is NonNullable<typeof s> => Boolean(s))
+    );
 
     if (nextStops.filter((s) => !s.isOverview).length < 2) {
       setErr("Choose at least 2 stops.");
@@ -1092,6 +1126,7 @@ async function startStopNarration() {
     if (step !== "buildMix") return;
     if (!isEditingStopsFromWalk) {
       setBuilderSelectedStops([]);
+      setBuildMixOrderedStops(availableStopsForCity);
       setSelectedPersona("adult");
     }
     setGenerationJobId(null);
@@ -1099,7 +1134,7 @@ async function startStopNarration() {
     setGenerationProgress(0);
     setGenerationStatusLabel(GENERATION_STATUS_LABELS.queued);
     setGenerationMessage("Queued");
-  }, [step, isEditingStopsFromWalk]);
+  }, [step, isEditingStopsFromWalk, availableStopsForCity]);
 
   useEffect(() => {
     if (!jam?.id) {
@@ -1340,18 +1375,30 @@ async function startStopNarration() {
                     }}
                     className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
                   >
-                    <div className={styles.pickNarratorWithAvatar}>
-                      <div className={styles.pickNarratorAvatarWrap}>
-                        <Image
-                          src={personaCatalog.adult.avatarSrc}
-                          alt={personaCatalog.adult.avatarAlt}
-                          fill
-                          className={styles.pickNarratorAvatar}
-                        />
+                    <div className={styles.pickNarratorOptionContent}>
+                      <div className={styles.pickNarratorWithAvatar}>
+                        <div className={styles.pickNarratorAvatarWrap}>
+                          <Image
+                            src={personaCatalog.adult.avatarSrc}
+                            alt={personaCatalog.adult.avatarAlt}
+                            fill
+                            className={styles.pickNarratorAvatar}
+                          />
+                        </div>
+                        <div>
+                          <div className={styles.pickRouteTitle}>{personaCatalog.adult.displayName}</div>
+                          <div className={styles.pickNarratorSub}>{personaCatalog.adult.description}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className={styles.pickRouteTitle}>{personaCatalog.adult.displayName}</div>
-                        <div className={styles.pickNarratorSub}>{personaCatalog.adult.description}</div>
+                      <div className={styles.pickRowArrow} aria-hidden="true">
+                        <Image
+                          src="/icons/chevron-right.svg"
+                          alt=""
+                          width={28}
+                          height={28}
+                          className={styles.landingArrowIcon}
+                          aria-hidden="true"
+                        />
                       </div>
                     </div>
                   </button>
@@ -1361,18 +1408,30 @@ async function startStopNarration() {
                     }}
                     className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
                   >
-                    <div className={styles.pickNarratorWithAvatar}>
-                      <div className={styles.pickNarratorAvatarWrap}>
-                        <Image
-                          src={personaCatalog.preteen.avatarSrc}
-                          alt={personaCatalog.preteen.avatarAlt}
-                          fill
-                          className={styles.pickNarratorAvatar}
-                        />
+                    <div className={styles.pickNarratorOptionContent}>
+                      <div className={styles.pickNarratorWithAvatar}>
+                        <div className={styles.pickNarratorAvatarWrap}>
+                          <Image
+                            src={personaCatalog.preteen.avatarSrc}
+                            alt={personaCatalog.preteen.avatarAlt}
+                            fill
+                            className={styles.pickNarratorAvatar}
+                          />
+                        </div>
+                        <div>
+                          <div className={styles.pickRouteTitle}>{personaCatalog.preteen.displayName}</div>
+                          <div className={styles.pickNarratorSub}>{personaCatalog.preteen.description}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className={styles.pickRouteTitle}>{personaCatalog.preteen.displayName}</div>
-                        <div className={styles.pickNarratorSub}>{personaCatalog.preteen.description}</div>
+                      <div className={styles.pickRowArrow} aria-hidden="true">
+                        <Image
+                          src="/icons/chevron-right.svg"
+                          alt=""
+                          width={28}
+                          height={28}
+                          className={styles.landingArrowIcon}
+                          aria-hidden="true"
+                        />
                       </div>
                     </div>
                   </button>
@@ -1395,7 +1454,7 @@ async function startStopNarration() {
                       </div>
                       <div>
                         <div className={styles.pickRouteTitle}>Create your own narrator</div>
-                        <div className={styles.pickNarratorSub}>This will cost money</div>
+                        <div className={styles.pickNarratorSub}>Coming soon for a fee</div>
                       </div>
                     </div>
                   </button>
@@ -1448,13 +1507,21 @@ async function startStopNarration() {
                   {salemRoutes.map((r) => (
                     <button
                       key={r.id}
-                      onClick={() => setSelectedRouteId(r.id)}
+                      onClick={() => {
+                        void startTourFromRoute(r.id);
+                      }}
                       className={`${styles.pickRouteRow} ${selectedRouteId === r.id ? styles.pickRouteRowSelected : ""}`}
                     >
                       <div className={styles.pickRouteMainWithIcon}>
                         <div className={styles.pickRouteIconCircle} aria-hidden="true">
                           <Image
-                            src="/icons/person-walking.svg"
+                            src={
+                              r.id === "salem-core-15"
+                                ? "/icons/lightning-fill.svg"
+                                : r.id === "salem-deepdive-60"
+                                  ? "/icons/layers.svg"
+                                  : "/icons/person-walking.svg"
+                            }
                             alt=""
                             width={24}
                             height={24}
@@ -1469,17 +1536,27 @@ async function startStopNarration() {
                           </div>
                         </div>
                       </div>
+                      <div className={styles.pickRowArrow} aria-hidden="true">
+                        <Image
+                          src="/icons/chevron-right.svg"
+                          alt=""
+                          width={28}
+                          height={28}
+                          className={styles.landingArrowIcon}
+                          aria-hidden="true"
+                        />
+                      </div>
                     </button>
                   ))}
                   <button
                     type="button"
                     onClick={() => setStep("buildMix")}
                     className={styles.pickRouteRow}
-                  >
-                    <div className={styles.pickRouteMainWithIcon}>
+                    >
+                      <div className={styles.pickRouteMainWithIcon}>
                       <div className={styles.pickRouteIconCircle} aria-hidden="true">
                         <Image
-                          src="/icons/car-front-fill.svg"
+                          src="/icons/shuffle.svg"
                           alt=""
                           width={24}
                           height={24}
@@ -1487,23 +1564,22 @@ async function startStopNarration() {
                           aria-hidden="true"
                         />
                       </div>
-                      <div className={styles.pickRouteMain}>
-                        <div className={styles.pickRouteTitle}>Create your own mix</div>
-                        <div className={styles.pickRouteMeta}>Shape your story with up to 9 stops</div>
+                        <div className={styles.pickRouteMain}>
+                          <div className={styles.pickRouteTitle}>Create your own mix</div>
+                          <div className={styles.pickRouteMeta}>Shape your story with up to 9 stops</div>
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                </div>
-                <div className={styles.pickSectionDivider} />
-
-                <div className={styles.pickDurationStartWrap}>
-                  <button
-                    onClick={startTourFromSelection}
-                    disabled={!selectedRouteId || !selectedPersona}
-                    className={`${styles.landingCtaButton} ${styles.startTourButton}`}
-                  >
-                    Start Tour
-                  </button>
+                      <div className={styles.pickRowArrow} aria-hidden="true">
+                        <Image
+                          src="/icons/chevron-right.svg"
+                          alt=""
+                          width={28}
+                          height={28}
+                          className={styles.landingArrowIcon}
+                          aria-hidden="true"
+                        />
+                      </div>
+                    </button>
                 </div>
               </section>
 
@@ -1553,28 +1629,39 @@ async function startStopNarration() {
             </div>
 
             <div className={styles.pickSectionLabel}>
-              Shape your story with up to 9 stops 
-            </div>
-      
-            <div className={styles.pickLimitHint}>
-              {builderSelectedStops.length}/{maxStopsForSelection || 0} selected  for {formatRouteMiles(selectedStopsDistanceMiles)}
+               
+              {builderSelectedStops.length} of {maxStopsForSelection || 0} stops selected  for {formatRouteMiles(selectedStopsDistanceMiles)}
             </div>
             <div className={styles.buildMixLinkAddWrap}>
-              <textarea
-                value={linkBatchInput}
-                onChange={(e) => setLinkBatchInput(e.target.value)}
-                className={styles.buildMixLinkTextarea}
-                placeholder="Paste Google Maps links, one per line"
-                rows={4}
-              />
-              <button
-                type="button"
-                onClick={addStopsFromLinks}
-                disabled={isResolvingLinks}
-                className={styles.pickBuildMixButton}
-              >
-                {isResolvingLinks ? "Resolving links..." : "Add Stops from Links"}
-              </button>
+              <div className={styles.buildMixLinkRow}>
+                <textarea
+                  value={linkBatchInput}
+                  onChange={(e) => setLinkBatchInput(e.target.value)}
+                  className={styles.buildMixLinkTextarea}
+                  placeholder="Paste in a Google Maps link"
+                  rows={1}
+                />
+                <button
+                  type="button"
+                  onClick={addStopsFromLinks}
+                  disabled={isResolvingLinks}
+                  className={styles.buildMixLinkAddButton}
+                  aria-label={isResolvingLinks ? "Resolving links" : "Add stop link"}
+                >
+                  {isResolvingLinks ? (
+                    <span className={styles.buildMixLinkAddLoading} aria-hidden="true" />
+                  ) : (
+                    <Image
+                      src="/icons/plus.svg"
+                      alt=""
+                      width={22}
+                      height={22}
+                      className={styles.buildMixLinkAddIcon}
+                      aria-hidden="true"
+                    />
+                  )}
+                </button>
+              </div>
               {resolveSummary && (
                 <div className={styles.buildMixLinkSummary}>
                   Added {resolveSummary.added}. Skipped duplicates {resolveSummary.skippedDuplicate}.
@@ -1590,12 +1677,21 @@ async function startStopNarration() {
                   (s) => s.id === stop.id || getStopCoordKey(s) === stopCoordKey
                 );
                 return (
-                  <button
+                  <div
                     key={stop.id}
-                    onClick={() => toggleBuilderStop(stop)}
                     className={`${styles.pickRouteRow} ${styles.pickRouteRowBuildMix} ${active ? styles.pickRouteRowSelected : ""}`}
                   >
-                    <div className={styles.pickRouteArrow}>
+                    <div className={styles.pickRouteMain}>
+                      <div className={styles.pickRouteTitle}>{stop.title}</div>
+                       
+                    </div>
+                    <button
+                      type="button"
+                      className={styles.pickRouteToggleButton}
+                      onClick={() => toggleBuilderStop(stop)}
+                      aria-label={active ? `Remove ${stop.title}` : `Add ${stop.title}`}
+                    >
+                      <div className={styles.pickRouteArrow}>
                       <div className={styles.pickRouteIconCircle} aria-hidden="true">
                         {active ? (
                           <Image
@@ -1617,23 +1713,14 @@ async function startStopNarration() {
                           />
                         )}
                       </div>
-                    </div>
-                    <div className={styles.pickRouteMain}>
-                      <div className={styles.pickRouteTitle}>{stop.title}</div>
-                      <div className={styles.stopRating} aria-label="4 out of 5 stars">
-                        <span className={styles.stopRatingFilled}>★</span>
-                        <span className={styles.stopRatingFilled}>★</span>
-                        <span className={styles.stopRatingFilled}>★</span>
-                        <span className={styles.stopRatingFilled}>★</span>
-                        <span className={styles.stopRatingEmpty}>★</span>
                       </div>
-                    </div>
-                  </button>
+                    </button>
+                  </div>
                 );
               })}
             </div>
 
-              <div className={styles.pickDurationStartWrap}>
+              <div className={`${styles.pickDurationStartWrap} ${styles.buildMixStickyCtaWrap}`}>
                 <button
                 onClick={() => {
                   if (isEditingStopsFromWalk) {
@@ -1645,7 +1732,7 @@ async function startStopNarration() {
                 disabled={!selectionValidation.ok || !selectedPersona || isGeneratingMix}
                 className={`${styles.landingCtaButton} ${styles.startTourButton}`}
               >
-                {isEditingStopsFromWalk ? (hasOffRouteAddsInEdit ? "Save & Regenerate" : "Save") : "Generate Tour"}
+                {isEditingStopsFromWalk ? (hasOffRouteAddsInEdit ? "Save Tour" : "Save Tour") : "Save Tour"}
               </button>
             </div>
           </section>
@@ -1763,17 +1850,32 @@ async function startStopNarration() {
           <div className={styles.rightRail}>
             <div className={styles.walkCard}>
               <div className={styles.walkMetaRow}>
-                <div className={styles.walkNarratorAvatarWrap}>
+                <button
+                  type="button"
+                  className={`${styles.walkNarratorAvatarWrap} ${styles.walkNarratorAvatarButton}`}
+                  onClick={() => {
+                    setReturnToWalkOnClose(true);
+                    setStep("pickDuration");
+                  }}
+                  aria-label="Edit narrator"
+                >
                   <Image
                     src={personaCatalog[persona].avatarSrc}
                     alt={personaCatalog[persona].avatarAlt}
                     fill
                     className={styles.walkNarratorAvatar}
                   />
-                </div>
-                <div className={styles.walkNarrator}>
-                  Narrated by {activePersonaDisplayName}
-                </div>
+                </button>
+                <button
+                  className={`${styles.walkNarrator} ${styles.walkNarratorButton}`}
+                  type="button"
+                  onClick={() => {
+                    setReturnToWalkOnClose(true);
+                    setStep("pickDuration");
+                  }}
+                >
+                  Narrated by <span className={styles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
+                </button>
               </div>
             <h1 className={styles.walkHeadline}>{route.title}</h1>
             <div className={styles.walkSubline}>
@@ -1782,17 +1884,15 @@ async function startStopNarration() {
             </div>
 
               <div className={styles.walkActionRow}>
-                <button className={styles.pillButton} type="button" onClick={copyShareLink}>Share to...</button>
+                <button className={styles.pillButton} type="button" onClick={copyShareLink}>Share to ...</button>
+                 
                 <button
-                  className={styles.pillButton}
-                  type="button"
-                  onClick={() => {
-                    setReturnToWalkOnClose(true);
-                    setStep("pickDuration");
-                  }}
-                >
-                  Edit narrator
-                </button>
+                className={styles.pillButton}
+                type="button"
+                onClick={openEditStopsFromWalk} 
+              >
+                Edit Stops
+              </button>
                 <button
                   className={styles.nowPlayingButton}
                   type="button"
@@ -1836,13 +1936,7 @@ async function startStopNarration() {
                   );
                 })}
               </div>
-              <button
-                type="button"
-                onClick={openEditStopsFromWalk}
-                className={`${styles.pickBuildMixButton} ${styles.editStopsButton}`}
-              >
-                Edit Stops
-              </button>
+              
             </div>
 
             {currentStop && (

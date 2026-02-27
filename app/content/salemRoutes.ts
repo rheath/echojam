@@ -68,7 +68,7 @@ const deepDiveCanonicalStops: Stop[] = [
     lat: 42.5212,
     lng: -70.8877,
     audio: { adult: "", preteen: "" },
-    images: ["/images/salem/placeholder-01.png"],
+    images: ["https://images.squarespace-cdn.com/content/v1/5aad88d20dbda36546051fd4/1560780072845-EH7NNED896NW6DV7VDKX/16161093490_d19dc0ed5b_o.jpg?format=2500w"],
   },
   {
     id: "deep-house-seven-gables",
