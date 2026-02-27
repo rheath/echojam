@@ -2065,11 +2065,13 @@ async function startStopNarration() {
 
       )}
 
-      {step !== "walk" && step !== "landing" && step !== "pickDuration" && (
+     {/* footer Jam 
+     {step !== "walk" && step !== "landing" && step !== "pickDuration" && (
         <footer className={styles.footer}>
           {jam ? `Jam: ${jam.id}` : "No jam loaded"}
         </footer>
       )}
+      */}
     </div>
   );
 }

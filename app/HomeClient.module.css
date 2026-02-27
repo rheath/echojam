@@ -246,7 +246,7 @@
 }
 
 .pickInfo {
-  padding: 34px 32px 28px;
+  padding: 34px 32px 0 28px;
   display: flex;
   flex-direction: column;
   position: relative;
