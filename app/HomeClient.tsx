@@ -30,6 +30,7 @@ type JamRow = {
 };
 
 type FlowStep = "landing" | "pickDuration" | "buildMix" | "generating" | "walk" | "end";
+type PickDurationPage = "narrator" | "routes";
 type CityOption = "salem" | "boston" | "concord";
 type TransportMode = "walk" | "drive";
 
@@ -174,6 +175,7 @@ const [audioDuration, setAudioDuration] = useState(0);
 const [connectedCount, setConnectedCount] = useState(0);
 const [selectedRouteId, setSelectedRouteId] = useState<RouteDef["id"] | null>(null);
 const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
+const [pickDurationPage, setPickDurationPage] = useState<PickDurationPage>("narrator");
 const [selectedCity, setSelectedCity] = useState<CityOption>("salem");
 const [builderSelectedStops, setBuilderSelectedStops] = useState<CustomMixStop[]>([]);
 const [linkBatchInput, setLinkBatchInput] = useState("");
@@ -388,8 +390,8 @@ const previousStepRef = useRef<FlowStep>("landing");
   }
 
   // ---------- Supabase: update jam ----------
-  async function updateJam(patch: Partial<JamRow>) {
-    if (!jam) return;
+  async function updateJam(patch: Partial<JamRow>): Promise<boolean> {
+    if (!jam) return false;
     setErr(null);
 
     const { data, error } = await supabase
@@ -399,8 +401,24 @@ const previousStepRef = useRef<FlowStep>("landing");
       .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms")
       .single();
 
-    if (error) return setErr(error.message);
+    if (error) {
+      setErr(error.message);
+      return false;
+    }
     setJam(data as JamRow);
+    return true;
+  }
+
+  async function handleNarratorSelect(nextPersona: Persona) {
+    setSelectedPersona(nextPersona);
+    if (returnToWalkOnClose && jam?.route_id) {
+      const updated = await updateJam({ persona: nextPersona });
+      if (!updated) return;
+      setReturnToWalkOnClose(false);
+      setStep("walk");
+      return;
+    }
+    setPickDurationPage("routes");
   }
 
   async function copyShareLink() {
@@ -1054,6 +1072,7 @@ async function startStopNarration() {
 
   useEffect(() => {
     if (step !== "pickDuration") return;
+    setPickDurationPage("narrator");
     const cameFromLanding = previousStepRef.current === "landing";
     if (returnToWalkOnClose && jam?.route_id) {
       const routeId = salemRoutes.some((r) => r.id === jam.route_id) ? jam.route_id : null;
@@ -1062,7 +1081,7 @@ async function startStopNarration() {
       return;
     }
     setSelectedRouteId(null);
-    if (cameFromLanding) setSelectedPersona("adult");
+    if (cameFromLanding) setSelectedPersona(null);
   }, [step, returnToWalkOnClose, jam?.route_id, jam?.persona]);
 
   useEffect(() => {
@@ -1300,174 +1319,215 @@ async function startStopNarration() {
       {/* PICK DURATION */}
       {step === "pickDuration" && (
         <main className={styles.pickLayout}>
-          <section className={`${styles.pickInfo} ${styles.pickInfoSelectRoute}`}>
-            <button onClick={closeRoutePicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Close">
-              <Image
-                src="/icons/x.svg"
-                alt=""
-                width={26}
-                height={26}
-                className={styles.mapBackIconDark}
-                aria-hidden="true"
-              />
-            </button>
-            <h2 className={`${styles.pickHeading} ${styles.pickHeadingBelowClose}`}>What narrator do you want?</h2>
-            <div className={styles.pickPersonaRow}>
-              <button
-                onClick={() => setSelectedPersona("adult")}
-                className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
-              >
-                <div className={styles.pickNarratorWithAvatar}>
-                  <div className={styles.pickNarratorAvatarWrap}>
-                    <Image
-                      src={personaCatalog.adult.avatarSrc}
-                      alt={personaCatalog.adult.avatarAlt}
-                      fill
-                      className={styles.pickNarratorAvatar}
-                    />
-                  </div>
-                  <div>
-                    <div className={styles.pickRouteTitle}>{personaCatalog.adult.displayName}</div>
-                    <div className={styles.pickNarratorSub}>{personaCatalog.adult.description}</div>
-                  </div>
-                </div>
-              </button>
-              <button
-                onClick={() => setSelectedPersona("preteen")}
-                className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
-              >
-                <div className={styles.pickNarratorWithAvatar}>
-                  <div className={styles.pickNarratorAvatarWrap}>
-                    <Image
-                      src={personaCatalog.preteen.avatarSrc}
-                      alt={personaCatalog.preteen.avatarAlt}
-                      fill
-                      className={styles.pickNarratorAvatar}
-                    />
-                  </div>
-                  <div>
-                    <div className={styles.pickRouteTitle}>{personaCatalog.preteen.displayName}</div>
-                    <div className={styles.pickNarratorSub}>{personaCatalog.preteen.description}</div>
-                  </div>
-                </div>
-              </button>
-              <button
-                type="button"
-                disabled
-                aria-disabled="true"
-                className={`${styles.pickNarratorOption} ${styles.pickNarratorOptionDisabled}`}
-              >
-                <div className={styles.pickNarratorWithAvatar}>
-                  <div className={styles.pickNarratorAvatarWrap}>
-                    <Image
-                      src="/icons/stars.svg"
-                      alt=""
-                      width={24}
-                      height={24}
-                      className={styles.pickNarratorFutureIcon}
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div>
-                    <div className={styles.pickRouteTitle}>Create your own narrator</div>
-                    <div className={styles.pickNarratorSub}>This will cost money</div>
-                  </div>
-                </div>
-              </button>
-            </div>
-            <div className={styles.pickSectionDivider} />
-            <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>
-                How long do you have in{" "}
-                <button type="button" className={styles.pickHeadingCityLink} onClick={goHome}>
-                  {selectedCityLabel}
+          {pickDurationPage === "narrator" ? (
+            <>
+              <section className={`${styles.pickInfo} ${styles.pickInfoSelectRoute}`}>
+                <button onClick={closeRoutePicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Back">
+                  <Image
+                    src="/icons/arrow-left.svg"
+                    alt=""
+                    width={26}
+                    height={26}
+                    className={styles.mapBackIconDark}
+                    aria-hidden="true"
+                  />
                 </button>
-                ?
-              </h2>
-            </div>
-
-            <div className={styles.pickRouteList}>
-              {salemRoutes.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => setSelectedRouteId(r.id)}
-                  className={`${styles.pickRouteRow} ${selectedRouteId === r.id ? styles.pickRouteRowSelected : ""}`}
-                >
-                  <div className={styles.pickRouteMainWithIcon}>
-                    <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                      <Image
-                        src="/icons/person-walking.svg"
-                        alt=""
-                        width={24}
-                        height={24}
-                        className={styles.pickRouteWalkIcon}
-                        aria-hidden="true"
-                      />
-                    </div>
-                    <div className={styles.pickRouteMain}>
-                      <div className={styles.pickRouteTitle}>{r.title}</div>
-                      <div className={styles.pickRouteMeta}>
-                        {r.durationLabel} • {r.stops.length} stops • {formatRouteMiles(getRouteMiles(r.stops))}
+                <h2 className={`${styles.pickHeading} ${styles.pickHeadingBelowClose}`}>What narrator do you want?</h2>
+                <div className={styles.pickPersonaRow}>
+                  <button
+                    onClick={() => {
+                      void handleNarratorSelect("adult");
+                    }}
+                    className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
+                  >
+                    <div className={styles.pickNarratorWithAvatar}>
+                      <div className={styles.pickNarratorAvatarWrap}>
+                        <Image
+                          src={personaCatalog.adult.avatarSrc}
+                          alt={personaCatalog.adult.avatarAlt}
+                          fill
+                          className={styles.pickNarratorAvatar}
+                        />
+                      </div>
+                      <div>
+                        <div className={styles.pickRouteTitle}>{personaCatalog.adult.displayName}</div>
+                        <div className={styles.pickNarratorSub}>{personaCatalog.adult.description}</div>
                       </div>
                     </div>
-                  </div>
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setStep("buildMix")}
-                className={styles.pickRouteRow}
-              >
-                <div className={styles.pickRouteMainWithIcon}>
-                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                    <Image
-                      src="/icons/car-front-fill.svg"
-                      alt=""
-                      width={24}
-                      height={24}
-                      className={styles.pickRouteWalkIcon}
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>Create your own mix</div>
-                    <div className={styles.pickRouteMeta}>Shape your story with up to 9 stops</div>
-                  </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      void handleNarratorSelect("preteen");
+                    }}
+                    className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
+                  >
+                    <div className={styles.pickNarratorWithAvatar}>
+                      <div className={styles.pickNarratorAvatarWrap}>
+                        <Image
+                          src={personaCatalog.preteen.avatarSrc}
+                          alt={personaCatalog.preteen.avatarAlt}
+                          fill
+                          className={styles.pickNarratorAvatar}
+                        />
+                      </div>
+                      <div>
+                        <div className={styles.pickRouteTitle}>{personaCatalog.preteen.displayName}</div>
+                        <div className={styles.pickNarratorSub}>{personaCatalog.preteen.description}</div>
+                      </div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    className={`${styles.pickNarratorOption} ${styles.pickNarratorOptionDisabled}`}
+                  >
+                    <div className={styles.pickNarratorWithAvatar}>
+                      <div className={styles.pickNarratorAvatarWrap}>
+                        <Image
+                          src="/icons/stars.svg"
+                          alt=""
+                          width={24}
+                          height={24}
+                          className={styles.pickNarratorFutureIcon}
+                          aria-hidden="true"
+                        />
+                      </div>
+                      <div>
+                        <div className={styles.pickRouteTitle}>Create your own narrator</div>
+                        <div className={styles.pickNarratorSub}>This will cost money</div>
+                      </div>
+                    </div>
+                  </button>
                 </div>
-              </button>
-            </div>
-            <div className={styles.pickSectionDivider} />
+              </section>
 
-            <div className={styles.pickDurationStartWrap}>
-              <button
-                onClick={startTourFromSelection}
-                disabled={!selectedRouteId || !selectedPersona}
-                className={`${styles.landingCtaButton} ${styles.startTourButton}`}
-              >
-                Start Tour
-              </button>
-            </div>
-          </section>
+              <section className={styles.pickImagePane}>
+                <RouteMap
+                  stops={[]}
+                  currentStopIndex={0}
+                  myPos={myPos}
+                  cityCenter={selectedCityCenter}
+                  followCurrentStop={false}
+                />
+                <button onClick={closeRoutePicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`} aria-label="Back">
+                  <Image
+                    src="/icons/arrow-left.svg"
+                    alt=""
+                    width={26}
+                    height={26}
+                    className={styles.mapBackIconDark}
+                    aria-hidden="true"
+                  />
+                </button>
+              </section>
+            </>
+          ) : (
+            <>
+              <section className={`${styles.pickInfo} ${styles.pickInfoSelectRoute}`}>
+                <button onClick={() => setPickDurationPage("narrator")} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Back to narrators">
+                  <Image
+                    src="/icons/arrow-left.svg"
+                    alt=""
+                    width={26}
+                    height={26}
+                    className={styles.mapBackIconDark}
+                    aria-hidden="true"
+                  />
+                </button>
+                <div className={styles.pickCopyBlock}>
+                  <h2 className={styles.pickHeading}>
+                    Choose your route in{" "}
+                    <button type="button" className={styles.pickHeadingCityLink} onClick={goHome}>
+                      {selectedCityLabel}
+                    </button>
+                  </h2>
+                </div>
 
-          <section className={styles.pickImagePane}>
-            <RouteMap
-              stops={selectedRoute ? selectedRoute.stops : []}
-              currentStopIndex={0}
-              myPos={myPos}
-              cityCenter={selectedCityCenter}
-              followCurrentStop={false}
-            />
-            <button onClick={closeRoutePicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`} aria-label="Close">
-              <Image
-                src="/icons/x.svg"
-                alt=""
-                width={26}
-                height={26}
-                className={styles.mapBackIconDark}
-                aria-hidden="true"
-              />
-            </button>
-          </section>
+                <div className={styles.pickRouteList}>
+                  {salemRoutes.map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => setSelectedRouteId(r.id)}
+                      className={`${styles.pickRouteRow} ${selectedRouteId === r.id ? styles.pickRouteRowSelected : ""}`}
+                    >
+                      <div className={styles.pickRouteMainWithIcon}>
+                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                          <Image
+                            src="/icons/person-walking.svg"
+                            alt=""
+                            width={24}
+                            height={24}
+                            className={styles.pickRouteWalkIcon}
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div className={styles.pickRouteMain}>
+                          <div className={styles.pickRouteTitle}>{r.title}</div>
+                          <div className={styles.pickRouteMeta}>
+                            {r.durationLabel} • {r.stops.length} stops • {formatRouteMiles(getRouteMiles(r.stops))}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setStep("buildMix")}
+                    className={styles.pickRouteRow}
+                  >
+                    <div className={styles.pickRouteMainWithIcon}>
+                      <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                        <Image
+                          src="/icons/car-front-fill.svg"
+                          alt=""
+                          width={24}
+                          height={24}
+                          className={styles.pickRouteWalkIcon}
+                          aria-hidden="true"
+                        />
+                      </div>
+                      <div className={styles.pickRouteMain}>
+                        <div className={styles.pickRouteTitle}>Create your own mix</div>
+                        <div className={styles.pickRouteMeta}>Shape your story with up to 9 stops</div>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+                <div className={styles.pickSectionDivider} />
+
+                <div className={styles.pickDurationStartWrap}>
+                  <button
+                    onClick={startTourFromSelection}
+                    disabled={!selectedRouteId || !selectedPersona}
+                    className={`${styles.landingCtaButton} ${styles.startTourButton}`}
+                  >
+                    Start Tour
+                  </button>
+                </div>
+              </section>
+
+              <section className={styles.pickImagePane}>
+                <RouteMap
+                  stops={selectedRoute ? selectedRoute.stops : []}
+                  currentStopIndex={0}
+                  myPos={myPos}
+                  cityCenter={selectedCityCenter}
+                  followCurrentStop={false}
+                />
+                <button onClick={() => setPickDurationPage("narrator")} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`} aria-label="Back to narrators">
+                  <Image
+                    src="/icons/arrow-left.svg"
+                    alt=""
+                    width={26}
+                    height={26}
+                    className={styles.mapBackIconDark}
+                    aria-hidden="true"
+                  />
+                </button>
+              </section>
+            </>
+          )}
         </main>
       )}
 
@@ -1490,48 +1550,6 @@ async function startStopNarration() {
             </button>
             <div className={styles.pickCopyBlock}>
               <h2 className={styles.pickHeading}>Create your own mix of {selectedCityLabel}</h2>
-            </div>
-
-            <div className={styles.pickSectionLabel}>Narrator</div>
-            <div className={styles.pickPersonaRow}>
-              <button
-                onClick={() => setSelectedPersona("adult")}
-                className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
-              >
-                <div className={styles.pickNarratorWithAvatar}>
-                  <div className={styles.pickNarratorAvatarWrap}>
-                    <Image
-                      src={personaCatalog.adult.avatarSrc}
-                      alt={personaCatalog.adult.avatarAlt}
-                      fill
-                      className={styles.pickNarratorAvatar}
-                    />
-                  </div>
-                  <div>
-                    <div className={styles.pickRouteTitle}>{personaCatalog.adult.displayName}</div>
-                    <div className={styles.pickNarratorSub}>{personaCatalog.adult.description}</div>
-                  </div>
-                </div>
-              </button>
-              <button
-                onClick={() => setSelectedPersona("preteen")}
-                className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
-              >
-                <div className={styles.pickNarratorWithAvatar}>
-                  <div className={styles.pickNarratorAvatarWrap}>
-                    <Image
-                      src={personaCatalog.preteen.avatarSrc}
-                      alt={personaCatalog.preteen.avatarAlt}
-                      fill
-                      className={styles.pickNarratorAvatar}
-                    />
-                  </div>
-                  <div>
-                    <div className={styles.pickRouteTitle}>{personaCatalog.preteen.displayName}</div>
-                    <div className={styles.pickNarratorSub}>{personaCatalog.preteen.description}</div>
-                  </div>
-                </div>
-              </button>
             </div>
 
             <div className={styles.pickSectionLabel}>
@@ -1773,7 +1791,7 @@ async function startStopNarration() {
                     setStep("pickDuration");
                   }}
                 >
-                  Customize
+                  Edit narrator
                 </button>
                 <button
                   className={styles.nowPlayingButton}
