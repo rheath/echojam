@@ -1960,6 +1960,14 @@ async function startStopNarration() {
                       onClick={openScriptModal}
                     >
                       {currentStop.title}
+                      <Image
+                        src="/icons/file-earmark-text.svg"
+                        alt=""
+                        width={14}
+                        height={14}
+                        className={styles.nowPlayingTitleLinkIcon}
+                        aria-hidden="true"
+                      />
                     </button>
                     <div className={styles.nowPlayingLinksRow}>
                       <div className={styles.nowPlayingSubtitle}>

@@ -1180,11 +1180,21 @@
   padding: 0;
   margin: 0;
   text-align: left;
-  font-size: 24px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nowPlayingTitleLinkIcon {
+  width: 14px;
+  height: 14px;
+  filter: invert(1);
+  opacity: 0.9;
 }
 
 .nowPlayingSubtitle {
@@ -1219,6 +1229,7 @@
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
+  display: none;
 }
 
 .nowPlayingButton {
