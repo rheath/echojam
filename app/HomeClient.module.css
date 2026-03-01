@@ -253,11 +253,11 @@
 }
 
 .pickCopyBlock {
-  margin-top: 68px;
+  margin-top: 0px;
 }
 
 .pickInfoSelectRoute .pickCopyBlock {
-  margin-top: 36px;
+  margin-top: 0px;
 }
 
 .pickHeading {
@@ -364,8 +364,7 @@
 
 .buildMixLinkAddIcon {
   width: 22px;
-  height: 22px;
-  filter: invert(1);
+  height: 22px;  
 }
 
 .buildMixLinkAddLoading {
@@ -723,7 +722,7 @@
 .generationStatusMessage {
   margin-top: 10px;
   font-size: 16px;
-  opacity: 0.82;
+  opacity: 0;
 }
 
 .proximityBanner {
@@ -909,8 +908,8 @@
   position: absolute;
   top: 16px;
   left: 16px;
-  width: 56px;
-  height: 56px;
+  width: 40px;
+  height: 40px;
   border-radius: 999px;
   border: 0;
   background: rgba(24, 24, 31, 0.82);
@@ -1033,6 +1032,7 @@
 
 .walkNarratorActiveName {
   color: #ff5f92;
+  font-weight: bold;
 }
 
 .walkHeadline {

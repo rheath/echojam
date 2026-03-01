@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRouteById } from "@/app/content/salemRoutes";
 import { ensureCanonicalStopForPreset, upsertRouteStopMapping } from "@/lib/canonicalStops";
@@ -10,6 +10,7 @@ import {
   shouldRegenerateAudio,
   shouldRegenerateScript,
   synthesizeSpeechWithOpenAI,
+  toNullableAudioUrl,
   toNullableTrimmed,
   type Persona,
   type StopInput,
@@ -22,6 +23,8 @@ type CreateBody = {
   persona: Persona;
   city?: "salem" | "boston" | "concord";
 };
+
+const CREATE_JOB_REQUEST_TIMEOUT_MS = 12000;
 
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -113,7 +116,7 @@ async function runPresetGeneration(
         canonical_stop_id: canonical.id,
         persona,
         script,
-        audio_url: toNullableTrimmed(current?.audio_url),
+        audio_url: toNullableAudioUrl(current?.audio_url),
         status: script ? "ready" : "failed",
         error: script ? null : lastWarning || "Script generation failed",
       },
@@ -128,7 +131,7 @@ async function runPresetGeneration(
   await updateProgress("generating_audio", "Generating audio (Overview first)");
   let overviewAudioReady = overviewStops.length === 0;
   for (const state of states) {
-    const replayUrl = toNullableTrimmed(switchConfig.replay_audio[state.stop.id]?.[persona]);
+    const replayUrl = toNullableAudioUrl(switchConfig.replay_audio[state.stop.id]?.[persona]);
 
     const { data: current } = await admin
       .from("canonical_stop_assets")
@@ -138,13 +141,13 @@ async function runPresetGeneration(
       .maybeSingle();
 
     const currentScript = toNullableTrimmed(current?.script) || state.script;
-    let audioUrl = !forceAudio ? toNullableTrimmed(current?.audio_url) : null;
+    let audioUrl = !forceAudio ? toNullableAudioUrl(current?.audio_url) : null;
     if (replayUrl) audioUrl = replayUrl;
 
     if (!audioUrl && currentScript) {
       try {
         const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, persona, currentScript);
-        audioUrl = toNullableTrimmed(await uploadNarrationAudio(audioBytes, `preset-${routeId}`, persona, state.stop.id));
+        audioUrl = toNullableAudioUrl(await uploadNarrationAudio(audioBytes, `preset-${routeId}`, persona, state.stop.id));
       } catch (e) {
         warningCount += 1;
         lastWarning = `Audio generation failed for ${persona} at "${state.stop.title}": ${e instanceof Error ? e.message : "Unknown error"}`;
@@ -204,92 +207,111 @@ async function runPresetGeneration(
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as CreateBody;
-    const route = getRouteById(body.routeId);
-    if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
-    const city = normalizePresetCity(body.city);
-
-    const admin = getAdmin();
-    let jamId = body.jamId ?? null;
-    if (!jamId) {
-      const { data: jam, error: jamErr } = await admin
-        .from("jams")
-        .insert({
-          host_name: "Rob",
-          route_id: route.id,
-          persona: body.persona,
-          current_stop: 0,
-          is_playing: false,
-          position_ms: 0,
-        })
-        .select("id")
-        .single();
-      if (jamErr || !jam?.id) throw new Error(jamErr?.message || "Failed to create jam");
-      jamId = jam.id;
-    } else {
-      await admin
-        .from("jams")
-        .update({ route_id: route.id, persona: body.persona, current_stop: 0, completed_at: null })
-        .eq("id", jamId);
-    }
-
-    const resolvedJamId = jamId;
-    if (!resolvedJamId) throw new Error("Failed to resolve jam id");
-
-    const { data: activeJob } = await admin
-      .from("preset_generation_jobs")
-      .select("id,status")
-      .eq("jam_id", resolvedJamId)
-      .in("status", ["queued", "generating_script", "generating_audio"])
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (activeJob?.id) {
-      return NextResponse.json(
-        {
-          error: "A generation job is already in progress for this jam.",
-          jobId: activeJob.id,
-          status: activeJob.status,
-        },
-        { status: 429 }
-      );
-    }
-
-    const { data: job, error: jobErr } = await admin
-      .from("preset_generation_jobs")
-      .insert({
-        jam_id: resolvedJamId,
-        preset_route_id: route.id,
-        status: "queued",
-        progress: 0,
-        message: "Queued",
-      })
-      .select("id")
-      .single();
-    if (jobErr || !job?.id) throw new Error(jobErr?.message || "Failed to create preset generation job");
-
-    const stops: StopInput[] = buildPresetStopsWithOverview(route.stops, city);
-
-    void runPresetGeneration(
-      job.id,
-      route.id,
-      city,
-      parseInt(route.durationLabel, 10) || 30,
-      body.persona,
-      stops
-    ).catch(async (e) => {
-      await admin
-        .from("preset_generation_jobs")
-        .update({
-          status: "failed",
-          progress: 100,
-          message: "Generation failed",
-          error: e instanceof Error ? e.message : "Unknown error",
-        })
-        .eq("id", job.id);
+    const timeoutResponse = new Promise<NextResponse>((resolve) => {
+      setTimeout(() => {
+        console.warn("preset-jobs/create timed out before responding");
+        resolve(NextResponse.json({ error: "Timed out creating preset job" }, { status: 504 }));
+      }, CREATE_JOB_REQUEST_TIMEOUT_MS);
     });
 
-    return NextResponse.json({ jamId: resolvedJamId, routeId: route.id, jobId: job.id });
+    const createResponse = await Promise.race([
+      (async () => {
+        const body = (await req.json()) as CreateBody;
+        const route = getRouteById(body.routeId);
+        if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
+        const city = normalizePresetCity(body.city);
+
+        const admin = getAdmin();
+        let jamId = body.jamId ?? null;
+        if (!jamId) {
+          const { data: jam, error: jamErr } = await admin
+            .from("jams")
+            .insert({
+              host_name: "Rob",
+              route_id: route.id,
+              persona: body.persona,
+              current_stop: 0,
+              is_playing: false,
+              position_ms: 0,
+            })
+            .select("id")
+            .single();
+          if (jamErr || !jam?.id) throw new Error(jamErr?.message || "Failed to create jam");
+          jamId = jam.id;
+        } else {
+          await admin
+            .from("jams")
+            .update({ route_id: route.id, persona: body.persona, current_stop: 0, completed_at: null })
+            .eq("id", jamId);
+        }
+
+        const resolvedJamId = jamId;
+        if (!resolvedJamId) throw new Error("Failed to resolve jam id");
+
+        const { data: activeJob } = await admin
+          .from("preset_generation_jobs")
+          .select("id,status")
+          .eq("jam_id", resolvedJamId)
+          .in("status", ["queued", "generating_script", "generating_audio"])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (activeJob?.id) {
+          return NextResponse.json(
+            {
+              error: "A generation job is already in progress for this jam.",
+              jobId: activeJob.id,
+              status: activeJob.status,
+            },
+            { status: 429 }
+          );
+        }
+
+        const { data: job, error: jobErr } = await admin
+          .from("preset_generation_jobs")
+          .insert({
+            jam_id: resolvedJamId,
+            preset_route_id: route.id,
+            status: "queued",
+            progress: 0,
+            message: "Queued",
+          })
+          .select("id")
+          .single();
+        if (jobErr || !job?.id) throw new Error(jobErr?.message || "Failed to create preset generation job");
+
+        const stops: StopInput[] = buildPresetStopsWithOverview(route.stops, city);
+
+        after(async () => {
+          try {
+            await runPresetGeneration(
+              job.id,
+              route.id,
+              city,
+              parseInt(route.durationLabel, 10) || 30,
+              body.persona,
+              stops
+            );
+          } catch (e) {
+            console.error("preset job generation failed", { jobId: job.id, routeId: route.id, error: e });
+            await admin
+              .from("preset_generation_jobs")
+              .update({
+                status: "failed",
+                progress: 100,
+                message: "Generation failed",
+                error: e instanceof Error ? e.message : "Unknown error",
+              })
+              .eq("id", job.id);
+          }
+        });
+
+        return NextResponse.json({ jamId: resolvedJamId, routeId: route.id, jobId: job.id });
+      })(),
+      timeoutResponse,
+    ]);
+
+    return createResponse;
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to create preset job" }, { status: 500 });
   }

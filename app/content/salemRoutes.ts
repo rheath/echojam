@@ -137,7 +137,7 @@ export const salemRoutes: RouteDef[] = [
   {
     id: "salem-core-15",
     title: "Speed Walker",
-    durationLabel: "15 min",
+    durationLabel: "15 mins",
     description: "A tight loop of Salem’s essential landmarks—quick, iconic, easy.",
     stops: speedWalkerStops,
   },
@@ -145,7 +145,7 @@ export const salemRoutes: RouteDef[] = [
   {
     id: "salem-story-30",
     title: "The Stroll",
-    durationLabel: "30 min",
+    durationLabel: "30 mins",
     description: "More context, more texture—how Salem became Salem.",
     stops: strollStops,
   },
@@ -153,7 +153,7 @@ export const salemRoutes: RouteDef[] = [
   {
     id: "salem-deepdive-60",
     title: "Deep Dive",
-    durationLabel: "60 min",
+    durationLabel: "60 mins",
     description: "A fuller arc: landmarks + hidden context + the ‘why it matters’ layer.",
     stops: deepDiveStops,
   },

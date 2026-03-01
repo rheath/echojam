@@ -74,9 +74,14 @@ type MixJobResponse = {
   error: string | null;
   jam_id: string;
   route_id: string;
+  updated_at?: string | null;
 };
 
 type GenerationJobKind = "custom" | "preset";
+type ActiveGenerationJobRow = {
+  id: string;
+  status: MixJobResponse["status"];
+};
 
 type ResolveLinksResponse = {
   resolved: CustomMixStop[];
@@ -99,6 +104,11 @@ const GENERATION_STATUS_LABELS: Record<MixJobResponse["status"], string> = {
   ready_with_warnings: "Ready with warnings",
   failed: "Failed",
 };
+
+const POLL_INTERVAL_MS = 1500;
+const POLL_REQUEST_TIMEOUT_MS = 8000;
+const POLL_FAILURE_THRESHOLD = 5;
+const START_JOB_TIMEOUT_MS = 15000;
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -152,7 +162,7 @@ function getRouteMiles(stops: RouteDef["stops"]) {
 }
 
 function formatRouteMiles(miles: number) {
-  return `${miles.toFixed(miles < 1 ? 2 : 1)} mi`;
+  return `${miles.toFixed(miles < 1 ? 2 : 1)} miles`;
 }
 
 function formatAudioTime(seconds: number) {
@@ -188,6 +198,64 @@ function prioritizeOverviewById<T extends { id: string }>(stops: T[]) {
   if (overview.length === 0) return stops;
   const rest = stops.filter((stop) => !isPresetOverviewStopId(stop.id));
   return [...overview, ...rest];
+}
+
+async function preloadAudioMetadata(url: string, timeoutMs = 4000): Promise<"ready" | "timeout" | "error"> {
+  return await new Promise((resolve) => {
+    let settled = false;
+    const audio = new Audio();
+    const cleanup = () => {
+      audio.removeEventListener("loadedmetadata", onLoaded);
+      audio.removeEventListener("error", onError);
+      window.clearTimeout(timeoutId);
+    };
+    const finish = (result: "ready" | "timeout" | "error") => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+    const onLoaded = () => finish("ready");
+    const onError = () => finish("error");
+    const timeoutId = window.setTimeout(() => finish("timeout"), timeoutMs);
+
+    audio.preload = "metadata";
+    audio.addEventListener("loadedmetadata", onLoaded);
+    audio.addEventListener("error", onError);
+    audio.src = url;
+    void audio.load();
+  });
+}
+
+async function fetchJsonWithTimeout<T>(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    const body = (await res.json()) as T;
+    if (!res.ok) {
+      const errorMessage =
+        typeof body === "object" &&
+        body !== null &&
+        "error" in body &&
+        typeof (body as { error?: unknown }).error === "string"
+          ? ((body as { error: string }).error)
+          : `Request failed: ${res.status}`;
+      throw new Error(errorMessage);
+    }
+    return body;
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error("Timed out while starting generation. Please try again.");
+    }
+    throw e;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 export default function HomeClient() {
@@ -350,6 +418,38 @@ const previousStepRef = useRef<FlowStep>("landing");
 
     setJam(data as JamRow);
 
+    const [presetJobResult, customJobResult] = await Promise.all([
+      supabase
+        .from("preset_generation_jobs")
+        .select("id,status")
+        .eq("jam_id", id)
+        .in("status", ["queued", "generating_script", "generating_audio"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("mix_generation_jobs")
+        .select("id,status")
+        .eq("jam_id", id)
+        .in("status", ["queued", "generating_script", "generating_audio"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    const presetActive = (presetJobResult.data ?? null) as ActiveGenerationJobRow | null;
+    const customActive = (customJobResult.data ?? null) as ActiveGenerationJobRow | null;
+    const activeJob = presetActive ?? customActive;
+    if (activeJob?.id) {
+      setGenerationJobId(activeJob.id);
+      setGenerationJobKind(presetActive ? "preset" : "custom");
+      setGenerationProgress(0);
+      setGenerationStatusLabel(getGenerationStatusLabel(activeJob.status));
+      setGenerationMessage("Queued");
+      setStep("generating");
+      return;
+    }
+
     // Decide which screen we’re on
     if (!data.route_id) setStep("pickDuration");
     else if (data.completed_at) setStep("end");
@@ -392,10 +492,9 @@ const previousStepRef = useRef<FlowStep>("landing");
 
     setJam(data as JamRow);
 
-    // Put it in URL like your existing flow
-    router.replace(`/?jam=${data.id}`);
-
     if (!opts?.skipStep) {
+      // Put it in URL like your existing flow
+      router.replace(`/?jam=${data.id}`);
       if (!routeId) setStep("pickDuration");
       else setStep("walk");
     }
@@ -474,7 +573,7 @@ const previousStepRef = useRef<FlowStep>("landing");
     const presetRoute = getRouteById(routeRef);
     if (!isCustom && !presetRoute) {
       setCustomRoute(null);
-      return;
+      return null;
     }
     const endpoint = isCustom
       ? `/api/custom-routes/${customRouteId}`
@@ -505,11 +604,12 @@ const previousStepRef = useRef<FlowStep>("landing");
     const nextRoute: RouteDef = {
       id: routeRef,
       title: payload.route.title,
-      durationLabel: `${payload.route.length_minutes} min`,
+      durationLabel: `${payload.route.length_minutes} mins`,
       description: `${payload.route.transport_mode === "drive" ? "Drive" : "Walk"} • ${landmarkStops.length} stops`,
       stops: prioritizeOverviewById(mappedStops),
     };
     setCustomRoute(nextRoute);
+    return nextRoute;
   }, [selectedCity]);
 
   // ---------- "Start stop” handler ----------
@@ -651,6 +751,8 @@ async function startStopNarration() {
     }
 
     try {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), START_JOB_TIMEOUT_MS);
       const res = await fetch("/api/preset-jobs/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -660,7 +762,9 @@ async function startStopNarration() {
           persona: personaSelection,
           city: selectedCity,
         }),
+        signal: controller.signal,
       });
+      window.clearTimeout(timeoutId);
       const body = (await res.json()) as { error?: string; jobId?: string; status?: string };
       if (res.status === 429 && body.jobId) {
         setGenerationJobId(body.jobId);
@@ -673,8 +777,12 @@ async function startStopNarration() {
       setGenerationJobKind("preset");
       router.replace(`/?jam=${jamId}`);
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setErr("Timed out while starting generation. Please try again.");
+      } else {
+        setErr(e instanceof Error ? e.message : "Failed to generate preset tour");
+      }
       setGenerationJobKind(null);
-      setErr(e instanceof Error ? e.message : "Failed to generate preset tour");
       setStep("pickDuration");
     }
   }
@@ -792,22 +900,22 @@ async function startStopNarration() {
     setStep("generating");
 
     try {
-      const res = await fetch("/api/mix-jobs/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jamId: jam?.id ?? null,
-          city: selectedCity,
-          transportMode: "walk",
-          lengthMinutes: 30,
-          persona: selectedPersona,
-          stops: stopsToGenerate,
-        }),
-      });
-      const body = (await res.json()) as { error?: string; jamId?: string; jobId?: string };
-      if (!res.ok) {
-        throw new Error(body.error || "Failed to start mix generation");
-      }
+      const body = await fetchJsonWithTimeout<{ error?: string; jamId?: string; jobId?: string }>(
+        "/api/mix-jobs/create",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jamId: jam?.id ?? null,
+            city: selectedCity,
+            transportMode: "walk",
+            lengthMinutes: 30,
+            persona: selectedPersona,
+            stops: stopsToGenerate,
+          }),
+        },
+        START_JOB_TIMEOUT_MS
+      );
       if (!body.jamId || !body.jobId) {
         throw new Error("Missing generation job metadata");
       }
@@ -939,19 +1047,31 @@ async function startStopNarration() {
   useEffect(() => {
     if (step !== "generating" || !generationJobId || !generationJobKind) return;
     let cancelled = false;
+    let nextPollTimeout: number | null = null;
+    let pollAbortController: AbortController | null = null;
+    let consecutivePollFailures = 0;
 
     const poll = async () => {
+      if (cancelled) return;
+      pollAbortController = new AbortController();
+      const timeoutId = window.setTimeout(() => {
+        pollAbortController?.abort();
+      }, POLL_REQUEST_TIMEOUT_MS);
+
       try {
         const endpoint =
           generationJobKind === "custom"
             ? `/api/mix-jobs/${generationJobId}`
             : `/api/preset-jobs/${generationJobId}`;
-        const res = await fetch(endpoint, { cache: "no-store" });
+        const res = await fetch(endpoint, { cache: "no-store", signal: pollAbortController.signal });
+        window.clearTimeout(timeoutId);
+        pollAbortController = null;
         const body = (await res.json()) as MixJobResponse | { error?: string };
         if (!res.ok || !("status" in body)) {
           throw new Error(("error" in body && body.error) || "Failed to poll generation status");
         }
         if (cancelled) return;
+        consecutivePollFailures = 0;
 
         const nextProgress = Math.max(0, Math.min(100, Number(body.progress) || 0));
         setGenerationProgress(nextProgress);
@@ -962,7 +1082,33 @@ async function startStopNarration() {
           setGenerationJobId(null);
           setGenerationJobKind(null);
           const routeRef = generationJobKind === "custom" ? `custom:${body.route_id}` : body.route_id;
-          await loadResolvedRoute(routeRef);
+          if (generationJobKind === "preset") {
+            setGenerationStatusLabel("Preparing first stop");
+            setGenerationMessage("Preparing first stop...");
+          }
+          const prepStartedAt = Date.now();
+          const resolvedRoute = await loadResolvedRoute(routeRef);
+          if (generationJobKind === "preset" && resolvedRoute) {
+            const overviewStop = resolvedRoute.stops.find(
+              (stop) => Boolean(stop.isOverview) || isPresetOverviewStopId(stop.id)
+            );
+            if (overviewStop) {
+              const personaForPreload = selectedPersona ?? (jam?.persona ?? "adult");
+              const overviewAudioUrl = (overviewStop.audio[personaForPreload] || "").trim();
+              if (overviewAudioUrl) {
+                const preloadResult = await preloadAudioMetadata(overviewAudioUrl, 4500);
+                if (preloadResult !== "ready") {
+                  setErr("Tour is ready. First stop audio is still buffering.");
+                }
+              } else {
+                setErr("Tour is ready, but first stop audio is still unavailable.");
+              }
+            }
+            const prepElapsed = Date.now() - prepStartedAt;
+            if (prepElapsed < 1200) {
+              await new Promise((resolve) => window.setTimeout(resolve, 1200 - prepElapsed));
+            }
+          }
           await loadJamById(body.jam_id);
           if (body.status === "ready_with_warnings") {
             setErr(body.error || body.message || "Tour is ready with warnings.");
@@ -976,30 +1122,55 @@ async function startStopNarration() {
           setGenerationProgress(100);
           setGenerationStatusLabel(GENERATION_STATUS_LABELS.failed);
           setGenerationMessage(body.error || body.message || "Generation failed");
+          return;
         }
       } catch (e) {
-        if (!cancelled) {
+        window.clearTimeout(timeoutId);
+        pollAbortController = null;
+        if (cancelled) return;
+
+        const isTimeoutError = e instanceof DOMException && e.name === "AbortError";
+        consecutivePollFailures += 1;
+
+        if (isTimeoutError) {
+          console.warn(
+            `generation poll timeout (${generationJobKind}) job=${generationJobId} failures=${consecutivePollFailures}`
+          );
+          setGenerationMessage("Status check timed out. Retrying...");
+        } else {
+          console.warn(
+            `generation poll error (${generationJobKind}) job=${generationJobId} failures=${consecutivePollFailures}`,
+            e
+          );
+        }
+
+        if (consecutivePollFailures >= POLL_FAILURE_THRESHOLD) {
           setGenerationJobId(null);
           setGenerationJobKind(null);
-          const message = e instanceof Error ? e.message : "Failed to poll generation status";
+          const message = "Status check timed out. Retry or return to home.";
           setErr(message);
           setGenerationProgress(100);
           setGenerationStatusLabel(GENERATION_STATUS_LABELS.failed);
           setGenerationMessage(message);
+          return;
+        }
+      } finally {
+        if (!cancelled && generationJobId && generationJobKind) {
+          nextPollTimeout = window.setTimeout(() => {
+            void poll();
+          }, POLL_INTERVAL_MS);
         }
       }
     };
 
     void poll();
-    const interval = window.setInterval(() => {
-      void poll();
-    }, 1500);
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      if (nextPollTimeout !== null) window.clearTimeout(nextPollTimeout);
+      if (pollAbortController) pollAbortController.abort();
     };
-  }, [step, generationJobId, generationJobKind, loadResolvedRoute]);
+  }, [step, generationJobId, generationJobKind, loadResolvedRoute, selectedPersona, jam?.persona]);
 
 // ---------- watchPosition ----------
   useEffect(() => {
@@ -1271,7 +1442,7 @@ async function startStopNarration() {
               </strong></p>
             </div>
 
-            <div className={styles.landingPopular}>Popular Tour Mixes:</div>
+            <div className={styles.landingPopular}>Popular tour mixes:</div>
 
             <button
               className={styles.landingTourRow}
@@ -1367,7 +1538,7 @@ async function startStopNarration() {
                     aria-hidden="true"
                   />
                 </button>
-                <h2 className={`${styles.pickHeading} ${styles.pickHeadingBelowClose}`}>What narrator do you want?</h2>
+                <h2 className={`${styles.pickHeading} ${styles.pickHeadingBelowClose}`}>Select your narrator</h2>
                 <div className={styles.pickPersonaRow}>
                   <button
                     onClick={() => {
@@ -1566,7 +1737,7 @@ async function startStopNarration() {
                       </div>
                         <div className={styles.pickRouteMain}>
                           <div className={styles.pickRouteTitle}>Create your own mix</div>
-                          <div className={styles.pickRouteMeta}>Shape your story with up to 9 stops</div>
+                          <div className={styles.pickRouteMeta}>Select up to 9 stops</div>
                         </div>
                       </div>
                       <div className={styles.pickRowArrow} aria-hidden="true">
@@ -1625,7 +1796,7 @@ async function startStopNarration() {
               />
             </button>
             <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>Create your own mix of {selectedCityLabel}</h2>
+              <h2 className={styles.pickHeading}>Create your own mix</h2>
             </div>
 
             <div className={styles.pickSectionLabel}>
@@ -1844,7 +2015,7 @@ async function startStopNarration() {
               />
             </button>
             <a href={mapsUrl} target="_blank" rel="noreferrer" className={styles.mapViewButton}>
-              View directions
+              View Directions
             </a>
           </div>
           <div className={styles.rightRail}>
@@ -1879,8 +2050,7 @@ async function startStopNarration() {
               </div>
             <h1 className={styles.walkHeadline}>{route.title}</h1>
             <div className={styles.walkSubline}>
-              <span>{connectedCount} {connectedCount === 1 ? "person" : "people"} connected</span>
-              <span>{route.durationLabel}/{routeMilesLabel} walking</span>
+              <span>{connectedCount} {connectedCount === 1 ? "person" : "people"} connected  •  {route.durationLabel} / {routeMilesLabel}</span>
             </div>
 
               <div className={styles.walkActionRow}>
@@ -1941,7 +2111,7 @@ async function startStopNarration() {
 
             {currentStop && (
               <div className={styles.nowPlayingBar}>
-                <audio ref={audioRef} preload="metadata" src={currentStopAudio} hidden />
+                <audio ref={audioRef} preload="none" src={hasCurrentAudio ? currentStopAudio : undefined} hidden />
                 <input
                   type="range"
                   min={0}
@@ -2046,6 +2216,13 @@ async function startStopNarration() {
           <h2 className={styles.walkTitle}>Nice work — walk complete.</h2>
           <p className={styles.endText}>
             Reflection prompt (MVP): What was one detail you didn’t expect?
+          </p>
+          <p className={`${styles.endText} ${styles.lightMuted} ${styles.spacedTop}`}>
+            Some stop photos are provided by{" "}
+            <a href="https://www.pexels.com/" target="_blank" rel="noreferrer">
+              Pexels
+            </a>
+            .
           </p>
 
           <div className={styles.actionRow}>

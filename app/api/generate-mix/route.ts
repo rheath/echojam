@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createHash } from "node:crypto";
 import { personaCatalog } from "@/lib/personas/catalog";
 
 type Persona = "adult" | "preteen";
@@ -105,23 +106,32 @@ async function uploadNarrationAudio(
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const bucket = process.env.SUPABASE_AUDIO_BUCKET || "narrations";
+  const cacheControl = process.env.SUPABASE_AUDIO_CACHE_SECONDS || "31536000";
+  const version = createHash("sha1").update(audioBytes).digest("hex").slice(0, 12);
+  const safeJamId = jamLikeId.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "mix";
+  const safeStopId = stopId.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "stop";
 
-  if (url && serviceRole) {
-    const admin = createClient(url, serviceRole, { auth: { persistSession: false } });
-    const path = `mixes/${jamLikeId}/${persona}/${stopId}.mp3`;
-    const { error } = await admin.storage.from(bucket).upload(path, audioBytes, {
-      contentType: "audio/mpeg",
-      upsert: true,
-    });
-    if (!error) {
-      const { data } = admin.storage.from(bucket).getPublicUrl(path);
-      if (data?.publicUrl) return data.publicUrl;
-    }
+  if (!url || !serviceRole) {
+    throw new Error("Missing storage configuration for narration upload.");
   }
 
-  // Fallback: embedded audio data URL so flow works even without storage service-role configuration.
-  const base64 = Buffer.from(audioBytes).toString("base64");
-  return `data:audio/mpeg;base64,${base64}`;
+  const admin = createClient(url, serviceRole, { auth: { persistSession: false } });
+  const path = `mixes/${safeJamId}/${persona}/${safeStopId}.mp3`;
+  const { error } = await admin.storage.from(bucket).upload(path, audioBytes, {
+    contentType: "audio/mpeg",
+    cacheControl,
+    upsert: true,
+  });
+  if (error) {
+    throw new Error(`Narration upload failed: ${error.message}`);
+  }
+
+  const { data } = admin.storage.from(bucket).getPublicUrl(path);
+  if (!data?.publicUrl) {
+    throw new Error("Narration upload succeeded but public URL was unavailable.");
+  }
+  const sep = data.publicUrl.includes("?") ? "&" : "?";
+  return `${data.publicUrl}${sep}v=${version}`;
 }
 
 export async function POST(req: Request) {

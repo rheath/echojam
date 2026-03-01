@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import type { Persona } from "@/app/content/salemRoutes";
 import { ensureCanonicalStopForCustom, upsertRouteStopMapping } from "@/lib/canonicalStops";
-import { generateScriptWithOpenAI, getSwitchConfig, shouldRegenerateScript, toNullableTrimmed } from "@/lib/mixGeneration";
+import {
+  generateScriptWithOpenAI,
+  getSwitchConfig,
+  shouldRegenerateScript,
+  toNullableAudioUrl,
+  toNullableTrimmed,
+} from "@/lib/mixGeneration";
 
 type Body = {
   routeId: string;
@@ -96,7 +102,7 @@ export async function POST(req: Request) {
         canonical_stop_id: canonical.id,
         persona: body.persona,
         script,
-        audio_url: toNullableTrimmed(current?.audio_url),
+        audio_url: toNullableAudioUrl(current?.audio_url),
         status: "ready",
         error: null,
       },

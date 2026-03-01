@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRouteById } from "@/app/content/salemRoutes";
-import { toNullableTrimmed } from "@/lib/mixGeneration";
+import { toNullableAudioUrl, toNullableTrimmed } from "@/lib/mixGeneration";
 import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
 
 function getAdmin() {
@@ -33,6 +33,34 @@ function isNonPlaceholderImage(value: string | null | undefined) {
   const normalized = toNullableTrimmed(value);
   if (!normalized) return false;
   return !normalized.toLowerCase().includes("/placeholder-");
+}
+
+function normalizedImageKey(value: string | null | undefined) {
+  const normalized = toNullableTrimmed(value);
+  if (!normalized) return null;
+  return normalized.toLowerCase();
+}
+
+function pickStopImage(
+  canonicalImage: string | null | undefined,
+  routeImage: string | null | undefined,
+  placeholder: string,
+  usedStrongImages: Set<string>
+) {
+  const strongCandidates = [canonicalImage, routeImage]
+    .map((value) => toNullableTrimmed(value))
+    .filter((value): value is string => Boolean(value) && isNonPlaceholderImage(value));
+
+  for (const candidate of strongCandidates) {
+    const key = normalizedImageKey(candidate);
+    if (!key || !usedStrongImages.has(key)) {
+      if (key) usedStrongImages.add(key);
+      return candidate;
+    }
+  }
+
+  if (strongCandidates[0]) return strongCandidates[0];
+  return toNullableTrimmed(routeImage) || placeholder;
 }
 
 export async function GET(req: Request, ctx: { params: Promise<{ routeId: string }> }) {
@@ -136,7 +164,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
       };
 
       const script = toNullableTrimmed(row.script);
-      const audioUrl = toNullableTrimmed(row.audio_url);
+      const audioUrl = toNullableAudioUrl(row.audio_url);
       if (row.persona === "adult") {
         entry.script_adult = script;
         entry.audio_url_adult = audioUrl;
@@ -159,6 +187,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
       .limit(1)
       .maybeSingle();
 
+    const usedStrongImages = new Set<string>();
     const stops = presetStops.map((stop, index) => {
       const mapping = mappingByStop.get(stop.id);
       const assetsForStop = mapping ? assetsByCanonical.get(mapping.canonical_stop_id) : null;
@@ -171,10 +200,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
         title: stop.title,
         lat: stop.lat,
         lng: stop.lng,
-        image_url:
-          (isNonPlaceholderImage(canonicalImage) ? canonicalImage : null) ||
-          routeImage ||
-          "/images/salem/placeholder-01.png",
+        image_url: pickStopImage(canonicalImage, routeImage, "/images/salem/placeholder-01.png", usedStrongImages),
         script_adult: assetsForStop?.script_adult ?? null,
         script_preteen: assetsForStop?.script_preteen ?? null,
         audio_url_adult: assetsForStop?.audio_url_adult ?? null,

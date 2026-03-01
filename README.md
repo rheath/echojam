@@ -42,7 +42,7 @@ Custom and preset routes can use canonical cached images for each stop.
 Required env vars:
 
 ```bash
-GOOGLE_MAPS_API_KEY=...
+PEXELS_API_KEY=...
 CANONICAL_IMAGE_SYNC_TOKEN=...
 ```
 
@@ -54,4 +54,10 @@ Header: x-sync-token: $CANONICAL_IMAGE_SYNC_TOKEN
 Body: {"limit":100,"maxAgeHours":168}
 ```
 
-Recommended: run this on a schedule (hourly or daily) so user route loads do not call Google Places directly.
+Recommended: run this on a schedule (hourly or daily) so user route loads do not call Pexels directly.
+
+Pilot notes:
+
+- Default Pexels API limits are 200 requests/hour and 20,000 requests/month.
+- Keep sync batches modest (for example `limit: 100`) and schedule runs conservatively.
+- Pexels photos require attribution policy compliance (credit Pexels/photographer where required).

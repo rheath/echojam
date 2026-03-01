@@ -6,6 +6,7 @@ import {
   getSwitchConfig,
   shouldRegenerateAudio,
   synthesizeSpeechWithOpenAI,
+  toNullableAudioUrl,
   toNullableTrimmed,
   uploadNarrationAudio,
 } from "@/lib/mixGeneration";
@@ -51,7 +52,7 @@ export async function POST(req: Request) {
 
     const switchConfig = await getSwitchConfig();
     const forceAudio = shouldRegenerateAudio(switchConfig.mode);
-    const replayUrl = toNullableTrimmed(switchConfig.replay_audio[stop.id]?.[body.persona]);
+    const replayUrl = toNullableAudioUrl(switchConfig.replay_audio[stop.id]?.[body.persona]);
 
     const { data: current } = await admin
       .from("canonical_stop_assets")
@@ -65,14 +66,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Script not generated yet for this stop/persona." }, { status: 400 });
     }
 
-    let audioUrl = !forceAudio ? toNullableTrimmed(current?.audio_url) : null;
+    let audioUrl = !forceAudio ? toNullableAudioUrl(current?.audio_url) : null;
     if (replayUrl) audioUrl = replayUrl;
     if (audioUrl) {
       return NextResponse.json({ audioUrl, reused: true });
     }
 
     const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, body.persona, script);
-    audioUrl = toNullableTrimmed(await uploadNarrationAudio(audioBytes, `preset-${route.id}`, body.persona, stop.id));
+    audioUrl = toNullableAudioUrl(await uploadNarrationAudio(audioBytes, `preset-${route.id}`, body.persona, stop.id));
     if (!audioUrl) {
       return NextResponse.json({ error: "Generated audio URL was empty" }, { status: 500 });
     }
