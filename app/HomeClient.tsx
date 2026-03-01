@@ -535,7 +535,7 @@ const previousStepRef = useRef<FlowStep>("landing");
 
   async function copyShareLink() {
     if (!jam) return;
-    await navigator.clipboard?.writeText(`${window.location.origin}/?jam=${jam.id}`);
+    await navigator.clipboard?.writeText(`${window.location.origin}/j/${jam.id}`);
   }
 
   function goHome() {
