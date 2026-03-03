@@ -118,6 +118,21 @@ async function uploadNarrationAudio(
 
   const admin = createClient(url, serviceRole, { auth: { persistSession: false } });
   const path = `mixes/${safeJamId}/${persona}/${safeStopId}.mp3`;
+
+  const { data: buckets, error: listBucketsError } = await admin.storage.listBuckets();
+  if (listBucketsError) {
+    throw new Error(`Narration upload failed: could not list storage buckets (${listBucketsError.message}).`);
+  }
+  const bucketExists = (buckets ?? []).some((item) => item.name === bucket);
+  if (!bucketExists) {
+    const { error: createBucketError } = await admin.storage.createBucket(bucket, { public: true });
+    if (createBucketError && !createBucketError.message.toLowerCase().includes("already exists")) {
+      throw new Error(
+        `Narration upload failed: Supabase storage bucket "${bucket}" was not found and could not be created (${createBucketError.message}).`
+      );
+    }
+  }
+
   const { error } = await admin.storage.from(bucket).upload(path, audioBytes, {
     contentType: "audio/mpeg",
     cacheControl,
