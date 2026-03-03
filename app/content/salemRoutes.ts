@@ -1,5 +1,5 @@
 // app/content/salemRoutes.ts
-export type Persona = "adult" | "preteen";
+export type Persona = "adult" | "preteen" | "ghost";
 
 export type Stop = {
   id: string;
@@ -67,7 +67,7 @@ const deepDiveCanonicalStops: Stop[] = [
     title: "Salem Harbor",
     lat: 42.5212,
     lng: -70.8877,
-    audio: { adult: "", preteen: "" },
+    audio: { adult: "", preteen: "", ghost: "" },
     images: ["https://images.squarespace-cdn.com/content/v1/5aad88d20dbda36546051fd4/1560780072845-EH7NNED896NW6DV7VDKX/16161093490_d19dc0ed5b_o.jpg?format=2500w"],
   },
   {
@@ -75,7 +75,7 @@ const deepDiveCanonicalStops: Stop[] = [
     title: "House of the Seven Gables",
     lat: 42.521756, 
     lng: -70.883507,
-    audio: { adult: "", preteen: "" },
+    audio: { adult: "", preteen: "", ghost: "" },
     images: [
       "https://commons.wikimedia.org/wiki/Special:FilePath/House_of_the_Seven_Gables_MA1.jpg",
       "https://commons.wikimedia.org/wiki/Special:FilePath/House%20of%20Seven%20Gables%2C%20Salem%20MA%201.jpg",
@@ -87,7 +87,7 @@ const deepDiveCanonicalStops: Stop[] = [
     title: "Old Burying Point Cemetery",
     lat: 42.5206,
     lng: -70.8922,
-    audio: { adult: "", preteen: "" },
+    audio: { adult: "", preteen: "", ghost: "" },
     images: ["https://salemhauntedadventures.com/wp-content/uploads/2024/08/Old-Burying-Point-Cemetery-Salem-Massachusetts.png",
       "/images/salem/placeholder-02.png"],
   },
@@ -96,7 +96,7 @@ const deepDiveCanonicalStops: Stop[] = [
     title: "Salem Witch Trials Memorial",
     lat: 42.5232,
     lng: -70.8958,
-    audio: { adult: "", preteen: "" },
+    audio: { adult: "", preteen: "", ghost: "" },
     images: ["https://en.wikipedia.org/wiki/Special:FilePath/Salem_witch2.jpg",
       "/images/salem/placeholder-03.png"],
   },
@@ -105,7 +105,7 @@ const deepDiveCanonicalStops: Stop[] = [
     title: "Joshua Ward House",
     lat: 42.5203982, 
     lng: -70.8959536,
-    audio: { adult: "", preteen: "" },
+    audio: { adult: "", preteen: "", ghost: "" },
     images: ["https://en.wikipedia.org/wiki/Special:FilePath/Joshua_Ward_House_in_Salem_MA.jpg",
       "/images/salem/placeholder-01.png"],
   },
@@ -114,7 +114,7 @@ const deepDiveCanonicalStops: Stop[] = [
     title: "Ropes Mansion & Garden",
     lat: 42.5211,
     lng: -70.8972,
-    audio: { adult: "", preteen: "" },
+    audio: { adult: "", preteen: "", ghost: "" },
     images: ["https://en.wikipedia.org/wiki/Special:FilePath/Ropes_Mansion_-_Salem,_Massachusetts.JPG",
       "/images/salem/placeholder-03.png"],
   },
@@ -123,7 +123,7 @@ const deepDiveCanonicalStops: Stop[] = [
     title: "Salem Witch House",
     lat: 42.5229,
     lng: -70.8985,
-    audio: { adult: "", preteen: "" },
+    audio: { adult: "", preteen: "", ghost: "" },
     images: ["https://en.wikipedia.org/wiki/Special:FilePath/Witch_House,_Salem.jpg",
       "/images/salem/placeholder-01.png"],
   },

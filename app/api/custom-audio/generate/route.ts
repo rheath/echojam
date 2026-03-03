@@ -18,6 +18,12 @@ type Body = {
   city?: "salem" | "boston" | "concord";
 };
 
+const AUDIO_PATCH_BY_PERSONA = {
+  adult: (audioUrl: string) => ({ audio_url_adult: audioUrl }),
+  preteen: (audioUrl: string) => ({ audio_url_preteen: audioUrl }),
+  ghost: (audioUrl: string) => ({ audio_url_ghost: audioUrl }),
+} as const;
+
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -94,7 +100,7 @@ export async function POST(req: Request) {
       { onConflict: "canonical_stop_id,persona" }
     );
 
-    const audioPatch = body.persona === "adult" ? { audio_url_adult: audioUrl } : { audio_url_preteen: audioUrl };
+    const audioPatch = AUDIO_PATCH_BY_PERSONA[body.persona](audioUrl);
     await admin.from("custom_route_stops").update(audioPatch).eq("route_id", body.routeId).eq("stop_id", body.stopId);
 
     return NextResponse.json({ audioUrl, reused: false });

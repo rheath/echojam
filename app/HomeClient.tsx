@@ -59,8 +59,10 @@ type CustomRouteResponse = {
     image_url: string | null;
     script_adult: string | null;
     script_preteen: string | null;
+    script_ghost: string | null;
     audio_url_adult: string | null;
     audio_url_preteen: string | null;
+    audio_url_ghost: string | null;
     is_overview?: boolean;
     position: number;
   }>;
@@ -96,6 +98,15 @@ type ResolveSummary = {
   failed: Array<{ input: string; reason: string }>;
 };
 
+type NearbyStoryResponse = {
+  routeRef: string;
+  insertedStopId: string;
+  insertedStopIndex: number;
+  autoplay: true;
+  source: "canonical" | "google_places" | "locality_fallback";
+  distanceMeters: number | null;
+};
+
 const GENERATION_STATUS_LABELS: Record<MixJobResponse["status"], string> = {
   queued: "Queued",
   generating_script: "Creating the curated story",
@@ -109,6 +120,11 @@ const POLL_INTERVAL_MS = 1500;
 const POLL_REQUEST_TIMEOUT_MS = 8000;
 const POLL_FAILURE_THRESHOLD = 5;
 const START_JOB_TIMEOUT_MS = 15000;
+const PERSONA_KEYS: Persona[] = ["adult", "preteen", "ghost"];
+const DEFAULT_STOP_IMAGE = "/images/salem/placeholder-01.png";
+const NEARBY_STORY_ENABLED = ["1", "true", "yes", "on"].includes(
+  (process.env.NEXT_PUBLIC_ENABLE_NEARBY_STORY || "").trim().toLowerCase()
+);
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -142,6 +158,14 @@ function estimateWalkMinutes(meters: number) {
   // ~1.35 m/s ≈ 3.0 mph
   const seconds = meters / 1.35;
   return Math.max(1, Math.round(seconds / 60));
+}
+
+function toSafeStopImage(value: string | null | undefined) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) return DEFAULT_STOP_IMAGE;
+  if (normalized.startsWith("/")) return normalized;
+  if (normalized.startsWith("https://") || normalized.startsWith("http://")) return normalized;
+  return DEFAULT_STOP_IMAGE;
 }
 
 function getInitialStopSubtitle(distanceToStopM: number | null, fallbackMinutes: number) {
@@ -258,6 +282,24 @@ async function fetchJsonWithTimeout<T>(
   }
 }
 
+async function requestCurrentGeoPosition(timeoutMs = 8000): Promise<{ lat: number; lng: number }> {
+  return await new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Geolocation is not supported on this device."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      () => {
+        reject(new Error("Location permission is required to tell nearby stories."));
+      },
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 }
+    );
+  });
+}
+
 export default function HomeClient() {
   const [distanceToStopM, setDistanceToStopM] = useState<number | null>(null);
 const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
@@ -285,6 +327,8 @@ const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
 const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
 const [isGeneratingScriptForModal, setIsGeneratingScriptForModal] = useState(false);
 const [isGeneratingAudioForCurrentStop, setIsGeneratingAudioForCurrentStop] = useState(false);
+const [isGeneratingNearbyStory, setIsGeneratingNearbyStory] = useState(false);
+const [isResolvingNearbyGeo, setIsResolvingNearbyGeo] = useState(false);
 const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
 const [isEditingStopsFromWalk, setIsEditingStopsFromWalk] = useState(false);
 const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
@@ -328,6 +372,14 @@ const previousStepRef = useRef<FlowStep>("landing");
     return (currentStop.audio[persona] || "").trim();
   }, [currentStop, persona]);
   const hasCurrentAudio = currentStopAudio.length > 0;
+  const isNearbyStoryButtonDisabled =
+    !NEARBY_STORY_ENABLED ||
+    step !== "walk" ||
+    !jam?.id ||
+    !route ||
+    isGeneratingNearbyStory ||
+    isResolvingNearbyGeo ||
+    geoAllowed !== true;
   const routeMilesLabel = useMemo(() => {
     if (!route) return "";
     return formatRouteMiles(getRouteMiles(route.stops));
@@ -368,7 +420,7 @@ const previousStepRef = useRef<FlowStep>("landing");
           title: s.title,
           lat: s.lat,
           lng: s.lng,
-          image: s.images[0] ?? "/images/salem/placeholder-01.png",
+          image: toSafeStopImage(s.images[0]),
         });
       }
     }
@@ -579,7 +631,16 @@ const previousStepRef = useRef<FlowStep>("landing");
       ? `/api/custom-routes/${customRouteId}`
       : `/api/preset-routes/${routeRef}?city=${encodeURIComponent(selectedCity)}`;
     const res = await fetch(endpoint);
-    if (!res.ok) throw new Error(`Failed to load ${isCustom ? "custom" : "preset"} route`);
+    if (!res.ok) {
+      let detail: string | null = null;
+      try {
+        const errorPayload = (await res.json()) as { error?: string };
+        detail = typeof errorPayload?.error === "string" ? errorPayload.error.trim() : null;
+      } catch {
+        detail = null;
+      }
+      throw new Error(detail || `Failed to load ${isCustom ? "custom" : "preset"} route`);
+    }
     const payload = (await res.json()) as CustomRouteResponse;
     const landmarkStops = payload.stops.filter((s) => !s.is_overview);
     const mappedStops: RouteDef["stops"] = payload.stops.map((s, idx) => {
@@ -590,14 +651,16 @@ const previousStepRef = useRef<FlowStep>("landing");
       lat: s.lat,
       lng: s.lng,
       isOverview: Boolean(s.is_overview) || isPresetOverviewStopId(stopId),
-      images: [s.image_url || "/images/salem/placeholder-01.png"],
+      images: [toSafeStopImage(s.image_url)],
       audio: {
         adult: s.audio_url_adult || "",
         preteen: s.audio_url_preteen || "",
+        ghost: s.audio_url_ghost || "",
       },
       text: {
         adult: s.script_adult || "",
         preteen: s.script_preteen || "",
+        ghost: s.script_ghost || "",
       },
     };
     });
@@ -623,6 +686,65 @@ async function startStopNarration() {
     // autoplay might still be blocked in some cases; user can press play manually
   }
 }
+
+  async function handleNearbyStory() {
+    if (!NEARBY_STORY_ENABLED || step !== "walk" || !jam?.id || !route) return;
+    if (geoAllowed !== true) {
+      setErr("Location permission is required to tell nearby stories.");
+      return;
+    }
+
+    try {
+      setErr(null);
+      setIsGeneratingNearbyStory(true);
+      let coords = myPos;
+
+      if (!coords) {
+        setIsResolvingNearbyGeo(true);
+        coords = await requestCurrentGeoPosition();
+        setMyPos(coords);
+        setGeoAllowed(true);
+      }
+
+      const res = await fetch("/api/nearby-story/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jamId: jam.id,
+          persona,
+          lat: coords.lat,
+          lng: coords.lng,
+          currentStopIndex,
+          city: selectedCity,
+        }),
+      });
+
+      const body = (await res.json()) as NearbyStoryResponse | { error?: string };
+      if (!res.ok || !("routeRef" in body)) {
+        throw new Error(("error" in body && body.error) || "Failed to generate nearby story");
+      }
+
+      await loadResolvedRoute(body.routeRef);
+      setJam((prev) =>
+        prev
+          ? {
+              ...prev,
+              route_id: body.routeRef,
+              persona,
+              current_stop: body.insertedStopIndex,
+              completed_at: null,
+            }
+          : prev
+      );
+      setActiveStopIndex(body.insertedStopIndex);
+      setPendingAutoplayStopId(body.insertedStopId);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to generate nearby story");
+    } finally {
+      setIsResolvingNearbyGeo(false);
+      setIsGeneratingNearbyStory(false);
+    }
+  }
 
   async function handleStopSelect(idx: number) {
     if (!route) return;
@@ -941,7 +1063,7 @@ async function startStopNarration() {
       title: s.title,
       lat: s.lat,
       lng: s.lng,
-      image: s.images[0] ?? "/images/salem/placeholder-01.png",
+      image: toSafeStopImage(s.images[0]),
     }));
     setErr(null);
     setIsEditingStopsFromWalk(true);
@@ -1366,7 +1488,7 @@ async function startStopNarration() {
           id: stop.id,
           title: stop.title,
           isOverview: Boolean(stop.isOverview),
-          image: stop.images[0] ?? "/images/salem/placeholder-01.png",
+          image: toSafeStopImage(stop.images[0]),
           subtitle: getInitialStopSubtitle(distanceFromUserM, fallbackMinutes),
           isActive: false,
         };
@@ -1383,7 +1505,7 @@ async function startStopNarration() {
         id: stop.id,
         title: stop.title,
         isOverview: Boolean(stop.isOverview),
-        image: stop.images[0] ?? "/images/salem/placeholder-01.png",
+        image: toSafeStopImage(stop.images[0]),
         subtitle,
         isActive: idx === selectedIdx,
       };
@@ -1540,72 +1662,45 @@ async function startStopNarration() {
                 </button>
                 <h2 className={`${styles.pickHeading} ${styles.pickHeadingBelowClose}`}>Select your narrator</h2>
                 <div className={styles.pickPersonaRow}>
-                  <button
-                    onClick={() => {
-                      void handleNarratorSelect("adult");
-                    }}
-                    className={`${styles.pickNarratorOption} ${selectedPersona === "adult" ? styles.pickNarratorOptionSelected : ""}`}
-                  >
-                    <div className={styles.pickNarratorOptionContent}>
-                      <div className={styles.pickNarratorWithAvatar}>
-                        <div className={styles.pickNarratorAvatarWrap}>
+                  {PERSONA_KEYS.map((personaKey) => {
+                    const personaInfo = personaCatalog[personaKey];
+                    return (
+                    <button
+                      key={personaKey}
+                      onClick={() => {
+                        void handleNarratorSelect(personaKey);
+                      }}
+                      className={`${styles.pickNarratorOption} ${selectedPersona === personaKey ? styles.pickNarratorOptionSelected : ""}`}
+                    >
+                      <div className={styles.pickNarratorOptionContent}>
+                        <div className={styles.pickNarratorWithAvatar}>
+                          <div className={styles.pickNarratorAvatarWrap}>
+                            <Image
+                              src={personaInfo.avatarSrc}
+                              alt={personaInfo.avatarAlt}
+                              fill
+                              className={styles.pickNarratorAvatar}
+                            />
+                          </div>
+                          <div>
+                            <div className={styles.pickRouteTitle}>{personaInfo.displayName}</div>
+                            <div className={styles.pickNarratorSub}>{personaInfo.description}</div>
+                          </div>
+                        </div>
+                        <div className={styles.pickRowArrow} aria-hidden="true">
                           <Image
-                            src={personaCatalog.adult.avatarSrc}
-                            alt={personaCatalog.adult.avatarAlt}
-                            fill
-                            className={styles.pickNarratorAvatar}
+                            src="/icons/chevron-right.svg"
+                            alt=""
+                            width={28}
+                            height={28}
+                            className={styles.landingArrowIcon}
+                            aria-hidden="true"
                           />
                         </div>
-                        <div>
-                          <div className={styles.pickRouteTitle}>{personaCatalog.adult.displayName}</div>
-                          <div className={styles.pickNarratorSub}>{personaCatalog.adult.description}</div>
-                        </div>
                       </div>
-                      <div className={styles.pickRowArrow} aria-hidden="true">
-                        <Image
-                          src="/icons/chevron-right.svg"
-                          alt=""
-                          width={28}
-                          height={28}
-                          className={styles.landingArrowIcon}
-                          aria-hidden="true"
-                        />
-                      </div>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => {
-                      void handleNarratorSelect("preteen");
-                    }}
-                    className={`${styles.pickNarratorOption} ${selectedPersona === "preteen" ? styles.pickNarratorOptionSelected : ""}`}
-                  >
-                    <div className={styles.pickNarratorOptionContent}>
-                      <div className={styles.pickNarratorWithAvatar}>
-                        <div className={styles.pickNarratorAvatarWrap}>
-                          <Image
-                            src={personaCatalog.preteen.avatarSrc}
-                            alt={personaCatalog.preteen.avatarAlt}
-                            fill
-                            className={styles.pickNarratorAvatar}
-                          />
-                        </div>
-                        <div>
-                          <div className={styles.pickRouteTitle}>{personaCatalog.preteen.displayName}</div>
-                          <div className={styles.pickNarratorSub}>{personaCatalog.preteen.description}</div>
-                        </div>
-                      </div>
-                      <div className={styles.pickRowArrow} aria-hidden="true">
-                        <Image
-                          src="/icons/chevron-right.svg"
-                          alt=""
-                          width={28}
-                          height={28}
-                          className={styles.landingArrowIcon}
-                          aria-hidden="true"
-                        />
-                      </div>
-                    </div>
-                  </button>
+                    </button>
+                    );
+                  })}
                   <button
                     type="button"
                     disabled
@@ -2063,6 +2158,22 @@ async function startStopNarration() {
               >
                 Edit Stops
               </button>
+                {NEARBY_STORY_ENABLED && (
+                  <button
+                    className={styles.pillButton}
+                    type="button"
+                    onClick={() => {
+                      void handleNearbyStory();
+                    }}
+                    disabled={isNearbyStoryButtonDisabled}
+                  >
+                    {isResolvingNearbyGeo
+                      ? "Locating..."
+                      : isGeneratingNearbyStory
+                        ? "Generating..."
+                        : "Tell me about this place"}
+                  </button>
+                )}
                 <button
                   className={styles.nowPlayingButton}
                   type="button"
@@ -2094,7 +2205,13 @@ async function startStopNarration() {
                     type="button"
                   >
                     <div className={styles.stopThumbWrap}>
-                      <Image src={stop.image} alt={stop.title} fill className={styles.stopThumb} />
+                      <Image
+                        src={toSafeStopImage(stop.image)}
+                        alt={stop.title}
+                        fill
+                        className={styles.stopThumb}
+                        unoptimized
+                      />
                     </div>
                     <div className={styles.stopText}>
                       <div className={`${styles.stopTitle} ${stop.isActive ? styles.stopTitleActive : ""}`}>

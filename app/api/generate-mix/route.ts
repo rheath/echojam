@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 import { personaCatalog } from "@/lib/personas/catalog";
 
-type Persona = "adult" | "preteen";
+type Persona = "adult" | "preteen" | "ghost";
 type StopInput = {
   id: string;
   title: string;
@@ -23,6 +23,7 @@ type Body = {
 const VOICE_BY_PERSONA: Record<Persona, string> = {
   adult: "alloy",
   preteen: "nova",
+  ghost: "alloy",
 };
 
 async function generateScriptWithOpenAI(
@@ -145,10 +146,11 @@ export async function POST(req: Request) {
     if (!apiKey) {
       return NextResponse.json({ error: "OPENAI_API_KEY is required for AI narration generation." }, { status: 500 });
     }
-    const personas: Persona[] = ["adult", "preteen"];
+    const personas: Persona[] = ["adult", "preteen", "ghost"];
     const narrations: Record<Persona, Array<{ stopId: string; script: string; audioUrl: string }>> = {
       adult: [],
       preteen: [],
+      ghost: [],
     };
     const jamLikeId = `mix-${Date.now()}`;
 

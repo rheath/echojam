@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { personaCatalog } from "@/lib/personas/catalog";
 
-export type Persona = "adult" | "preteen";
+export type Persona = "adult" | "preteen" | "ghost";
 export type GenerationMode =
   | "reuse_existing"
   | "force_regenerate_all"
@@ -32,11 +32,13 @@ const DEFAULT_SWITCH: Required<GenerationSwitch> = {
 const VOICE_BY_PERSONA: Record<Persona, string> = {
   adult: "alloy",
   preteen: "nova",
+  ghost: "alloy",
 };
 
 const PERSONA_PROMPTS = {
   adult: personaCatalog.adult.prompt,
   preteen: personaCatalog.preteen.prompt,
+  ghost: personaCatalog.ghost.prompt,
 } as const;
 
 export function toNullableTrimmed(value: string | null | undefined): string | null {
@@ -224,10 +226,20 @@ export function fallbackScript(city: string, persona: Persona, stop: StopInput, 
     ].join(" ");
   }
   const personaPrompt = PERSONA_PROMPTS.preteen;
+  if (persona === "preteen") {
+    return [
+      personaPrompt.fallbackTemplate.line1(stop.title),
+      personaPrompt.fallbackTemplate.line2,
+      personaPrompt.fallbackTemplate.line3(city),
+      personaPrompt.fallbackTemplate.line4(index + 2),
+    ].join(" ");
+  }
+
+  const ghostPrompt = PERSONA_PROMPTS.ghost;
   return [
-    personaPrompt.fallbackTemplate.line1(stop.title),
-    personaPrompt.fallbackTemplate.line2,
-    personaPrompt.fallbackTemplate.line3(city),
-    personaPrompt.fallbackTemplate.line4(index + 2),
+    ghostPrompt.fallbackTemplate.line1(stop.title, city),
+    ghostPrompt.fallbackTemplate.line2,
+    ghostPrompt.fallbackTemplate.line3,
+    ghostPrompt.fallbackTemplate.line4(index + 2),
   ].join(" ");
 }

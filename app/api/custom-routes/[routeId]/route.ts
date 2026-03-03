@@ -25,9 +25,24 @@ type CanonicalImageRow = {
 
 type AssetRow = {
   canonical_stop_id: string;
-  persona: "adult" | "preteen";
+  persona: "adult" | "preteen" | "ghost";
   script: string | null;
   audio_url: string | null;
+};
+
+type StopRow = {
+  stop_id: string;
+  title: string;
+  lat: number;
+  lng: number;
+  image_url: string | null;
+  script_adult: string | null;
+  script_preteen: string | null;
+  script_ghost?: string | null;
+  audio_url_adult: string | null;
+  audio_url_preteen: string | null;
+  audio_url_ghost?: string | null;
+  position: number;
 };
 
 function isNonPlaceholderImage(value: string | null | undefined) {
@@ -40,6 +55,14 @@ function normalizedImageKey(value: string | null | undefined) {
   const normalized = toNullableTrimmed(value);
   if (!normalized) return null;
   return normalized.toLowerCase();
+}
+
+function isMissingGhostColumnError(message: string | null | undefined) {
+  const normalized = (message ?? "").toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes("script_ghost")) return true;
+  if (normalized.includes("audio_url_ghost")) return true;
+  return normalized.includes("column") && normalized.includes("does not exist") && normalized.includes("custom_route_stops");
 }
 
 function pickStopImage(
@@ -86,12 +109,30 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       .single();
     if (routeErr) return NextResponse.json({ error: routeErr.message }, { status: 404 });
 
-    const { data: stops, error: stopsErr } = await admin
+    const stopsSelectWithGhost =
+      "stop_id,title,lat,lng,image_url,script_adult,script_preteen,script_ghost,audio_url_adult,audio_url_preteen,audio_url_ghost,position";
+    const stopsSelectLegacy =
+      "stop_id,title,lat,lng,image_url,script_adult,script_preteen,audio_url_adult,audio_url_preteen,position";
+    let stops: StopRow[] = [];
+
+    const { data: stopsWithGhost, error: stopsWithGhostErr } = await admin
       .from("custom_route_stops")
-      .select("stop_id,title,lat,lng,image_url,script_adult,script_preteen,audio_url_adult,audio_url_preteen,position")
+      .select(stopsSelectWithGhost)
       .eq("route_id", routeId)
       .order("position", { ascending: true });
-    if (stopsErr) return NextResponse.json({ error: stopsErr.message }, { status: 500 });
+
+    if (stopsWithGhostErr && isMissingGhostColumnError(stopsWithGhostErr.message)) {
+      const { data: legacyStops, error: legacyStopsErr } = await admin
+        .from("custom_route_stops")
+        .select(stopsSelectLegacy)
+        .eq("route_id", routeId)
+        .order("position", { ascending: true });
+      if (legacyStopsErr) return NextResponse.json({ error: legacyStopsErr.message }, { status: 500 });
+      stops = (legacyStops ?? []) as StopRow[];
+    } else {
+      if (stopsWithGhostErr) return NextResponse.json({ error: stopsWithGhostErr.message }, { status: 500 });
+      stops = (stopsWithGhost ?? []) as StopRow[];
+    }
 
     const { data: mappings, error: mapErr } = await admin
       .from("route_stop_mappings")
@@ -130,8 +171,10 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       {
         script_adult: string | null;
         script_preteen: string | null;
+        script_ghost: string | null;
         audio_url_adult: string | null;
         audio_url_preteen: string | null;
+        audio_url_ghost: string | null;
       }
     >();
 
@@ -139,8 +182,10 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       const entry = assetsByCanonical.get(row.canonical_stop_id) ?? {
         script_adult: null,
         script_preteen: null,
+        script_ghost: null,
         audio_url_adult: null,
         audio_url_preteen: null,
+        audio_url_ghost: null,
       };
 
       const script = toNullableTrimmed(row.script);
@@ -148,9 +193,12 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       if (row.persona === "adult") {
         entry.script_adult = script;
         entry.audio_url_adult = audioUrl;
-      } else {
+      } else if (row.persona === "preteen") {
         entry.script_preteen = script;
         entry.audio_url_preteen = audioUrl;
+      } else {
+        entry.script_ghost = script;
+        entry.audio_url_ghost = audioUrl;
       }
       assetsByCanonical.set(row.canonical_stop_id, entry);
     }
@@ -170,8 +218,10 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
 
       const scriptAdult = canonical?.script_adult ?? toNullableTrimmed(stop.script_adult);
       const scriptPreteen = canonical?.script_preteen ?? toNullableTrimmed(stop.script_preteen);
+      const scriptGhost = canonical?.script_ghost ?? toNullableTrimmed(stop.script_ghost);
       const audioAdult = canonical?.audio_url_adult ?? toNullableAudioUrl(stop.audio_url_adult);
       const audioPreteen = canonical?.audio_url_preteen ?? toNullableAudioUrl(stop.audio_url_preteen);
+      const audioGhost = canonical?.audio_url_ghost ?? toNullableAudioUrl(stop.audio_url_ghost);
       const canonicalImageUrl = toNullableTrimmed(canonicalImage?.image_url);
       const curatedFallback = toNullableTrimmed(canonicalImage?.fallback_image_url);
       const stopImage = toNullableTrimmed(stop.image_url);
@@ -189,8 +239,10 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
         image_url: imageUrl,
         script_adult: scriptAdult,
         script_preteen: scriptPreteen,
+        script_ghost: scriptGhost,
         audio_url_adult: audioAdult,
         audio_url_preteen: audioPreteen,
+        audio_url_ghost: audioGhost,
       };
     });
 

@@ -70,7 +70,7 @@ function firstImage(candidates: Array<string | null | undefined>) {
 }
 
 function isPersona(value: string | null | undefined): value is Persona {
-  return value === "adult" || value === "preteen";
+  return value === "adult" || value === "preteen" || value === "ghost";
 }
 
 function toPersonaLabel(persona: string | null | undefined) {

@@ -25,6 +25,18 @@ type CreateBody = {
   stops: StopInput[];
 };
 
+const SCRIPT_PATCH_BY_PERSONA = {
+  adult: (script: string | null) => ({ script_adult: script }),
+  preteen: (script: string | null) => ({ script_preteen: script }),
+  ghost: (script: string | null) => ({ script_ghost: script }),
+} as const;
+
+const AUDIO_PATCH_BY_PERSONA = {
+  adult: (audioUrl: string | null) => ({ audio_url_adult: audioUrl }),
+  preteen: (audioUrl: string | null) => ({ audio_url_preteen: audioUrl }),
+  ghost: (audioUrl: string | null) => ({ audio_url_ghost: audioUrl }),
+} as const;
+
 const CREATE_JOB_REQUEST_TIMEOUT_MS = 12000;
 
 function getAdmin() {
@@ -110,8 +122,7 @@ async function runGeneration(
       { onConflict: "canonical_stop_id,persona" }
     );
 
-    const scriptPatch =
-      persona === "adult" ? { script_adult: script } : { script_preteen: script };
+    const scriptPatch = SCRIPT_PATCH_BY_PERSONA[persona](script);
     await admin.from("custom_route_stops").update(scriptPatch).eq("route_id", routeId).eq("stop_id", stop.id);
 
     states.push({ stop, canonicalStopId: canonical.id, script, audioUrl: null });
@@ -162,8 +173,7 @@ async function runGeneration(
       { onConflict: "canonical_stop_id,persona" }
     );
 
-    const audioPatch =
-      persona === "adult" ? { audio_url_adult: audioUrl } : { audio_url_preteen: audioUrl };
+    const audioPatch = AUDIO_PATCH_BY_PERSONA[persona](audioUrl);
     await admin.from("custom_route_stops").update(audioPatch).eq("route_id", routeId).eq("stop_id", state.stop.id);
 
     doneUnits += 1;

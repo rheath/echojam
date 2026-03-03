@@ -24,7 +24,7 @@ type CanonicalImageRow = {
 
 type AssetRow = {
   canonical_stop_id: string;
-  persona: "adult" | "preteen";
+  persona: "adult" | "preteen" | "ghost";
   script: string | null;
   audio_url: string | null;
 };
@@ -87,8 +87,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
         image_url: toNullableTrimmed(stop.image) || "/images/salem/placeholder-01.png",
         script_adult: null,
         script_preteen: null,
+        script_ghost: null,
         audio_url_adult: null,
         audio_url_preteen: null,
+        audio_url_ghost: null,
         is_overview: Boolean(stop.isOverview),
         position: index,
       }));
@@ -150,8 +152,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
       {
         script_adult: string | null;
         script_preteen: string | null;
+        script_ghost: string | null;
         audio_url_adult: string | null;
         audio_url_preteen: string | null;
+        audio_url_ghost: string | null;
       }
     >();
 
@@ -159,8 +163,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
       const entry = assetsByCanonical.get(row.canonical_stop_id) ?? {
         script_adult: null,
         script_preteen: null,
+        script_ghost: null,
         audio_url_adult: null,
         audio_url_preteen: null,
+        audio_url_ghost: null,
       };
 
       const script = toNullableTrimmed(row.script);
@@ -168,9 +174,12 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
       if (row.persona === "adult") {
         entry.script_adult = script;
         entry.audio_url_adult = audioUrl;
-      } else {
+      } else if (row.persona === "preteen") {
         entry.script_preteen = script;
         entry.audio_url_preteen = audioUrl;
+      } else {
+        entry.script_ghost = script;
+        entry.audio_url_ghost = audioUrl;
       }
       assetsByCanonical.set(row.canonical_stop_id, entry);
     }
@@ -203,8 +212,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
         image_url: pickStopImage(canonicalImage, routeImage, "/images/salem/placeholder-01.png", usedStrongImages),
         script_adult: assetsForStop?.script_adult ?? null,
         script_preteen: assetsForStop?.script_preteen ?? null,
+        script_ghost: assetsForStop?.script_ghost ?? null,
         audio_url_adult: assetsForStop?.audio_url_adult ?? null,
         audio_url_preteen: assetsForStop?.audio_url_preteen ?? null,
+        audio_url_ghost: assetsForStop?.audio_url_ghost ?? null,
         is_overview: Boolean(stop.isOverview),
         position: index,
       };

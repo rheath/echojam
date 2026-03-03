@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { StopInput } from "@/lib/mixGeneration";
+import { resolvePlaceImage } from "@/lib/placesImages";
 
 export type RouteKind = "preset" | "custom";
 
@@ -18,6 +19,7 @@ export type CanonicalStopRow = {
 };
 
 export const CANONICAL_MATCH_RADIUS_METERS = 50;
+const NEARBY_MERGE_RADIUS_METERS = 35;
 
 function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
   const avgLatRad = ((aLat + bLat) / 2) * (Math.PI / 180);
@@ -41,11 +43,30 @@ function canonicalIdForCustomStop(city: string, stop: StopInput) {
   return canonicalId("canon-custom", key);
 }
 
+function canonicalIdForNearbyStop(city: string, googlePlaceId: string | null | undefined, stop: StopInput) {
+  const placeKey = (googlePlaceId || "").trim().toLowerCase();
+  if (placeKey) {
+    return canonicalId("canon-nearby", `${city}|${placeKey}`);
+  }
+  const key = `${city}|${stop.title.toLowerCase()}|${stop.lat.toFixed(6)}|${stop.lng.toFixed(6)}`;
+  return canonicalId("canon-nearby", key);
+}
+
 export async function findNearestCanonicalStop(
   admin: SupabaseClient,
   city: string,
   lat: number,
   lng: number
+): Promise<CanonicalStopRow | null> {
+  return findNearestCanonicalStopWithinRadius(admin, city, lat, lng, CANONICAL_MATCH_RADIUS_METERS);
+}
+
+export async function findNearestCanonicalStopWithinRadius(
+  admin: SupabaseClient,
+  city: string,
+  lat: number,
+  lng: number,
+  radiusMeters: number
 ): Promise<CanonicalStopRow | null> {
   const { data, error } = await admin
     .from("canonical_stops")
@@ -65,7 +86,7 @@ export async function findNearestCanonicalStop(
     }
   }
 
-  if (!best || bestDistance > CANONICAL_MATCH_RADIUS_METERS) return null;
+  if (!best || bestDistance > radiusMeters) return null;
   return best;
 }
 
@@ -85,6 +106,17 @@ async function getCanonicalStopById(admin: SupabaseClient, id: string) {
     .from("canonical_stops")
     .select("id,city,title,lat,lng,image_url,image_source,fallback_image_url,google_place_id,image_last_checked_at")
     .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data ?? null) as CanonicalStopRow | null;
+}
+
+async function findCanonicalByGooglePlaceId(admin: SupabaseClient, city: string, googlePlaceId: string) {
+  const { data, error } = await admin
+    .from("canonical_stops")
+    .select("id,city,title,lat,lng,image_url,image_source,fallback_image_url,google_place_id,image_last_checked_at")
+    .eq("city", city)
+    .eq("google_place_id", googlePlaceId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   return (data ?? null) as CanonicalStopRow | null;
@@ -206,6 +238,94 @@ export async function ensureCanonicalStopForCustom(
     .single();
 
   if (error || !data) throw new Error(error?.message || "Failed to upsert custom canonical stop");
+  return data as CanonicalStopRow;
+}
+
+type NearbyStopInput = StopInput & {
+  googlePlaceId?: string | null;
+};
+
+export async function ensureCanonicalStopForNearby(
+  admin: SupabaseClient,
+  city: string,
+  stop: NearbyStopInput
+): Promise<CanonicalStopRow> {
+  const googlePlaceId = (stop.googlePlaceId || "").trim() || null;
+  const stopImage = (stop.image || "").trim();
+
+  if (googlePlaceId) {
+    const placeMatch = await findCanonicalByGooglePlaceId(admin, city, googlePlaceId);
+    if (placeMatch) {
+      return seedLinkImageIfAllowed(admin, placeMatch, stopImage);
+    }
+  }
+
+  const nearest = await findNearestCanonicalStopWithinRadius(admin, city, stop.lat, stop.lng, NEARBY_MERGE_RADIUS_METERS);
+  if (nearest) {
+    const updates: Record<string, string> = {};
+    if (googlePlaceId && !nearest.google_place_id) {
+      updates.google_place_id = googlePlaceId;
+    }
+    if (!isStrongImageSource(nearest.image_source) && stopImage && !isPlaceholderImage(stopImage)) {
+      updates.image_url = stopImage;
+      updates.image_source = "link_seed";
+    }
+    if (Object.keys(updates).length > 0) {
+      const { data, error } = await admin
+        .from("canonical_stops")
+        .update(updates)
+        .eq("id", nearest.id)
+        .select("id,city,title,lat,lng,image_url,image_source,fallback_image_url,google_place_id,image_last_checked_at")
+        .single();
+      if (!error && data) return data as CanonicalStopRow;
+    }
+    return nearest;
+  }
+
+  const id = canonicalIdForNearbyStop(city, googlePlaceId, stop);
+  const existingById = await getCanonicalStopById(admin, id);
+  if (existingById) {
+    return seedLinkImageIfAllowed(admin, existingById, stopImage);
+  }
+
+  let imageUrl: string | null = stopImage || null;
+  let imageSource: CanonicalStopRow["image_source"] =
+    imageUrl && !isPlaceholderImage(imageUrl) ? "link_seed" : "placeholder";
+
+  if (!imageUrl || isPlaceholderImage(imageUrl)) {
+    try {
+      const resolved = await resolvePlaceImage({
+        title: stop.title,
+        lat: stop.lat,
+        lng: stop.lng,
+        city,
+      });
+      if (resolved?.imageUrl) {
+        imageUrl = resolved.imageUrl;
+        imageSource = "places";
+      }
+    } catch {
+      // best effort image enrichment only
+    }
+  }
+
+  const { data, error } = await admin
+    .from("canonical_stops")
+    .insert({
+      id,
+      city,
+      title: stop.title,
+      lat: stop.lat,
+      lng: stop.lng,
+      image_url: imageUrl,
+      image_source: imageSource,
+      source: "live_nearby",
+      google_place_id: googlePlaceId,
+    })
+    .select("id,city,title,lat,lng,image_url,image_source,fallback_image_url,google_place_id,image_last_checked_at")
+    .single();
+
+  if (error || !data) throw new Error(error?.message || "Failed to upsert nearby canonical stop");
   return data as CanonicalStopRow;
 }
 

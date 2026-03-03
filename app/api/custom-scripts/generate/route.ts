@@ -17,6 +17,12 @@ type Body = {
   city?: "salem" | "boston" | "concord";
 };
 
+const SCRIPT_PATCH_BY_PERSONA = {
+  adult: (script: string) => ({ script_adult: script }),
+  preteen: (script: string) => ({ script_preteen: script }),
+  ghost: (script: string) => ({ script_ghost: script }),
+} as const;
+
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -109,7 +115,7 @@ export async function POST(req: Request) {
       { onConflict: "canonical_stop_id,persona" }
     );
 
-    const scriptPatch = body.persona === "adult" ? { script_adult: script } : { script_preteen: script };
+    const scriptPatch = SCRIPT_PATCH_BY_PERSONA[body.persona](script);
     await admin.from("custom_route_stops").update(scriptPatch).eq("route_id", body.routeId).eq("stop_id", body.stopId);
 
     return NextResponse.json({ script, reused: false });
