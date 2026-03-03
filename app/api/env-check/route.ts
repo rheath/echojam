@@ -6,7 +6,12 @@ const REQUIRED_ENV_KEYS = [
   "SUPABASE_SERVICE_ROLE_KEY",
 ] as const;
 
-const OPTIONAL_ENV_KEYS = ["OPENAI_API_KEY", "GOOGLE_PLACES_API_KEY", "ENABLE_NEARBY_STORY"] as const;
+const OPTIONAL_ENV_KEYS = [
+  "OPENAI_API_KEY",
+  "GOOGLE_PLACES_API_KEY",
+  "ENABLE_NEARBY_STORY",
+  "SUPABASE_AUDIO_BUCKET",
+] as const;
 
 function hasNonEmptyEnv(key: string) {
   const value = process.env[key];

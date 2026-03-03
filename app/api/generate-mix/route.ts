@@ -124,6 +124,12 @@ async function uploadNarrationAudio(
     upsert: true,
   });
   if (error) {
+    if (error.message.toLowerCase().includes("bucket not found")) {
+      throw new Error(
+        `Narration upload failed: Supabase storage bucket "${bucket}" was not found. ` +
+          "Create the bucket or set SUPABASE_AUDIO_BUCKET to an existing bucket name."
+      );
+    }
     throw new Error(`Narration upload failed: ${error.message}`);
   }
 
