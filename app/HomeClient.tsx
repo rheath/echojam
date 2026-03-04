@@ -32,6 +32,7 @@ type JamRow = {
 
 type FlowStep = "landing" | "pickDuration" | "buildMix" | "generating" | "walk" | "end";
 type PickDurationPage = "narrator" | "routes";
+type NarratorFlowSource = "presetRoute" | "buildMix" | "walkEdit" | null;
 type CityOption = "salem" | "boston" | "concord";
 type TransportMode = "walk" | "drive";
 
@@ -310,7 +311,8 @@ const [audioDuration, setAudioDuration] = useState(0);
 const [connectedCount, setConnectedCount] = useState(0);
 const [selectedRouteId, setSelectedRouteId] = useState<RouteDef["id"] | null>(null);
 const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
-const [pickDurationPage, setPickDurationPage] = useState<PickDurationPage>("narrator");
+const [pickDurationPage, setPickDurationPage] = useState<PickDurationPage>("routes");
+const [narratorFlowSource, setNarratorFlowSource] = useState<NarratorFlowSource>(null);
 const [selectedCity, setSelectedCity] = useState<CityOption>("salem");
 const [builderSelectedStops, setBuilderSelectedStops] = useState<CustomMixStop[]>([]);
 const [buildMixOrderedStops, setBuildMixOrderedStops] = useState<CustomMixStop[]>([]);
@@ -327,6 +329,7 @@ const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
 const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
 const [isGeneratingScriptForModal, setIsGeneratingScriptForModal] = useState(false);
 const [isGeneratingAudioForCurrentStop, setIsGeneratingAudioForCurrentStop] = useState(false);
+const [isBackfillingNarratorAudio, setIsBackfillingNarratorAudio] = useState(false);
 const [isGeneratingNearbyStory, setIsGeneratingNearbyStory] = useState(false);
 const [isResolvingNearbyGeo, setIsResolvingNearbyGeo] = useState(false);
 const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
@@ -503,7 +506,11 @@ const previousStepRef = useRef<FlowStep>("landing");
     }
 
     // Decide which screen we’re on
-    if (!data.route_id) setStep("pickDuration");
+    if (!data.route_id) {
+      setPickDurationPage("routes");
+      setNarratorFlowSource(null);
+      setStep("pickDuration");
+    }
     else if (data.completed_at) setStep("end");
     else setStep("walk");
   }
@@ -547,7 +554,10 @@ const previousStepRef = useRef<FlowStep>("landing");
     if (!opts?.skipStep) {
       // Put it in URL like your existing flow
       router.replace(`/?jam=${data.id}`);
-      if (!routeId) setStep("pickDuration");
+      if (!routeId) {
+        setPickDurationPage("routes");
+        setStep("pickDuration");
+      }
       else setStep("walk");
     }
     return data.id as string;
@@ -573,15 +583,80 @@ const previousStepRef = useRef<FlowStep>("landing");
     return true;
   }
 
+  async function backfillNarratorAudioForMissingStops(nextPersona: Persona) {
+    if (!jam?.route_id || !route) return;
+    const missingStops = route.stops.filter((stop) => !(stop.audio[nextPersona] || "").trim());
+    if (missingStops.length === 0) return;
+
+    const isPresetRoute = !jam.route_id.startsWith("custom:");
+    const customRouteId = isPresetRoute ? null : getCustomRouteId(jam.route_id);
+    if (!isPresetRoute && !customRouteId) {
+      setErr("Failed to resolve custom route for narrator audio generation.");
+      return;
+    }
+
+    setIsBackfillingNarratorAudio(true);
+    setErr(null);
+    let failedCount = 0;
+    let generatedCount = 0;
+    for (const stop of missingStops) {
+      try {
+        const endpoint = isPresetRoute ? "/api/preset-audio/generate" : "/api/custom-audio/generate";
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            routeId: isPresetRoute ? jam.route_id : customRouteId,
+            stopId: stop.id,
+            persona: nextPersona,
+            city: selectedCity,
+          }),
+        });
+        const body = (await res.json()) as { error?: string };
+        if (!res.ok) {
+          failedCount += 1;
+          console.warn("Failed to backfill narrator audio", { stopId: stop.id, error: body.error || "unknown" });
+          continue;
+        }
+        generatedCount += 1;
+      } catch {
+        failedCount += 1;
+      }
+    }
+
+    if (generatedCount > 0) {
+      try {
+        await loadResolvedRoute(jam.route_id);
+      } catch {
+        // Keep walk state even if route refresh fails.
+      }
+    }
+    if (failedCount > 0) {
+      setErr(`Updated narrator, but ${failedCount} stop audio file(s) failed to generate.`);
+    }
+    setIsBackfillingNarratorAudio(false);
+  }
+
   async function handleNarratorSelect(nextPersona: Persona) {
     setSelectedPersona(nextPersona);
     if (returnToWalkOnClose && jam?.route_id) {
       const updated = await updateJam({ persona: nextPersona });
       if (!updated) return;
       setReturnToWalkOnClose(false);
+      setNarratorFlowSource(null);
       setStep("walk");
+      void backfillNarratorAudioForMissingStops(nextPersona);
       return;
     }
+    if (narratorFlowSource === "presetRoute" && selectedRouteId) {
+      await startPresetTour(selectedRouteId, nextPersona);
+      return;
+    }
+    if (narratorFlowSource === "buildMix") {
+      await startCustomMixGeneration(builderSelectedStops, nextPersona);
+      return;
+    }
+    setNarratorFlowSource(null);
     setPickDurationPage("routes");
   }
 
@@ -598,6 +673,8 @@ const previousStepRef = useRef<FlowStep>("landing");
     setGenerationJobKind(null);
     setIsScriptModalOpen(false);
     setReturnToWalkOnClose(false);
+    setNarratorFlowSource(null);
+    setPickDurationPage("routes");
     setStep("landing");
   }
 
@@ -605,9 +682,26 @@ const previousStepRef = useRef<FlowStep>("landing");
     if (returnToWalkOnClose && jam?.route_id) {
       setStep("walk");
       setReturnToWalkOnClose(false);
+      setNarratorFlowSource(null);
       return;
     }
+    setNarratorFlowSource(null);
     goHome();
+  }
+
+  function closeNarratorPicker() {
+    if (returnToWalkOnClose && jam?.route_id) {
+      setStep("walk");
+      setReturnToWalkOnClose(false);
+      setNarratorFlowSource(null);
+      return;
+    }
+    if (narratorFlowSource === "buildMix") {
+      setStep("buildMix");
+      return;
+    }
+    setNarratorFlowSource(null);
+    setPickDurationPage("routes");
   }
 
   function getCustomRouteId(routeRef: string | null | undefined) {
@@ -860,6 +954,8 @@ async function startStopNarration() {
     if (!jamId) {
       jamId = await createJam(routeId, personaSelection, { skipStep: true });
       if (!jamId) {
+        setPickDurationPage("narrator");
+        setNarratorFlowSource("presetRoute");
         setStep("pickDuration");
         return;
       }
@@ -905,6 +1001,8 @@ async function startStopNarration() {
         setErr(e instanceof Error ? e.message : "Failed to generate preset tour");
       }
       setGenerationJobKind(null);
+      setPickDurationPage("narrator");
+      setNarratorFlowSource("presetRoute");
       setStep("pickDuration");
     }
   }
@@ -914,10 +1012,10 @@ async function startStopNarration() {
     await startPresetTour(selectedRouteId, selectedPersona);
   }
 
-  async function startTourFromRoute(routeId: RouteDef["id"]) {
-    if (!selectedPersona) return;
+  function startTourFromRoute(routeId: RouteDef["id"]) {
     setSelectedRouteId(routeId);
-    await startPresetTour(routeId, selectedPersona);
+    setNarratorFlowSource("presetRoute");
+    setPickDurationPage("narrator");
   }
 
   function toggleBuilderStop(stop: CustomMixStop) {
@@ -1008,9 +1106,10 @@ async function startStopNarration() {
     }
   }
 
-  async function startCustomMixGeneration(stopsOverride?: CustomMixStop[]) {
+  async function startCustomMixGeneration(stopsOverride?: CustomMixStop[], personaOverride?: Persona) {
     const stopsToGenerate = prioritizeOverviewById(stopsOverride ?? builderSelectedStops);
-    if (!stopsToGenerate.length || !selectedPersona) return;
+    const personaForGeneration = personaOverride ?? selectedPersona;
+    if (!stopsToGenerate.length || !personaForGeneration) return;
     const validation = validateMixSelection(30, "walk", stopsToGenerate.length);
     if (!validation.ok) {
       setErr(validation.message);
@@ -1032,7 +1131,7 @@ async function startStopNarration() {
             city: selectedCity,
             transportMode: "walk",
             lengthMinutes: 30,
-            persona: selectedPersona,
+            persona: personaForGeneration,
             stops: stopsToGenerate,
           }),
         },
@@ -1399,16 +1498,20 @@ async function startStopNarration() {
 
   useEffect(() => {
     if (step !== "pickDuration") return;
-    setPickDurationPage("narrator");
-    const cameFromLanding = previousStepRef.current === "landing";
     if (returnToWalkOnClose && jam?.route_id) {
       const routeId = salemRoutes.some((r) => r.id === jam.route_id) ? jam.route_id : null;
       setSelectedRouteId(routeId);
       setSelectedPersona((jam.persona ?? null) as Persona | null);
+      setNarratorFlowSource("walkEdit");
+      setPickDurationPage("narrator");
       return;
     }
-    setSelectedRouteId(null);
-    if (cameFromLanding) setSelectedPersona(null);
+    if (previousStepRef.current === "landing") {
+      setPickDurationPage("routes");
+      setSelectedRouteId(null);
+      setSelectedPersona(null);
+      setNarratorFlowSource(null);
+    }
   }, [step, returnToWalkOnClose, jam?.route_id, jam?.persona]);
 
   useEffect(() => {
@@ -1420,7 +1523,7 @@ async function startStopNarration() {
     if (!isEditingStopsFromWalk) {
       setBuilderSelectedStops([]);
       setBuildMixOrderedStops(availableStopsForCity);
-      setSelectedPersona("adult");
+      setSelectedPersona(null);
     }
     setGenerationJobId(null);
     setGenerationJobKind(null);
@@ -1571,6 +1674,8 @@ async function startStopNarration() {
               type="button"
               onClick={() => {
                 setSelectedCity("salem");
+                setPickDurationPage("routes");
+                setNarratorFlowSource(null);
                 setStep("pickDuration");
               }}
             >
@@ -1600,7 +1705,8 @@ async function startStopNarration() {
               <button
                 onClick={() => {
                   setSelectedCity("salem");
-                  setStep("pickDuration");
+                  setNarratorFlowSource(null);
+                  setStep("buildMix");
                 }}
                 className={styles.landingCtaButton}
               >
@@ -1650,7 +1756,7 @@ async function startStopNarration() {
           {pickDurationPage === "narrator" ? (
             <>
               <section className={`${styles.pickInfo} ${styles.pickInfoSelectRoute}`}>
-                <button onClick={closeRoutePicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Back">
+                <button onClick={closeNarratorPicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Back">
                   <Image
                     src="/icons/arrow-left.svg"
                     alt=""
@@ -1735,7 +1841,7 @@ async function startStopNarration() {
                   cityCenter={selectedCityCenter}
                   followCurrentStop={false}
                 />
-                <button onClick={closeRoutePicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`} aria-label="Back">
+                <button onClick={closeNarratorPicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`} aria-label="Back">
                   <Image
                     src="/icons/arrow-left.svg"
                     alt=""
@@ -1750,7 +1856,7 @@ async function startStopNarration() {
           ) : (
             <>
               <section className={`${styles.pickInfo} ${styles.pickInfoSelectRoute}`}>
-                <button onClick={() => setPickDurationPage("narrator")} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Back to narrators">
+                <button onClick={closeRoutePicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Back">
                   <Image
                     src="/icons/arrow-left.svg"
                     alt=""
@@ -1774,7 +1880,7 @@ async function startStopNarration() {
                     <button
                       key={r.id}
                       onClick={() => {
-                        void startTourFromRoute(r.id);
+                        startTourFromRoute(r.id);
                       }}
                       className={`${styles.pickRouteRow} ${selectedRouteId === r.id ? styles.pickRouteRowSelected : ""}`}
                     >
@@ -1816,7 +1922,10 @@ async function startStopNarration() {
                   ))}
                   <button
                     type="button"
-                    onClick={() => setStep("buildMix")}
+                    onClick={() => {
+                      setNarratorFlowSource(null);
+                      setStep("buildMix");
+                    }}
                     className={styles.pickRouteRow}
                     >
                       <div className={styles.pickRouteMainWithIcon}>
@@ -1857,7 +1966,7 @@ async function startStopNarration() {
                   cityCenter={selectedCityCenter}
                   followCurrentStop={false}
                 />
-                <button onClick={() => setPickDurationPage("narrator")} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`} aria-label="Back to narrators">
+                <button onClick={closeRoutePicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`} aria-label="Back">
                   <Image
                     src="/icons/arrow-left.svg"
                     alt=""
@@ -1993,12 +2102,18 @@ async function startStopNarration() {
                     void saveEditedStopsFromWalk();
                     return;
                   }
-                  void startCustomMixGeneration();
+                  if (!selectionValidation.ok) {
+                    setErr(selectionValidation.message);
+                    return;
+                  }
+                  setNarratorFlowSource("buildMix");
+                  setPickDurationPage("narrator");
+                  setStep("pickDuration");
                 }}
-                disabled={!selectionValidation.ok || !selectedPersona || isGeneratingMix}
+                disabled={!selectionValidation.ok || isGeneratingMix}
                 className={`${styles.landingCtaButton} ${styles.startTourButton}`}
               >
-                {isEditingStopsFromWalk ? (hasOffRouteAddsInEdit ? "Save Tour" : "Save Tour") : "Save Tour"}
+                {isEditingStopsFromWalk ? "Save Tour" : "Continue"}
               </button>
             </div>
           </section>
@@ -2076,7 +2191,15 @@ async function startStopNarration() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setStep(generationJobKind === "preset" ? "pickDuration" : "buildMix")}
+                      onClick={() => {
+                        if (generationJobKind === "preset") {
+                          setNarratorFlowSource(null);
+                          setPickDurationPage("routes");
+                          setStep("pickDuration");
+                          return;
+                        }
+                        setStep("buildMix");
+                      }}
                       className={styles.pickBuildMixButton}
                     >
                       {generationJobKind === "preset" ? "Back to routes" : "Back to editor"}
@@ -2121,6 +2244,8 @@ async function startStopNarration() {
                   className={`${styles.walkNarratorAvatarWrap} ${styles.walkNarratorAvatarButton}`}
                   onClick={() => {
                     setReturnToWalkOnClose(true);
+                    setNarratorFlowSource("walkEdit");
+                    setPickDurationPage("narrator");
                     setStep("pickDuration");
                   }}
                   aria-label="Edit narrator"
@@ -2137,6 +2262,8 @@ async function startStopNarration() {
                   type="button"
                   onClick={() => {
                     setReturnToWalkOnClose(true);
+                    setNarratorFlowSource("walkEdit");
+                    setPickDurationPage("narrator");
                     setStep("pickDuration");
                   }}
                 >
@@ -2266,6 +2393,9 @@ async function startStopNarration() {
                               ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
                               : "Audio not generated yet"}
                       </div>
+                      {isBackfillingNarratorAudio ? (
+                        <div className={styles.nowPlayingSubtitle}>Generating narrator audio for missing stops...</div>
+                      ) : null}
                       {hasCurrentAudio ? (
                         <a
                           className={styles.nowPlayingInlineLink}

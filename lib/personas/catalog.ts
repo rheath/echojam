@@ -12,10 +12,10 @@ export const personaCatalog = {
   },
   preteen: {
     prompt: mainCharacterPersonaPrompt,
-    displayName: "AI Main Character",
-    description: "Story-led and playful",
+    displayName: "AI Explore Mode",
+    description: "Adventures made for curious kids.",
     avatarSrc: "/images/avatars/ai-main-character.png",
-    avatarAlt: "AI Main Character avatar",
+    avatarAlt: "AI Explore Mode avatar",
   },
   ghost: {
     prompt: ghostWhispererPersonaPrompt,
