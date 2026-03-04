@@ -252,7 +252,7 @@ export function fallbackScript(city: string, persona: Persona, stop: StopInput, 
       personaPrompt.fallbackTemplate.line1(stop.title),
       personaPrompt.fallbackTemplate.line2,
       personaPrompt.fallbackTemplate.line3(city),
-      personaPrompt.fallbackTemplate.line4(index + 2),
+      personaPrompt.fallbackTemplate.line4,
     ].join(" ");
   }
 
@@ -261,6 +261,6 @@ export function fallbackScript(city: string, persona: Persona, stop: StopInput, 
     ghostPrompt.fallbackTemplate.line1(stop.title, city),
     ghostPrompt.fallbackTemplate.line2,
     ghostPrompt.fallbackTemplate.line3,
-    ghostPrompt.fallbackTemplate.line4(index + 2),
+    ghostPrompt.fallbackTemplate.line4,
   ].join(" ");
 }
