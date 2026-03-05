@@ -30,9 +30,9 @@ type JamRow = {
   position_ms?: number | null;
 };
 
-type FlowStep = "landing" | "pickDuration" | "buildMix" | "generating" | "walk" | "end";
+type FlowStep = "landing" | "presetRoutes" | "pickDuration" | "buildMix" | "generating" | "walk" | "end";
 type PickDurationPage = "narrator" | "routes";
-type NarratorFlowSource = "presetRoute" | "buildMix" | "walkEdit" | null;
+type NarratorFlowSource = "buildMix" | "walkEdit" | null;
 type CityOption = "salem" | "boston" | "concord";
 type TransportMode = "walk" | "drive";
 
@@ -359,6 +359,7 @@ const previousStepRef = useRef<FlowStep>("landing");
     [customRoute, jam?.route_id]
   );
   const persona: Persona = (jam?.persona ?? "adult") as Persona;
+  const isPresetWalkRoute = Boolean(jam?.route_id && !jam.route_id.startsWith("custom:"));
 
   const currentStopIndex = useMemo(() => {
     if (!route || activeStopIndex === null) return null;
@@ -509,7 +510,7 @@ const previousStepRef = useRef<FlowStep>("landing");
     if (!data.route_id) {
       setPickDurationPage("routes");
       setNarratorFlowSource(null);
-      setStep("pickDuration");
+      setStep("presetRoutes");
     }
     else if (data.completed_at) setStep("end");
     else setStep("walk");
@@ -648,10 +649,6 @@ const previousStepRef = useRef<FlowStep>("landing");
       void backfillNarratorAudioForMissingStops(nextPersona);
       return;
     }
-    if (narratorFlowSource === "presetRoute" && selectedRouteId) {
-      await startPresetTour(selectedRouteId, nextPersona);
-      return;
-    }
     if (narratorFlowSource === "buildMix") {
       await startCustomMixGeneration(builderSelectedStops, nextPersona);
       return;
@@ -763,11 +760,12 @@ const previousStepRef = useRef<FlowStep>("landing");
       title: payload.route.title,
       durationLabel: `${payload.route.length_minutes} mins`,
       description: `${payload.route.transport_mode === "drive" ? "Drive" : "Walk"} • ${landmarkStops.length} stops`,
+      defaultPersona: isCustom ? ((jam?.persona ?? "adult") as Persona) : (presetRoute?.defaultPersona ?? "adult"),
       stops: prioritizeOverviewById(mappedStops),
     };
     setCustomRoute(nextRoute);
     return nextRoute;
-  }, [selectedCity]);
+  }, [selectedCity, jam?.persona]);
 
   // ---------- "Start stop” handler ----------
 async function startStopNarration() {
@@ -954,9 +952,7 @@ async function startStopNarration() {
     if (!jamId) {
       jamId = await createJam(routeId, personaSelection, { skipStep: true });
       if (!jamId) {
-        setPickDurationPage("narrator");
-        setNarratorFlowSource("presetRoute");
-        setStep("pickDuration");
+        setStep("presetRoutes");
         return;
       }
     } else {
@@ -1001,9 +997,7 @@ async function startStopNarration() {
         setErr(e instanceof Error ? e.message : "Failed to generate preset tour");
       }
       setGenerationJobKind(null);
-      setPickDurationPage("narrator");
-      setNarratorFlowSource("presetRoute");
-      setStep("pickDuration");
+      setStep("presetRoutes");
     }
   }
 
@@ -1013,9 +1007,14 @@ async function startStopNarration() {
   }
 
   function startTourFromRoute(routeId: RouteDef["id"]) {
+    const selectedRoute = getRouteById(routeId);
+    if (!selectedRoute) {
+      setErr("Unknown preset route");
+      return;
+    }
     setSelectedRouteId(routeId);
-    setNarratorFlowSource("presetRoute");
-    setPickDurationPage("narrator");
+    setSelectedPersona(selectedRoute.defaultPersona);
+    void startPresetTour(routeId, selectedRoute.defaultPersona);
   }
 
   function toggleBuilderStop(stop: CustomMixStop) {
@@ -1109,11 +1108,11 @@ async function startStopNarration() {
   async function startCustomMixGeneration(stopsOverride?: CustomMixStop[], personaOverride?: Persona) {
     const stopsToGenerate = prioritizeOverviewById(stopsOverride ?? builderSelectedStops);
     const personaForGeneration = personaOverride ?? selectedPersona;
-    if (!stopsToGenerate.length || !personaForGeneration) return;
+    if (!stopsToGenerate.length || !personaForGeneration) return false;
     const validation = validateMixSelection(30, "walk", stopsToGenerate.length);
     if (!validation.ok) {
       setErr(validation.message);
-      return;
+      return false;
     }
 
     setErr(null);
@@ -1146,10 +1145,12 @@ async function startStopNarration() {
       setGenerationStatusLabel(GENERATION_STATUS_LABELS.queued);
       setGenerationMessage("Queued");
       router.replace(`/?jam=${body.jamId}`);
+      return true;
     } catch (e) {
       setGenerationJobKind(null);
       setErr(e instanceof Error ? e.message : "Failed to generate custom mix");
       setStep("buildMix");
+      return false;
     } finally {
       setIsGeneratingMix(false);
     }
@@ -1176,9 +1177,11 @@ async function startStopNarration() {
   async function saveEditedStopsFromWalk() {
     if (!route) return;
     if (hasOffRouteAddsInEdit) {
-      setIsEditingStopsFromWalk(false);
-      setReturnToWalkOnClose(false);
-      await startCustomMixGeneration(builderSelectedStops);
+      const started = await startCustomMixGeneration(builderSelectedStops);
+      if (started) {
+        setIsEditingStopsFromWalk(false);
+        setReturnToWalkOnClose(false);
+      }
       return;
     }
     const stopById = new Map(route.stops.map((s) => [s.id, s]));
@@ -1569,7 +1572,7 @@ async function startStopNarration() {
   }, [jam?.id]);
 
   useEffect(() => {
-    if (!["landing", "pickDuration", "buildMix", "generating", "walk"].includes(step)) return;
+    if (!["landing", "presetRoutes", "pickDuration", "buildMix", "generating", "walk"].includes(step)) return;
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [step]);
 
@@ -1626,14 +1629,15 @@ async function startStopNarration() {
     const base = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=walking`;
     return waypoints ? `${base}&waypoints=${encodeURIComponent(waypoints)}` : base;
   }, [route]);
+  const buildMixSubmitDisabled = isEditingStopsFromWalk ? isGeneratingMix : (!selectionValidation.ok || isGeneratingMix);
 
   // ---------- UI ----------
   return (
-    <div className={`${styles.container} ${step === "walk" || step === "landing" || step === "pickDuration" || step === "buildMix" || step === "generating" ? styles.containerWide : ""}`}>
-      {step !== "walk" && step !== "landing" && step !== "pickDuration" && step !== "buildMix" && step !== "generating" && (
+    <div className={`${styles.container} ${step === "walk" || step === "landing" || step === "presetRoutes" || step === "pickDuration" || step === "buildMix" || step === "generating" ? styles.containerWide : ""}`}>
+      {step !== "walk" && step !== "landing" && step !== "presetRoutes" && step !== "pickDuration" && step !== "buildMix" && step !== "generating" && (
         <header className={styles.header}>
           <div>
-            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.brandTitle}`}>MixTours</button>
+            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.brandTitle}`}>Wandrful</button>
           </div>
 
           <div className={styles.headerActions}>
@@ -1659,7 +1663,7 @@ async function startStopNarration() {
       {step === "landing" && (
         <main className={styles.landingLayout}>
           <section className={styles.landingInfo}>
-            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>MixTours</button>
+            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>Wandrful</button>
             <div className={styles.landingCopyBlock}>
               <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets.</h1>
               <p className={styles.landingCopy}>
@@ -1667,7 +1671,7 @@ async function startStopNarration() {
               </strong></p>
             </div>
 
-            <div className={styles.landingPopular}>Popular tour mixes:</div>
+            <div className={styles.landingPopular}>Featured mixes:</div>
 
             <button
               className={styles.landingTourRow}
@@ -1676,7 +1680,9 @@ async function startStopNarration() {
                 setSelectedCity("salem");
                 setPickDurationPage("routes");
                 setNarratorFlowSource(null);
-                setStep("pickDuration");
+                setSelectedRouteId(null);
+                setSelectedPersona(null);
+                setStep("presetRoutes");
               }}
             >
               <div className={styles.landingTourText}>
@@ -1748,7 +1754,99 @@ async function startStopNarration() {
       {hasCurrentAudio ? "Start stop" : "Audio pending"}
     </button>
   </div>
-)}
+      )}
+
+      {step === "presetRoutes" && (
+        <main className={styles.pickLayout}>
+          <section className={`${styles.pickInfo} ${styles.pickInfoSelectRoute}`}>
+            <button onClick={goHome} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Back">
+              <Image
+                src="/icons/arrow-left.svg"
+                alt=""
+                width={26}
+                height={26}
+                className={styles.mapBackIconDark}
+                aria-hidden="true"
+              />
+            </button>
+            <div className={styles.pickCopyBlock}>
+              <h2 className={styles.pickHeading}>
+                Choose a preset route in{" "}
+                <button type="button" className={styles.pickHeadingCityLink} onClick={goHome}>
+                  {selectedCityLabel}
+                </button>
+              </h2>
+            </div>
+
+            <div className={styles.pickRouteList}>
+              {salemRoutes.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => {
+                    startTourFromRoute(r.id);
+                  }}
+                  className={`${styles.pickRouteRow} ${selectedRouteId === r.id ? styles.pickRouteRowSelected : ""}`}
+                >
+                  <div className={styles.pickRouteMainWithIcon}>
+                    <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                      <Image
+                        src={
+                          r.id === "salem-core-15"
+                            ? "/icons/lightning-fill.svg"
+                            : r.id === "salem-deepdive-60"
+                              ? "/icons/layers.svg"
+                              : "/icons/person-walking.svg"
+                        }
+                        alt=""
+                        width={24}
+                        height={24}
+                        className={styles.pickRouteWalkIcon}
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <div className={styles.pickRouteMain}>
+                      <div className={styles.pickRouteTitle}>{r.title}</div>
+                      <div className={styles.pickRouteMeta}>
+                        {r.durationLabel} • {r.stops.length} stops • {formatRouteMiles(getRouteMiles(r.stops))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={styles.pickRowArrow} aria-hidden="true">
+                    <Image
+                      src="/icons/chevron-right.svg"
+                      alt=""
+                      width={28}
+                      height={28}
+                      className={styles.landingArrowIcon}
+                      aria-hidden="true"
+                    />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className={styles.pickImagePane}>
+            <RouteMap
+              stops={selectedRoute ? selectedRoute.stops : []}
+              currentStopIndex={0}
+              myPos={myPos}
+              cityCenter={selectedCityCenter}
+              followCurrentStop={false}
+            />
+            <button onClick={goHome} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`} aria-label="Back">
+              <Image
+                src="/icons/arrow-left.svg"
+                alt=""
+                width={26}
+                height={26}
+                className={styles.mapBackIconDark}
+                aria-hidden="true"
+              />
+            </button>
+          </section>
+        </main>
+      )}
 
       {/* PICK DURATION */}
       {step === "pickDuration" && (
@@ -2110,7 +2208,7 @@ async function startStopNarration() {
                   setPickDurationPage("narrator");
                   setStep("pickDuration");
                 }}
-                disabled={!selectionValidation.ok || isGeneratingMix}
+                disabled={buildMixSubmitDisabled}
                 className={`${styles.landingCtaButton} ${styles.startTourButton}`}
               >
                 {isEditingStopsFromWalk ? "Save Tour" : "Continue"}
@@ -2194,8 +2292,7 @@ async function startStopNarration() {
                       onClick={() => {
                         if (generationJobKind === "preset") {
                           setNarratorFlowSource(null);
-                          setPickDurationPage("routes");
-                          setStep("pickDuration");
+                          setStep("presetRoutes");
                           return;
                         }
                         setStep("buildMix");
@@ -2239,51 +2336,69 @@ async function startStopNarration() {
           <div className={styles.rightRail}>
             <div className={styles.walkCard}>
               <div className={styles.walkMetaRow}>
-                <button
-                  type="button"
-                  className={`${styles.walkNarratorAvatarWrap} ${styles.walkNarratorAvatarButton}`}
-                  onClick={() => {
-                    setReturnToWalkOnClose(true);
-                    setNarratorFlowSource("walkEdit");
-                    setPickDurationPage("narrator");
-                    setStep("pickDuration");
-                  }}
-                  aria-label="Edit narrator"
-                >
-                  <Image
-                    src={personaCatalog[persona].avatarSrc}
-                    alt={personaCatalog[persona].avatarAlt}
-                    fill
-                    className={styles.walkNarratorAvatar}
-                  />
-                </button>
-                <button
-                  className={`${styles.walkNarrator} ${styles.walkNarratorButton}`}
-                  type="button"
-                  onClick={() => {
-                    setReturnToWalkOnClose(true);
-                    setNarratorFlowSource("walkEdit");
-                    setPickDurationPage("narrator");
-                    setStep("pickDuration");
-                  }}
-                >
-                  Narrated by <span className={styles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
-                </button>
+                {isPresetWalkRoute ? (
+                  <>
+                    <div className={styles.walkNarratorAvatarWrap}>
+                      <Image
+                        src={personaCatalog[persona].avatarSrc}
+                        alt={personaCatalog[persona].avatarAlt}
+                        fill
+                        className={styles.walkNarratorAvatar}
+                      />
+                    </div>
+                    <div className={styles.walkNarrator}>
+                      Narrated by <span className={styles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className={`${styles.walkNarratorAvatarWrap} ${styles.walkNarratorAvatarButton}`}
+                      onClick={() => {
+                        setReturnToWalkOnClose(true);
+                        setNarratorFlowSource("walkEdit");
+                        setPickDurationPage("narrator");
+                        setStep("pickDuration");
+                      }}
+                      aria-label="Edit narrator"
+                    >
+                      <Image
+                        src={personaCatalog[persona].avatarSrc}
+                        alt={personaCatalog[persona].avatarAlt}
+                        fill
+                        className={styles.walkNarratorAvatar}
+                      />
+                    </button>
+                    <button
+                      className={`${styles.walkNarrator} ${styles.walkNarratorButton}`}
+                      type="button"
+                      onClick={() => {
+                        setReturnToWalkOnClose(true);
+                        setNarratorFlowSource("walkEdit");
+                        setPickDurationPage("narrator");
+                        setStep("pickDuration");
+                      }}
+                    >
+                      Narrated by <span className={styles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
+                    </button>
+                  </>
+                )}
               </div>
             <h1 className={styles.walkHeadline}>{route.title}</h1>
             <div className={styles.walkSubline}>
-              <span>{connectedCount} {connectedCount === 1 ? "person" : "people"} connected  •  {route.durationLabel} / {routeMilesLabel}</span>
+              <span>{connectedCount} {connectedCount === 1 ? "person" : "people"} listening  •  {route.durationLabel} / {routeMilesLabel}</span>
             </div>
 
               <div className={styles.walkActionRow}>
-                <button className={styles.pillButton} type="button" onClick={copyShareLink}>Share to ...</button>
+                <button className={styles.pillButton} type="button" onClick={copyShareLink}>Share</button>
                  
                 <button
                 className={styles.pillButton}
                 type="button"
                 onClick={openEditStopsFromWalk} 
               >
-                Edit Stops
+                Edit
               </button>
                 {NEARBY_STORY_ENABLED && (
                   <button
@@ -2298,7 +2413,7 @@ async function startStopNarration() {
                       ? "Locating..."
                       : isGeneratingNearbyStory
                         ? "Generating..."
-                        : "Tell me about this place"}
+                        : "Instant*"}
                   </button>
                 )}
                 <button

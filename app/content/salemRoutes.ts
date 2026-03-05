@@ -21,6 +21,7 @@ export type RouteDef = {
   title: string;
   durationLabel: string;
   description: string;
+  defaultPersona: Persona;
   stops: Stop[];
 };
 
@@ -139,6 +140,7 @@ export const salemRoutes: RouteDef[] = [
     title: "Speed Walker",
     durationLabel: "15 mins",
     description: "A tight loop of Salem’s essential landmarks—quick, iconic, easy.",
+    defaultPersona: "adult",
     stops: speedWalkerStops,
   },
 
@@ -147,6 +149,7 @@ export const salemRoutes: RouteDef[] = [
     title: "The Stroll",
     durationLabel: "30 mins",
     description: "More context, more texture—how Salem became Salem.",
+    defaultPersona: "adult",
     stops: strollStops,
   },
 
@@ -155,6 +158,7 @@ export const salemRoutes: RouteDef[] = [
     title: "Deep Dive",
     durationLabel: "60 mins",
     description: "A fuller arc: landmarks + hidden context + the ‘why it matters’ layer.",
+    defaultPersona: "adult",
     stops: deepDiveStops,
   },
 ];
