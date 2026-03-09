@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { getJamSharePayload } from "@/lib/server/jamShare";
 import { getSiteBaseUrl, toAbsoluteUrl } from "@/lib/server/siteUrl";
@@ -26,7 +28,11 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
   const backgroundUrl = payload.posterBackgroundImageUrl
     ? toAbsoluteUrl(payload.posterBackgroundImageUrl, baseUrl)
     : null;
-  const logoUrl = toAbsoluteUrl("/images/marketing/Wandrful-logo-v2.svg", baseUrl);
+  const rawLogoSvg = await readFile(join(process.cwd(), "public/images/marketing/Wandrful-logo-v2.svg"), "utf8");
+  const whiteLogoSvg = rawLogoSvg
+    .replace(/fill="[^"]*"/gi, 'fill="#ffffff"')
+    .replace(/stroke="[^"]*"/gi, 'stroke="#ffffff"');
+  const logoDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(whiteLogoSvg)}`;
 
   return new ImageResponse(
     (
@@ -60,7 +66,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
             position: "absolute",
             inset: 0,
             background:
-              "linear-gradient(180deg, rgba(7, 8, 12, 0.22) 0%, rgba(7, 8, 12, 0.4) 30%, rgba(7, 8, 12, 0.72) 68%, rgba(7, 8, 12, 0.96) 100%)",
+              "linear-gradient(180deg, rgba(7, 8, 12, 0.5) 0%, rgba(7, 8, 12, 0.5) 100%)",
           }}
         />
 
@@ -69,7 +75,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
             position: "absolute",
             inset: 0,
             background:
-              "linear-gradient(90deg, rgba(7, 8, 12, 0.82) 0%, rgba(7, 8, 12, 0.42) 42%, rgba(7, 8, 12, 0.16) 68%, rgba(7, 8, 12, 0.18) 100%)",
+              "linear-gradient(90deg, rgba(7, 8, 12, 0.78) 0%, rgba(7, 8, 12, 0.48) 40%, rgba(7, 8, 12, 0.24) 68%, rgba(7, 8, 12, 0.28) 100%)",
           }}
         />
 
@@ -98,11 +104,11 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
           }}
         >
           <img
-            src={logoUrl}
+            src={logoDataUrl}
             alt="Wandrful"
             style={{
-              width: 122,
-              height: 28,
+              width: 183,
+              height: 42,
               objectFit: "contain",
             }}
           />
@@ -133,15 +139,6 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
             maxWidth: 760,
           }}
         >
-          <div
-            style={{
-              width: 96,
-              height: 6,
-              borderRadius: 999,
-              background: "#ff5f92",
-              marginBottom: 26,
-            }}
-          />
           <div
             style={{
               fontFamily: TITLE_FONT,
