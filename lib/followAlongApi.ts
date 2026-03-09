@@ -37,12 +37,35 @@ type GoogleGeocodeResponse = {
   error_message?: string;
 };
 
+type OsmReverseGeocodeResponse = {
+  display_name?: string;
+  error?: string;
+  address?: {
+    house_number?: string;
+    road?: string;
+    pedestrian?: string;
+    footway?: string;
+    path?: string;
+    neighbourhood?: string;
+    suburb?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    hamlet?: string;
+    municipality?: string;
+    county?: string;
+    state?: string;
+    postcode?: string;
+  };
+};
+
 export type FollowAlongDestinationSearchResult = FollowAlongLocation & {
   title: string;
   types: string[];
 };
 
 const GOOGLE_GEOCODE_ENDPOINT = "https://maps.googleapis.com/maps/api/geocode/json";
+const OSM_REVERSE_GEOCODE_ENDPOINT = "https://nominatim.openstreetmap.org/reverse";
 const CURRENT_LOCATION_LABEL = "Current location";
 
 function isFiniteCoord(lat: number, lng: number) {
@@ -94,6 +117,88 @@ function withDetectedOriginAddress(
     lat: coords.lat,
     lng: coords.lng,
   };
+}
+
+async function reverseGeocodeWithGoogle(
+  coords: { lat: number; lng: number }
+): Promise<string | null> {
+  const apiKey = (process.env.GOOGLE_PLACES_API_KEY || "").trim();
+  if (!apiKey) return null;
+
+  try {
+    const params = new URLSearchParams({
+      latlng: `${coords.lat},${coords.lng}`,
+      key: apiKey,
+    });
+    const res = await fetch(`${GOOGLE_GEOCODE_ENDPOINT}?${params.toString()}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+
+    const payload = (await res.json()) as GoogleGeocodeResponse;
+    if (payload.status && payload.status !== "OK" && payload.status !== "ZERO_RESULTS") {
+      return null;
+    }
+
+    return normalizeOptionalText(payload.results?.[0]?.formatted_address);
+  } catch {
+    return null;
+  }
+}
+
+function formatOsmAddress(payload: OsmReverseGeocodeResponse): string | null {
+  const streetName = normalizeOptionalText(
+    payload.address?.road ||
+      payload.address?.pedestrian ||
+      payload.address?.footway ||
+      payload.address?.path
+  );
+  const houseNumber = normalizeOptionalText(payload.address?.house_number);
+  const street = [houseNumber, streetName].filter(Boolean).join(" ").trim();
+  const locality = normalizeOptionalText(
+    payload.address?.city ||
+      payload.address?.town ||
+      payload.address?.village ||
+      payload.address?.hamlet ||
+      payload.address?.municipality ||
+      payload.address?.suburb ||
+      payload.address?.neighbourhood ||
+      payload.address?.county
+  );
+  const region = [normalizeOptionalText(payload.address?.state), normalizeOptionalText(payload.address?.postcode)]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const compact = [street, locality, region].filter(Boolean).join(", ").trim();
+  return normalizeOptionalText(compact) || normalizeOptionalText(payload.display_name);
+}
+
+async function reverseGeocodeWithOsm(
+  coords: { lat: number; lng: number }
+): Promise<string | null> {
+  try {
+    const params = new URLSearchParams({
+      format: "jsonv2",
+      lat: String(coords.lat),
+      lon: String(coords.lng),
+      zoom: "18",
+      addressdetails: "1",
+    });
+    const res = await fetch(`${OSM_REVERSE_GEOCODE_ENDPOINT}?${params.toString()}`, {
+      cache: "no-store",
+      headers: {
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": "EchoJam/1.0 (follow-along origin lookup)",
+      },
+    });
+    if (!res.ok) return null;
+
+    const payload = (await res.json()) as OsmReverseGeocodeResponse;
+    if (normalizeOptionalText(payload.error)) return null;
+    return formatOsmAddress(payload);
+  } catch {
+    return null;
+  }
 }
 
 export async function searchFollowAlongDestinations(
@@ -167,29 +272,17 @@ export async function reverseGeocodeFollowAlongOrigin(
     throw new Error("Valid origin coordinates are required.");
   }
 
-  const apiKey = (process.env.GOOGLE_PLACES_API_KEY || "").trim();
-  if (!apiKey) {
-    throw new Error("Google origin lookup is not configured.");
+  const googleAddress = await reverseGeocodeWithGoogle(coords);
+  if (googleAddress) {
+    return withDetectedOriginAddress(coords, googleAddress);
   }
 
-  const params = new URLSearchParams({
-    latlng: `${coords.lat},${coords.lng}`,
-    key: apiKey,
-  });
-  const res = await fetch(`${GOOGLE_GEOCODE_ENDPOINT}?${params.toString()}`, {
-    cache: "no-store",
-  });
-
-  if (!res.ok) {
-    throw new Error("Origin lookup failed.");
+  const osmAddress = await reverseGeocodeWithOsm(coords);
+  if (osmAddress) {
+    return withDetectedOriginAddress(coords, osmAddress);
   }
 
-  const payload = (await res.json()) as GoogleGeocodeResponse;
-  if (payload.status && payload.status !== "OK" && payload.status !== "ZERO_RESULTS") {
-    throw new Error(payload.error_message || "Origin lookup failed.");
-  }
-
-  return withDetectedOriginAddress(coords, payload.results?.[0]?.formatted_address);
+  return buildFollowAlongOrigin(coords);
 }
 
 export async function fetchDrivingRoutePreview(

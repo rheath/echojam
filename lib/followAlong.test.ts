@@ -48,14 +48,19 @@ test("reverseGeocodeFollowAlongOrigin returns a formatted address", async (t) =>
   const originalApiKey = process.env.GOOGLE_PLACES_API_KEY;
 
   process.env.GOOGLE_PLACES_API_KEY = "test-key";
-  global.fetch = (async () =>
-    new Response(
-      JSON.stringify({
-        status: "OK",
-        results: [{ formatted_address: "1 Main St, Boston, MA 02108, USA" }],
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    )) as typeof fetch;
+  global.fetch = (async (input) => {
+    const url = String(input);
+    if (url.startsWith("https://maps.googleapis.com/maps/api/geocode/json")) {
+      return new Response(
+        JSON.stringify({
+          status: "OK",
+          results: [{ formatted_address: "1 Main St, Boston, MA 02108, USA" }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  }) as typeof fetch;
 
   t.after(() => {
     global.fetch = originalFetch;
@@ -71,19 +76,13 @@ test("reverseGeocodeFollowAlongOrigin returns a formatted address", async (t) =>
   assert.equal(origin.subtitle, "Current location");
 });
 
-test("reverseGeocodeFollowAlongOrigin returns a null subtitle for zero results", async (t) => {
+test("reverseGeocodeFollowAlongOrigin returns a generic origin when no provider resolves an address", async (t) => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.GOOGLE_PLACES_API_KEY;
 
   process.env.GOOGLE_PLACES_API_KEY = "test-key";
   global.fetch = (async () =>
-    new Response(
-      JSON.stringify({
-        status: "ZERO_RESULTS",
-        results: [],
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    )) as typeof fetch;
+    new Response("service unavailable", { status: 503 })) as typeof fetch;
 
   t.after(() => {
     global.fetch = originalFetch;
@@ -97,6 +96,53 @@ test("reverseGeocodeFollowAlongOrigin returns a null subtitle for zero results",
 
   assert.equal(origin.label, "Current location");
   assert.equal(origin.subtitle, null);
+});
+
+test("reverseGeocodeFollowAlongOrigin falls back to OSM when Google geocoding is unavailable", async (t) => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.GOOGLE_PLACES_API_KEY;
+
+  process.env.GOOGLE_PLACES_API_KEY = "test-key";
+  global.fetch = (async (input) => {
+    const url = String(input);
+    if (url.startsWith("https://maps.googleapis.com/maps/api/geocode/json")) {
+      return new Response(
+        JSON.stringify({
+          status: "REQUEST_DENIED",
+          error_message: "This API project is not authorized to use this API.",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    if (url.startsWith("https://nominatim.openstreetmap.org/reverse")) {
+      return new Response(
+        JSON.stringify({
+          address: {
+            house_number: "24",
+            road: "Beacon St",
+            city: "Boston",
+            state: "MA",
+            postcode: "02108",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  }) as typeof fetch;
+
+  t.after(() => {
+    global.fetch = originalFetch;
+    process.env.GOOGLE_PLACES_API_KEY = originalApiKey;
+  });
+
+  const origin = await reverseGeocodeFollowAlongOrigin({
+    lat: 42.3601,
+    lng: -71.0589,
+  });
+
+  assert.equal(origin.label, "24 Beacon St, Boston, MA 02108");
+  assert.equal(origin.subtitle, "Current location");
 });
 
 test("sampleRoutePoints returns ordered samples along the route", () => {
@@ -205,26 +251,31 @@ test("fetchDrivingRoutePreview fills origin subtitle from start_address when mis
   const originalApiKey = process.env.GOOGLE_PLACES_API_KEY;
 
   process.env.GOOGLE_PLACES_API_KEY = "test-key";
-  global.fetch = (async () =>
-    new Response(
-      JSON.stringify({
-        status: "OK",
-        routes: [
-          {
-            overview_polyline: { points: "_p~iF~ps|U_ulLnnqC_mqNvxq`@" },
-            legs: [
-              {
-                distance: { value: 1600 },
-                duration: { value: 420 },
-                start_address: "10 Beacon St, Boston, MA 02108, USA",
-                end_address: "1 Charles St, Boston, MA 02114, USA",
-              },
-            ],
-          },
-        ],
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    )) as typeof fetch;
+  global.fetch = (async (input) => {
+    const url = String(input);
+    if (url.startsWith("https://maps.googleapis.com/maps/api/directions/json")) {
+      return new Response(
+        JSON.stringify({
+          status: "OK",
+          routes: [
+            {
+              overview_polyline: { points: "_p~iF~ps|U_ulLnnqC_mqNvxq`@" },
+              legs: [
+                {
+                  distance: { value: 1600 },
+                  duration: { value: 420 },
+                  start_address: "10 Beacon St, Boston, MA 02108, USA",
+                  end_address: "1 Charles St, Boston, MA 02114, USA",
+                },
+              ],
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  }) as typeof fetch;
 
   t.after(() => {
     global.fetch = originalFetch;

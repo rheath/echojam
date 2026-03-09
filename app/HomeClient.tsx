@@ -15,7 +15,6 @@ import {
   shouldTriggerFollowAlongStop,
   type FollowAlongLocation,
 } from "@/lib/followAlong";
-import { loadGoogleMapsLibraries } from "@/lib/googleMapsLoader";
 import dynamic from "next/dynamic";
 import styles from "./HomeClient.module.css";
 
@@ -1034,48 +1033,6 @@ const followAlongLastPositionRef = useRef<{
     };
   }
 
-  function toDetectedFollowAlongOrigin(
-    coords: { lat: number; lng: number },
-    address?: string | null
-  ): FollowAlongLocation {
-    const normalizedAddress = address?.trim();
-    if (!normalizedAddress) {
-      return toFollowAlongOrigin(coords);
-    }
-    return {
-      label: normalizedAddress,
-      subtitle: "Current location",
-      lat: coords.lat,
-      lng: coords.lng,
-    };
-  }
-
-  async function reverseGeocodeFollowAlongOriginClient(
-    coords: { lat: number; lng: number }
-  ): Promise<FollowAlongLocation | null> {
-    try {
-      await loadGoogleMapsLibraries();
-      const geocoder = new google.maps.Geocoder();
-      const results = await new Promise<google.maps.GeocoderResult[]>((resolve, reject) => {
-        geocoder.geocode({ location: coords }, (nextResults, status) => {
-          if (status === google.maps.GeocoderStatus.OK) {
-            resolve(nextResults ?? []);
-            return;
-          }
-          if (status === google.maps.GeocoderStatus.ZERO_RESULTS) {
-            resolve([]);
-            return;
-          }
-          reject(new Error(`Client origin lookup failed: ${status}`));
-        });
-      });
-
-      return toDetectedFollowAlongOrigin(coords, results[0]?.formatted_address);
-    } catch {
-      return null;
-    }
-  }
-
   async function resolveFollowAlongOrigin(
     coords: { lat: number; lng: number },
     sessionId: number
@@ -1087,15 +1044,6 @@ const followAlongLastPositionRef = useRef<{
     );
 
     try {
-      const clientOrigin = await reverseGeocodeFollowAlongOriginClient(coords);
-
-      if (sessionId !== followAlongSessionRef.current) return;
-
-      if (clientOrigin?.label && clientOrigin.label !== "Current location") {
-        setFollowAlongOrigin(clientOrigin);
-        return;
-      }
-
       const body = await fetchJsonWithTimeout<FollowAlongOriginResponse>(
         "/api/follow-along/origin",
         {
