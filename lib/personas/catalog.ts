@@ -20,10 +20,10 @@ export const personaCatalog = {
   },
   ghost: {
     prompt: ghostWhispererPersonaPrompt,
-    displayName: "AI Ghost Whisperer",
+    displayName: "AI Ghost Guide",
     description: "Eerie folklore, grounded in history",
     avatarSrc: "/images/avatars/ai-ghost-whisper.png",
-    avatarAlt: "AI Ghost Whisperer avatar",
+    avatarAlt: "AI Ghost Guide avatar",
   },
   custom: {
     prompt: customNarratorPersonaPrompt,

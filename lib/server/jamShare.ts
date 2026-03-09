@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getRouteById, type Persona } from "@/app/content/salemRoutes";
 import { cityPlaceholderImage, proxyGoogleImageUrl } from "@/lib/placesImages";
 import { personaCatalog } from "@/lib/personas/catalog";
+import { getPresetCityMeta } from "@/lib/presetOverview";
 
 type JamRow = {
   id: string;
@@ -32,6 +33,10 @@ export type JamSharePayload = {
   title: string;
   description: string;
   imageUrl: string;
+  posterTitle: string;
+  posterSubtitle: string;
+  posterBackgroundImageUrl: string | null;
+  city: string | null;
   canonicalPath: string;
   deepLinkPath: string;
 };
@@ -90,6 +95,15 @@ function parseRouteMinutes(durationLabel: string | null | undefined) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function formatStopCount(count: number) {
+  return `${count} Stop${count === 1 ? "" : "s"}`;
+}
+
+function makePosterSubtitle(stopCount: number, personaLabel: string | null) {
+  const storyBy = personaLabel || "EchoJam";
+  return `${formatStopCount(stopCount)} • Story by ${storyBy}`;
+}
+
 function fallbackPayload(jamId: string): JamSharePayload {
   return {
     jamFound: false,
@@ -97,6 +111,10 @@ function fallbackPayload(jamId: string): JamSharePayload {
     title: FALLBACK_TITLE,
     description: FALLBACK_DESCRIPTION,
     imageUrl: cityPlaceholderImage(DEFAULT_CITY),
+    posterTitle: "EchoJam",
+    posterSubtitle: FALLBACK_DESCRIPTION,
+    posterBackgroundImageUrl: null,
+    city: DEFAULT_CITY,
     canonicalPath: `/j/${encodeURIComponent(jamId)}`,
     deepLinkPath: `/?jam=${encodeURIComponent(jamId)}`,
   };
@@ -143,7 +161,26 @@ async function resolvePresetRouteSummary(routeId: string) {
   const route = getRouteById(routeId);
   if (!route) return null;
 
+  const stopsWithPlaceIds = route.stops.filter((stop) => (stop.googlePlaceId || "").trim().length > 0);
+  const cityMeta = route.city ? getPresetCityMeta(route.city) : null;
   const imageCandidates: string[] = [];
+
+  if (stopsWithPlaceIds.length > 0) {
+    let hash = 0;
+    for (let i = 0; i < route.id.length; i += 1) {
+      hash = (hash * 31 + route.id.charCodeAt(i)) >>> 0;
+    }
+    const index = hash % stopsWithPlaceIds.length;
+    const placeId = (stopsWithPlaceIds[index]?.googlePlaceId || "").trim();
+    if (placeId) {
+      imageCandidates.push(`/api/google-image?kind=place-id-photo&placeId=${encodeURIComponent(placeId)}&maxWidthPx=1400`);
+    }
+  }
+
+  if (cityMeta?.fallbackImage) {
+    imageCandidates.push(cityMeta.fallbackImage);
+  }
+
   for (const stop of route.stops) {
     for (const image of stop.images) imageCandidates.push(image);
   }
@@ -200,13 +237,14 @@ export const getJamSharePayload = cache(async (jamId: string): Promise<JamShareP
       ...fallbackPayload(jamId),
       jamFound: true,
       title: "EchoJam tour",
+      posterTitle: "EchoJam tour",
     };
   }
 
   const personaLabel = toPersonaLabel(jamRow.persona);
+  const posterSubtitle = makePosterSubtitle(summary.stopCount, personaLabel);
   const description = makeDescription([
-    personaLabel ? `${personaLabel} narration` : null,
-    summary.stopCount > 0 ? `${summary.stopCount} stop${summary.stopCount === 1 ? "" : "s"}` : null,
+    posterSubtitle,
     summary.minutes ? `${summary.minutes} mins` : null,
     summary.transportMode === "drive" ? "Drive route" : "Walk route",
   ]);
@@ -214,9 +252,13 @@ export const getJamSharePayload = cache(async (jamId: string): Promise<JamShareP
   return {
     jamFound: true,
     jamId,
-    title: `EchoJam: ${summary.routeTitle}`,
-    description: description || FALLBACK_DESCRIPTION,
+    title: summary.routeTitle,
+    description: description || posterSubtitle || FALLBACK_DESCRIPTION,
     imageUrl: summary.imageUrl,
+    posterTitle: summary.routeTitle,
+    posterSubtitle,
+    posterBackgroundImageUrl: isStrongImage(summary.imageUrl) ? summary.imageUrl : null,
+    city: summary.city,
     canonicalPath: `/j/${encodeURIComponent(jamId)}`,
     deepLinkPath: `/?jam=${encodeURIComponent(jamId)}`,
   };

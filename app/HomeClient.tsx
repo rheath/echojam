@@ -2571,7 +2571,13 @@ async function startStopNarration() {
             <div className={styles.landingVideoScrim} aria-hidden="true" />
             <div className={styles.landingMobileHeroContent}>
               <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand} ${styles.landingMobileBrand}`}>
-                Wandrful
+                <Image
+                  src="/images/marketing/Wandrful-logo-v2.svg"
+                  alt="Wandrful"
+                  width={65}
+                  height={60}
+                  className={styles.landingLogo}
+                />
               </button>
               <div className={`${styles.landingCopyBlock} ${styles.landingCopyBlockMobile}`}>
                 <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets</h1>
@@ -2584,7 +2590,15 @@ async function startStopNarration() {
 
           <section className={styles.landingInfo}>
             <div className={styles.landingDesktopIntro}>
-              <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>Wandrful</button>
+              <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>
+                <Image
+                  src="/images/marketing/Wandrful-logo.svg"
+                  alt="Wandrful"
+                  width={65}
+                  height={60}
+                  className={styles.landingLogo}
+                />
+              </button>
               <div className={styles.landingCopyBlock}>
                 <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets.</h1>
                 <p className={styles.landingCopy}>
@@ -2604,7 +2618,7 @@ async function startStopNarration() {
                     setSelectedCity(r.city ?? "salem");
                     void startPresetTourFromRoute(r.id);
                   }}
-                  aria-label={`${r.title}, ${formatStopCount(getPresetRouteStopCount(r))}, by ${personaCatalog[r.defaultPersona].displayName}`}
+                  aria-label={`${r.title}, ${formatStopCount(getPresetRouteStopCount(r))}, story by ${personaCatalog[r.defaultPersona].displayName}`}
                   className={`${styles.landingFeaturedCard} ${selectedRouteId === r.id ? styles.landingFeaturedCardSelected : ""}`}
                   style={{ backgroundImage: `url("${getLandingRouteImage(r)}")` }}
                 >
@@ -2630,7 +2644,7 @@ async function startStopNarration() {
                       <div className={styles.landingFeaturedCardMetaText}>
                         <div className={styles.landingFeaturedCardMetaPrimary}>{formatStopCount(getPresetRouteStopCount(r))}</div>
                         <div className={styles.landingFeaturedCardMetaSecondary}>
-                          By {personaCatalog[r.defaultPersona].displayName}
+                          Story by {personaCatalog[r.defaultPersona].displayName}
                         </div>
                       </div>
                     </div>
@@ -4074,9 +4088,9 @@ async function startStopNarration() {
                 )}
               </div>
             <h1 className={styles.walkHeadline}>{route.title}</h1>
-            <div className={styles.walkSubline}>
-              <span>{displayListenerCount} {displayListenerCount === 1 ? "listener" : "listeners"}  •  {route.durationLabel} / {routeMilesLabel}</span>
-            </div>
+              <div className={styles.walkSubline}>
+                <span>{displayListenerCount} {displayListenerCount === 1 ? "listener" : "listeners"}  •  {routeMilesLabel}</span>
+              </div>
 
               <div className={styles.walkActionRow}>
                 <button className={styles.pillButton} type="button" onClick={copyShareLink}>Share</button>
