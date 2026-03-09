@@ -47,7 +47,8 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
             alt=""
             style={{
               position: "absolute",
-              inset: 0,
+              top: 0,
+              left: 0,
               width: "100%",
               height: "100%",
               objectFit: "cover",
@@ -58,27 +59,35 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
         <div
           style={{
             position: "absolute",
-            inset: 0,
-            background:
-              "linear-gradient(180deg, rgba(7, 8, 12, 0.5) 0%, rgba(7, 8, 12, 0.5) 100%)",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
           }}
         />
 
         <div
           style={{
             position: "absolute",
-            inset: 0,
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
             background:
-              "linear-gradient(90deg, rgba(7, 8, 12, 0.78) 0%, rgba(7, 8, 12, 0.48) 40%, rgba(7, 8, 12, 0.24) 68%, rgba(7, 8, 12, 0.28) 100%)",
+              "linear-gradient(90deg, rgba(7, 8, 12, 0.3) 0%, rgba(7, 8, 12, 0.18) 42%, rgba(7, 8, 12, 0.08) 70%, rgba(7, 8, 12, 0.12) 100%)",
           }}
         />
 
         <div
           style={{
             position: "absolute",
-            inset: 0,
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
             background:
-              "radial-gradient(circle at 18% 84%, rgba(7, 8, 12, 0.84) 0%, rgba(7, 8, 12, 0.68) 24%, rgba(7, 8, 12, 0.38) 46%, rgba(7, 8, 12, 0) 72%)",
+              "radial-gradient(circle at 18% 84%, rgba(7, 8, 12, 0.4) 0%, rgba(7, 8, 12, 0.24) 26%, rgba(7, 8, 12, 0.08) 48%, rgba(7, 8, 12, 0) 72%)",
           }}
         />
 
@@ -90,11 +99,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: "14px 20px",
-            borderRadius: 999,
-            background: "rgba(7, 8, 12, 0.44)",
-            border: "1px solid rgba(255, 255, 255, 0.14)",
-            minWidth: 180,
+            padding: 0,
           }}
         >
           <img
