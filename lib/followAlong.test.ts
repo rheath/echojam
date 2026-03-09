@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildFollowAlongStops,
   buildRouteCandidates,
+  computeFollowAlongStoryCount,
   computeTriggerRadiusMeters,
   dedupeFollowAlongCandidates,
   normalizeRouteProgress,
@@ -41,6 +42,18 @@ test("isValidFollowAlongLocation accepts labeled coordinates", () => {
   };
   assert.equal(isValidFollowAlongLocation(location), true);
   assert.equal(isValidFollowAlongLocation({ label: "", lat: 0, lng: 0 }), false);
+});
+
+test("computeFollowAlongStoryCount uses 6 minute cadence with 2 story minimum", () => {
+  assert.equal(computeFollowAlongStoryCount(60), 2);
+  assert.equal(computeFollowAlongStoryCount(6 * 60), 2);
+  assert.equal(computeFollowAlongStoryCount(12 * 60), 2);
+  assert.equal(computeFollowAlongStoryCount(18 * 60), 3);
+});
+
+test("computeFollowAlongStoryCount caps at 9 stories", () => {
+  assert.equal(computeFollowAlongStoryCount(54 * 60), 9);
+  assert.equal(computeFollowAlongStoryCount(120 * 60), 9);
 });
 
 test("reverseGeocodeFollowAlongOrigin returns a formatted address", async (t) => {

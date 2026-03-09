@@ -28,6 +28,8 @@ export type ResolveNearbyPlaceInput = {
   radiusMeters: number;
   maxCandidates?: number;
   googleOnly?: boolean;
+  includedPrimaryTypes?: string[] | null;
+  allowBroadGoogleFallback?: boolean;
 };
 
 export type ResolveNearbyPlaceResult = {
@@ -179,7 +181,10 @@ async function resolveGoogleNearby(
   radiusMeters: number,
   options?: GoogleNearbyQueryOptions
 ): Promise<{ candidates: NearbyPlaceCandidate[]; status: string | null; httpStatus: number | null }> {
-  const includedPrimaryTypes = options?.includedPrimaryTypes ?? GOOGLE_NEARBY_INCLUDED_PRIMARY_TYPES;
+  const includedPrimaryTypes =
+    options?.includedPrimaryTypes === undefined
+      ? GOOGLE_NEARBY_INCLUDED_PRIMARY_TYPES
+      : options.includedPrimaryTypes;
   const res = await fetch(GOOGLE_NEARBY_ENDPOINT, {
     method: "POST",
     cache: "no-store",
@@ -369,6 +374,8 @@ async function resolveCanonicalNearby(input: ResolveNearbyPlaceInput): Promise<N
 export async function resolveNearbyPlaces(input: ResolveNearbyPlaceInput): Promise<ResolveNearbyPlacesResult> {
   const maxCandidates = clampMaxCandidates(input.maxCandidates);
   const googleOnly = Boolean(input.googleOnly);
+  const includedPrimaryTypes = input.includedPrimaryTypes ?? GOOGLE_NEARBY_INCLUDED_PRIMARY_TYPES;
+  const allowBroadGoogleFallback = input.allowBroadGoogleFallback ?? true;
   const canonicalCandidates = googleOnly ? [] : await resolveCanonicalNearby(input);
   const apiKey = process.env.GOOGLE_PLACES_API_KEY?.trim();
   if (!apiKey) {
@@ -381,10 +388,10 @@ export async function resolveNearbyPlaces(input: ResolveNearbyPlaceInput): Promi
   }
 
   const strictNearby = await resolveGoogleNearby(apiKey, input.city, input.lat, input.lng, input.radiusMeters, {
-    includedPrimaryTypes: GOOGLE_NEARBY_INCLUDED_PRIMARY_TYPES,
+    includedPrimaryTypes,
   });
   const broadNearby =
-    strictNearby.candidates.length < 3
+    allowBroadGoogleFallback && strictNearby.candidates.length < 3
       ? await resolveGoogleNearby(apiKey, input.city, input.lat, input.lng, input.radiusMeters, {
           includedPrimaryTypes: null,
         })

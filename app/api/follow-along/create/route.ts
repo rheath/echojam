@@ -34,6 +34,14 @@ type Body = {
   narratorGuidance?: string | null;
 };
 
+const FOLLOW_ALONG_INCLUDED_PRIMARY_TYPES = [
+  "tourist_attraction",
+  "museum",
+  "art_gallery",
+  "church",
+  "library",
+] as const;
+
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -102,6 +110,8 @@ export async function POST(req: Request) {
           radiusMeters: 1_500,
           maxCandidates: 4,
           googleOnly: true,
+          includedPrimaryTypes: [...FOLLOW_ALONG_INCLUDED_PRIMARY_TYPES],
+          allowBroadGoogleFallback: false,
         })
       )
     );

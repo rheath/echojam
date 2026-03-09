@@ -382,7 +382,7 @@ export function deriveRouteCity(location: Pick<FollowAlongLocation, "label" | "s
 }
 
 export function computeFollowAlongStoryCount(durationSeconds: number) {
-  return clamp(Math.round(durationSeconds / 900), 2, 7);
+  return clamp(Math.round(durationSeconds / 360), 2, 9);
 }
 
 export function normalizeRouteProgress(
