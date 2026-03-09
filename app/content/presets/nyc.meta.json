@@ -1,0 +1,9 @@
+{
+  "city": "nyc",
+  "overview": {
+    "label": "New York City",
+    "lat": 40.7527,
+    "lng": -73.9772,
+    "fallbackImage": "/api/google-image?kind=place-photo&name=places%2FChIJOwg_06VPwokRYv534QaPC8g%2Fphotos%2FATCDNfW1h1aXoITZMlMAJE4JH0tcqjHkZGR2DUaWvUD6Ddz1rKBbF6bA6ns3esJiTP9Q4fn3ZrubxHdzvNIbx1i4YD0VSF1dlU_6Jc8FJVRLV68D_YvXWab0K3ybpGKqULp4IwOkxOXcJIuK7LeD1xgE_7Ka-cyMv1T_GzT2Sk3bydOQ_hUOKMZL_TaQToRo1mTEiXnOfTYy10NZWEkp3ZiEvRzSCCu7Z_YWXOHMXgBkyOM7laSvpuhyVQ4QYNAfm8IVKA_3UP9Kogc9rIBaON5kFBbJoL1ptggwWnIN17GnZDZwuXqp1A3WIfuczmoM10rATgnRLf5oSTkxgl7IJR-wfwLhWYhP2ILQS8QRLZO4MFr-J8CeVEY82HmLtaznNSA49AJmZV-69j1pgFF9lfaW1DnfAy2bQkFNX-trZ5Q6W7RlJQ&maxWidthPx=1400"
+  }
+}

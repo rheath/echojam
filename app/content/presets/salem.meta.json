@@ -1,0 +1,9 @@
+{
+  "city": "salem",
+  "overview": {
+    "label": "Salem",
+    "lat": 42.5195,
+    "lng": -70.8967,
+    "fallbackImage": "/api/google-image?kind=place-photo&name=places%2FChIJPZ91zWgU44kRv-UsCG_53yU%2Fphotos%2FATCDNfVU7HopiQUw710Xl4VVQqr5KwMsT3pdnELegL0J4GSjPbUaYydCrcizC_LghQg_U_EkuZ-CdKuvCcdil_G1djLdRvrzFv3Ovtv5WaINy6HooL4_yE_uQuZTtu0fGpBO-sv7_fXC71gorIfniiOB8le_pmIxYZsSPjUJHxJXMw14g7G9KNovUhXtOn4uiOoW8cC-97-7afhOM_zB8Bi04FVS3mz7M3sxZnr7qm6BHKAkqKQbJK3b2tYHMeFQAYcnYB6zUYvtZaEv1qg0x3QmTHGY558vofE0Kkl8O4lgsiZYmBSiomaqD29LfWvDmLQhxpS4W686XsNVSFHzruWdt3sxrmzaoSWvbLoyFYHAolEfy_2ZI_uN9pqTNkiDs_j3FLf4edLVV4ZzrvovUtsaTF2Pwe-HmFuIGkaCSpIR4yPeGlO5C5oPcubV4z8w4jcj&maxWidthPx=1400"
+  }
+}

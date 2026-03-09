@@ -42,8 +42,9 @@ Custom and preset routes can use canonical cached images for each stop.
 Required env vars:
 
 ```bash
-PEXELS_API_KEY=...
+GOOGLE_PLACES_API_KEY=...
 CANONICAL_IMAGE_SYNC_TOKEN=...
+GOOGLE_PLACE_PHOTO_MAX_WIDTH=1400 # optional
 ```
 
 Background sync endpoint (server-to-server only):
@@ -54,10 +55,36 @@ Header: x-sync-token: $CANONICAL_IMAGE_SYNC_TOKEN
 Body: {"limit":100,"maxAgeHours":168}
 ```
 
-Recommended: run this on a schedule (hourly or daily) so user route loads do not call Pexels directly.
+Recommended: run this on a schedule (hourly or daily) so user route loads do not call Google Places directly.
 
 Pilot notes:
 
-- Default Pexels API limits are 200 requests/hour and 20,000 requests/month.
 - Keep sync batches modest (for example `limit: 100`) and schedule runs conservatively.
-- Pexels photos require attribution policy compliance (credit Pexels/photographer where required).
+- Ensure Google Places API and Place Photos usage is enabled with billing for your project.
+
+## Preset Route Authoring
+
+Preset routes are seeded from JSON and compiled into a generated runtime artifact.
+
+Files:
+
+- `app/content/presets/<city>.routes.json`: route metadata and ordered `stopPlaceIds`.
+- `app/content/presets/<city>.meta.json`: city overview metadata and fallback image.
+- `app/content/generated/presetRoutes.generated.ts`: generated output consumed at runtime.
+
+Workflow:
+
+```bash
+# Build and emit generated routes + diagnostics
+npm run presets:build
+
+# CI/check mode (validates seeds and generation feasibility without writing files)
+npm run presets:check
+```
+
+When adding a new city:
+
+1. Add `<city>.meta.json`.
+2. Add `<city>.routes.json` with `stopPlaceIds`.
+3. Run `npm run presets:build`.
+4. Optionally run `POST /api/canonical-stops/sync-images` scoped to that city to refresh Google-backed images.

@@ -10,7 +10,15 @@ type Stop = {
   title: string;
   lat: number;
   lng: number;
+  isOverview?: boolean;
+  stopKind?: "story" | "arrival";
   images?: string[];
+};
+
+type Endpoint = {
+  lat: number;
+  lng: number;
+  label: string;
 };
 
 type Props = {
@@ -20,10 +28,15 @@ type Props = {
   cityCenter?: { lat: number; lng: number } | null;
   followCurrentStop?: boolean;
   initialFitRoute?: boolean;
+  spreadOverlappingStops?: boolean;
+  routeCoords?: [number, number][] | null;
+  routeTravelMode?: "walk" | "drive" | null;
+  showRoutePath?: boolean;
+  endpoints?: {
+    origin?: Endpoint | null;
+    destination?: Endpoint | null;
+  } | null;
 };
-
-// Toggle this back to true to restore the drawn route line.
-const SHOW_ROUTE_PATH = false;
 
 export default function RouteMap({
   stops,
@@ -32,14 +45,27 @@ export default function RouteMap({
   cityCenter,
   followCurrentStop = true,
   initialFitRoute = false,
+  spreadOverlappingStops = false,
+  routeCoords: providedRouteCoords = null,
+  routeTravelMode = null,
+  showRoutePath = false,
+  endpoints = null,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
-  const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
+  const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(
+    providedRouteCoords
+  );
   const [routeStatus, setRouteStatus] = useState<"loading" | "ready" | "failed">("loading");
 
   useEffect(() => {
-    if (!SHOW_ROUTE_PATH) {
+    if (providedRouteCoords?.length) {
+      setRouteCoords(providedRouteCoords);
+      setRouteStatus("ready");
+      return;
+    }
+
+    if (!showRoutePath || routeTravelMode !== "walk") {
       setRouteCoords(null);
       setRouteStatus("failed");
       return;
@@ -86,7 +112,7 @@ export default function RouteMap({
       cancelled = true;
       controller.abort();
     };
-  }, [stops]);
+  }, [providedRouteCoords, routeTravelMode, showRoutePath, stops]);
 
   // init map
   useEffect(() => {
@@ -99,7 +125,12 @@ export default function RouteMap({
       const maplibregl = await import("maplibre-gl");
       if (cancelled) return;
 
-      const first = stops[0] ?? cityCenter ?? { lat: 42.5195, lng: -70.8967 };
+      const first =
+        stops[0] ??
+        endpoints?.origin ??
+        myPos ??
+        cityCenter ??
+        { lat: 42.5195, lng: -70.8967 };
 
       const map = new maplibregl.Map({
         container: containerRef.current,
@@ -115,41 +146,44 @@ export default function RouteMap({
       map.on("load", () => {
         if (cancelled) return;
 
-        if (stops.length) {
-          if (SHOW_ROUTE_PATH) {
-            // Route line
-            map.addSource("route", {
-              type: "geojson",
-              data: routeGeoJSON(stops, null, "loading"),
-            });
+        const hasPrimaryGeometry =
+          stops.length > 0 ||
+          Boolean(endpoints?.origin) ||
+          Boolean(endpoints?.destination) ||
+          Boolean(routeCoords?.length);
 
-            map.addLayer({
-              id: "route-line-underlay",
-              type: "line",
-              source: "route",
-              paint: {
-                "line-color": "#ffffff",
-                "line-width": 8,
-                "line-opacity": 0.8,
-              },
-            });
+        if (hasPrimaryGeometry) {
+          map.addSource("route", {
+            type: "geojson",
+            data: routeGeoJSON(stops, showRoutePath ? routeCoords : null, showRoutePath ? routeStatus : "loading"),
+          });
 
-            map.addLayer({
-              id: "route-line",
-              type: "line",
-              source: "route",
-              paint: {
-                "line-color": "#2b1b3f",
-                "line-width": 5,
-                "line-opacity": 0.9,
-              },
-            });
-          }
+          map.addLayer({
+            id: "route-line-underlay",
+            type: "line",
+            source: "route",
+            paint: {
+              "line-color": "#ffffff",
+              "line-width": 8,
+              "line-opacity": 0.8,
+            },
+          });
+
+          map.addLayer({
+            id: "route-line",
+            type: "line",
+            source: "route",
+            paint: {
+              "line-color": "#2b1b3f",
+              "line-width": 5,
+              "line-opacity": 0.9,
+            },
+          });
 
           // Stops
           map.addSource("stops", {
             type: "geojson",
-            data: stopsGeoJSON(stops, 0),
+            data: stopsGeoJSON(stops, 0, spreadOverlappingStops),
           });
 
           map.addLayer({
@@ -162,6 +196,8 @@ export default function RouteMap({
                 ["get", "status"],
                 "current",
                 "#ff5f92",
+                "arrival",
+                "#2e78ff",
                 "visited",
                 "#8e93a3",
                 "#2b1b3f",
@@ -219,6 +255,53 @@ export default function RouteMap({
           },
         });
 
+        map.addSource("endpoints", {
+          type: "geojson",
+          data: endpointGeoJSON(endpoints),
+        });
+
+        map.addLayer({
+          id: "endpoint-circle",
+          type: "circle",
+          source: "endpoints",
+          paint: {
+            "circle-radius": [
+              "match",
+              ["get", "kind"],
+              "origin",
+              8,
+              10,
+            ],
+            "circle-color": [
+              "match",
+              ["get", "kind"],
+              "origin",
+              "#111111",
+              "#2e78ff",
+            ],
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 2,
+            "circle-opacity": 0.95,
+          },
+        });
+
+        map.addLayer({
+          id: "endpoint-label",
+          type: "symbol",
+          source: "endpoints",
+          layout: {
+            "text-field": ["get", "label"],
+            "text-size": 11,
+            "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+            "text-offset": [0, 1.4],
+          },
+          paint: {
+            "text-color": "#111111",
+            "text-halo-color": "#ffffff",
+            "text-halo-width": 1.5,
+          },
+        });
+
         if (stops.length) {
           map.on("mouseenter", "stops-circle", () => {
             map.getCanvas().style.cursor = "pointer";
@@ -244,7 +327,10 @@ export default function RouteMap({
               .addTo(map);
           });
 
-          fitMapToPoints(map, stops, null);
+        }
+
+        if (hasPrimaryGeometry) {
+          fitMapToPoints(map, stops, null, endpoints);
         }
       });
     }
@@ -256,7 +342,7 @@ export default function RouteMap({
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [stops, cityCenter]);
+  }, [stops, myPos, cityCenter, spreadOverlappingStops, showRoutePath, endpoints, routeStatus]);
 
   useEffect(() => {
     const onResize = () => mapRef.current?.resize();
@@ -270,17 +356,24 @@ export default function RouteMap({
     if (!map) return;
     if (!map.isStyleLoaded()) return;
 
-    if (SHOW_ROUTE_PATH) {
-      const routeSrc = map.getSource("route") as GeoJSONSource | undefined;
-      routeSrc?.setData?.(routeGeoJSON(stops, routeCoords, routeStatus));
-    }
+    const routeSrc = map.getSource("route") as GeoJSONSource | undefined;
+    routeSrc?.setData?.(
+      routeGeoJSON(
+        stops,
+        showRoutePath ? routeCoords : null,
+        showRoutePath ? routeStatus : "loading"
+      )
+    );
 
     const stopsSrc = map.getSource("stops") as GeoJSONSource | undefined;
-    stopsSrc?.setData?.(stopsGeoJSON(stops, currentStopIndex));
+    stopsSrc?.setData?.(stopsGeoJSON(stops, currentStopIndex, spreadOverlappingStops));
 
     const meSrc = map.getSource("me") as GeoJSONSource | undefined;
     meSrc?.setData?.(myPosGeoJSON(myPos));
-  }, [stops, currentStopIndex, myPos, routeCoords, routeStatus]);
+
+    const endpointSrc = map.getSource("endpoints") as GeoJSONSource | undefined;
+    endpointSrc?.setData?.(endpointGeoJSON(endpoints));
+  }, [stops, currentStopIndex, myPos, routeCoords, routeStatus, spreadOverlappingStops, showRoutePath, endpoints]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -288,14 +381,14 @@ export default function RouteMap({
     if (!map.isStyleLoaded()) return;
 
     if (initialFitRoute && currentStopIndex === 0) {
-      fitMapToRoute(map, routeCoords, stops);
+      fitMapToRoute(map, routeCoords, stops, endpoints);
       return;
     }
 
     if (!followCurrentStop) return;
     const cur = stops[currentStopIndex];
     if (cur) map.easeTo({ center: [cur.lng, cur.lat], duration: 450 });
-  }, [stops, currentStopIndex, followCurrentStop, initialFitRoute, routeCoords]);
+  }, [stops, currentStopIndex, followCurrentStop, initialFitRoute, routeCoords, endpoints]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -304,8 +397,18 @@ export default function RouteMap({
     if (followCurrentStop) return;
     if (!stops.length) return;
 
-    fitMapToRoute(map, routeCoords, stops);
-  }, [followCurrentStop, routeCoords, stops]);
+    fitMapToRoute(map, routeCoords, stops, endpoints);
+  }, [followCurrentStop, routeCoords, stops, endpoints]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!map.isStyleLoaded()) return;
+    if (stops.length > 0) return;
+    if (!myPos) return;
+
+    map.easeTo({ center: [myPos.lng, myPos.lat], duration: 350 });
+  }, [stops, myPos]);
 
   return (
     <div className={styles.mapShell}>
@@ -354,27 +457,107 @@ function routeGeoJSON(
   };
 }
 
-function stopsGeoJSON(stops: Stop[], currentIdx: number): FeatureCollection<Point, GeoJsonProperties> {
+function offsetCoordinates(lat: number, lng: number, index: number, total: number) {
+  if (total <= 1) return { lat, lng };
+  const ring = Math.floor(index / 6);
+  const posInRing = index % 6;
+  const angle = (2 * Math.PI * posInRing) / 6;
+  const meters = 12 + ring * 8;
+  const dLat = (meters * Math.sin(angle)) / 111_320;
+  const cosLat = Math.cos((lat * Math.PI) / 180);
+  const dLng = (meters * Math.cos(angle)) / (111_320 * (Math.abs(cosLat) < 1e-6 ? 1e-6 : cosLat));
+  return { lat: lat + dLat, lng: lng + dLng };
+}
+
+function stopsGeoJSON(
+  stops: Stop[],
+  currentIdx: number,
+  spreadOverlappingStops: boolean
+): FeatureCollection<Point, GeoJsonProperties> {
+  const coordBuckets = new Map<string, number[]>();
+  for (let idx = 0; idx < stops.length; idx += 1) {
+    const stop = stops[idx];
+    const key = `${stop.lat.toFixed(6)},${stop.lng.toFixed(6)}`;
+    const bucket = coordBuckets.get(key) ?? [];
+    bucket.push(idx);
+    coordBuckets.set(key, bucket);
+  }
+  const rankInBucket = new Map<number, { pos: number; total: number }>();
+  for (const bucket of coordBuckets.values()) {
+    const total = bucket.length;
+    for (let pos = 0; pos < bucket.length; pos += 1) {
+      rankInBucket.set(bucket[pos], { pos, total });
+    }
+  }
+
   return {
     type: "FeatureCollection",
     features: stops.map((s, idx) => {
       const status = idx < currentIdx ? "visited" : idx === currentIdx ? "current" : "upcoming";
-      const subtitle = idx < currentIdx ? "Visited" : idx === currentIdx ? "At this location" : "Upcoming stop";
+      const visualStatus =
+        s.stopKind === "arrival" && idx >= currentIdx ? "arrival" : status;
+      const isOverview = Boolean(s.isOverview);
+      const subtitle = isOverview
+        ? "Starting point"
+        : idx < currentIdx
+          ? "Visited"
+          : idx === currentIdx
+            ? "At this location"
+            : "Upcoming stop";
+      const bucket = rankInBucket.get(idx) ?? { pos: 0, total: 1 };
+      const point = spreadOverlappingStops ? offsetCoordinates(s.lat, s.lng, bucket.pos, bucket.total) : { lat: s.lat, lng: s.lng };
       return {
         type: "Feature",
         properties: {
           id: s.id,
           title: s.title,
+          isOverview,
           isCurrent: idx === currentIdx,
           idx,
           label: `${idx + 1}`,
-          status,
+          status: visualStatus,
           subtitle,
           image: s.images?.[0] ?? "",
         },
-        geometry: { type: "Point", coordinates: [s.lng, s.lat] },
+        geometry: { type: "Point", coordinates: [point.lng, point.lat] },
       };
     }),
+  };
+}
+
+function endpointGeoJSON(
+  endpoints: Props["endpoints"]
+): FeatureCollection<Point, GeoJsonProperties> {
+  const features: Array<Feature<Point, GeoJsonProperties>> = [];
+  if (endpoints?.origin) {
+    features.push({
+      type: "Feature",
+      properties: {
+        label: "Start",
+        kind: "origin",
+      },
+      geometry: {
+        type: "Point",
+        coordinates: [endpoints.origin.lng, endpoints.origin.lat],
+      },
+    });
+  }
+  if (endpoints?.destination) {
+    features.push({
+      type: "Feature",
+      properties: {
+        label: "Finish",
+        kind: "destination",
+      },
+      geometry: {
+        type: "Point",
+        coordinates: [endpoints.destination.lng, endpoints.destination.lat],
+      },
+    });
+  }
+  return {
+    type: "FeatureCollection",
+    features,
   };
 }
 
@@ -396,9 +579,16 @@ function myPosGeoJSON(
   };
 }
 
-function fitMapToPoints(map: MapLibreMap, stops: Stop[], myPos?: { lat: number; lng: number } | null) {
+function fitMapToPoints(
+  map: MapLibreMap,
+  stops: Stop[],
+  myPos?: { lat: number; lng: number } | null,
+  endpoints?: Props["endpoints"]
+) {
   const coords: [number, number][] = stops.map((s) => [s.lng, s.lat]);
   if (myPos) coords.push([myPos.lng, myPos.lat]);
+  if (endpoints?.origin) coords.push([endpoints.origin.lng, endpoints.origin.lat]);
+  if (endpoints?.destination) coords.push([endpoints.destination.lng, endpoints.destination.lat]);
   if (!coords.length) return;
 
   let minX = coords[0][0],
@@ -422,8 +612,15 @@ function fitMapToPoints(map: MapLibreMap, stops: Stop[], myPos?: { lat: number; 
   );
 }
 
-function fitMapToRoute(map: MapLibreMap, routeCoords: [number, number][] | null, stops: Stop[]) {
-  const coords: [number, number][] = routeCoords?.length ? routeCoords : stops.map((s) => [s.lng, s.lat]);
+function fitMapToRoute(
+  map: MapLibreMap,
+  routeCoords: [number, number][] | null,
+  stops: Stop[],
+  endpoints?: Props["endpoints"]
+) {
+  const coords: [number, number][] = routeCoords?.length ? [...routeCoords] : stops.map((s) => [s.lng, s.lat]);
+  if (endpoints?.origin) coords.push([endpoints.origin.lng, endpoints.origin.lat]);
+  if (endpoints?.destination) coords.push([endpoints.destination.lng, endpoints.destination.lat]);
   if (!coords.length) return;
 
   let minX = coords[0][0];

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
+import { buildGooglePlacePhotoUrl } from "@/lib/placesImages";
 
 type Body = {
   city?: string;
@@ -22,15 +23,13 @@ type FailedStop = {
 
 const MAX_LINKS = 30;
 const PLACEHOLDER_BY_CITY: Record<string, string> = {
-  salem: "/images/salem/placeholder-01.png",
-  boston: "/images/salem/placeholder-01.png",
-  concord: "/images/salem/placeholder-01.png",
+  salem: "/images/salem/placeholder.png",
+  boston: "/images/salem/placeholder.png",
+  concord: "/images/salem/placeholder.png",
+  nyc: "/images/salem/placeholder.png",
 };
 const PLACEHOLDER_ROTATION = [
-  "/images/salem/placeholder-01.png",
-  "/images/salem/placeholder-02.png",
-  "/images/salem/placeholder-03.png",
-  "/images/salem/placeholder-04.png",
+  "/images/salem/placeholder.png",
 ];
 const GOOGLE_PLACES_NEW_SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 
@@ -184,15 +183,6 @@ function extractPreviewImage(html: string, finalUrl: URL): string | null {
   return null;
 }
 
-function buildGooglePhotoUrl(reference: string, apiKey: string) {
-  const params = new URLSearchParams({
-    key: apiKey,
-    maxWidthPx: "1400",
-    maxHeightPx: "900",
-  });
-  return `https://places.googleapis.com/v1/${reference}/media?${params.toString()}`;
-}
-
 function fallbackPlaceholderFor(city: string, index: number) {
   const cityDefault = PLACEHOLDER_BY_CITY[city] || PLACEHOLDER_BY_CITY.salem;
   if (!cityDefault) return PLACEHOLDER_ROTATION[0];
@@ -246,7 +236,7 @@ async function fetchGooglePlacePhotoByText(
     if (!Array.isArray(payload.places) || payload.places.length === 0) return null;
     for (const place of payload.places) {
       const ref = place.photos?.[0]?.name?.trim();
-      if (ref) return buildGooglePhotoUrl(ref, apiKey);
+      if (ref) return buildGooglePlacePhotoUrl(ref);
     }
     return null;
   } catch {

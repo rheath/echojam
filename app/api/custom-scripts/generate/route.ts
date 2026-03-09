@@ -14,13 +14,14 @@ type Body = {
   routeId: string;
   stopId: string;
   persona: Persona;
-  city?: "salem" | "boston" | "concord";
+  city?: "salem" | "boston" | "concord" | "nyc";
 };
 
 const SCRIPT_PATCH_BY_PERSONA = {
   adult: (script: string) => ({ script_adult: script }),
   preteen: (script: string) => ({ script_preteen: script }),
   ghost: (script: string) => ({ script_ghost: script }),
+  custom: (script: string) => ({ script_custom: script }),
 } as const;
 
 function getAdmin() {
@@ -37,7 +38,7 @@ export async function POST(req: Request) {
 
     const { data: route, error: routeErr } = await admin
       .from("custom_routes")
-      .select("id,city,length_minutes,transport_mode")
+      .select("id,city,length_minutes,transport_mode,narrator_guidance,narrator_default")
       .eq("id", body.routeId)
       .single();
     if (routeErr || !route) return NextResponse.json({ error: routeErr?.message || "Unknown custom route" }, { status: 404 });
@@ -54,6 +55,58 @@ export async function POST(req: Request) {
     if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is required." }, { status: 500 });
 
     const city = body.city ?? route.city;
+    if (body.persona === "custom") {
+      const narratorGuidance = toNullableTrimmed(route.narrator_guidance);
+      if (!narratorGuidance) {
+        return NextResponse.json({ error: "Narrator guidance is missing for this route." }, { status: 400 });
+      }
+
+      const { data: currentStopRow } = await admin
+        .from("custom_route_stops")
+        .select("script_custom")
+        .eq("route_id", body.routeId)
+        .eq("stop_id", body.stopId)
+        .maybeSingle();
+
+      const switchConfig = await getSwitchConfig();
+      const forceScript = shouldRegenerateScript(switchConfig.mode);
+      const existingScript = toNullableTrimmed(currentStopRow?.script_custom);
+      if (existingScript && !forceScript) {
+        return NextResponse.json({ script: existingScript, reused: true });
+      }
+
+      const { count: totalStops } = await admin
+        .from("custom_route_stops")
+        .select("*", { count: "exact", head: true })
+        .eq("route_id", body.routeId);
+
+      const generated = await generateScriptWithOpenAI(
+        apiKey,
+        city,
+        route.transport_mode ?? "walk",
+        route.length_minutes ?? 30,
+        body.persona,
+        {
+          id: stop.stop_id,
+          title: stop.title,
+          lat: stop.lat,
+          lng: stop.lng,
+          image: stop.image_url,
+        },
+        stop.position ?? 0,
+        totalStops ?? 1,
+        narratorGuidance
+      );
+
+      const script = toNullableTrimmed(generated);
+      if (!script) return NextResponse.json({ error: "Generated script was empty" }, { status: 500 });
+
+      const scriptPatch = SCRIPT_PATCH_BY_PERSONA[body.persona](script);
+      await admin.from("custom_route_stops").update(scriptPatch).eq("route_id", body.routeId).eq("stop_id", body.stopId);
+
+      return NextResponse.json({ script, reused: false });
+    }
+
     const canonical = await ensureCanonicalStopForCustom(admin, city, {
       id: stop.stop_id,
       title: stop.title,

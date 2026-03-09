@@ -1,13 +1,16 @@
 const PLACEHOLDER_BY_CITY: Record<string, string> = {
-  salem: "/images/salem/placeholder-01.png",
-  boston: "/images/salem/placeholder-01.png",
-  concord: "/images/salem/placeholder-01.png",
+  salem: "/images/salem/placeholder.png",
+  boston: "/images/salem/placeholder.png",
+  concord: "/images/salem/placeholder.png",
+  nyc: "/images/salem/placeholder.png",
 };
 
-export function cityPlaceholderImage(city: string | null | undefined) {
-  const key = (city || "").toLowerCase();
-  return PLACEHOLDER_BY_CITY[key] || PLACEHOLDER_BY_CITY.salem;
-}
+const GOOGLE_TEXT_SEARCH_NEW_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
+const GOOGLE_IMAGE_PROXY_PATH = "/api/google-image";
+
+const GOOGLE_PLACE_PHOTO_MAX_WIDTH_DEFAULT = 1400;
+const GOOGLE_STREETVIEW_SIZE_DEFAULT = "1200x675";
+const SEARCH_RADIUS_METERS = 1500;
 
 type ResolveInput = {
   title: string;
@@ -18,239 +21,251 @@ type ResolveInput = {
 
 export type PlaceImageResult = {
   imageUrl: string;
-  placeId: string;
+  googlePlaceId: string;
 };
 
-type PexelsPhoto = {
-  id?: number;
-  width?: number;
-  height?: number;
-  alt?: string;
-  src?: {
-    original?: string;
-    large2x?: string;
-    large?: string;
-    medium?: string;
+type GooglePlaceNew = {
+  id?: string;
+  name?: string;
+  displayName?: { text?: string };
+  location?: { latitude?: number; longitude?: number };
+  photos?: Array<{ name?: string }>;
+};
+
+type GooglePlacesNewResponse = {
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
   };
+  places?: GooglePlaceNew[];
 };
 
-type PexelsSearchResponse = {
-  photos?: PexelsPhoto[];
-};
-
-function isRetryableStatus(code: number) {
-  return code === 429 || (code >= 500 && code < 600);
+export function cityPlaceholderImage(city: string | null | undefined) {
+  const key = (city || "").toLowerCase();
+  return PLACEHOLDER_BY_CITY[key] || PLACEHOLDER_BY_CITY.salem;
 }
 
-async function fetchJsonWithRetry<T>(url: string, init: RequestInit, retries = 2): Promise<T> {
-  let attempt = 0;
-  let lastError: Error | null = null;
-
-  while (attempt <= retries) {
-    try {
-      const res = await fetch(url, init);
-      if (!res.ok) {
-        if (isRetryableStatus(res.status) && attempt < retries) {
-          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
-          attempt += 1;
-          continue;
-        }
-        throw new Error(`HTTP ${res.status}`);
-      }
-      return (await res.json()) as T;
-    } catch (e) {
-      lastError = e instanceof Error ? e : new Error("Unknown image request error");
-      if (attempt >= retries) break;
-      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
-      attempt += 1;
-    }
-  }
-
-  throw lastError || new Error("Image request failed");
+function normalize(value: string | null | undefined) {
+  return (value || "").trim();
 }
 
-const PEXELS_API_URL = "https://api.pexels.com/v1/search";
-const PEXELS_RESULTS_PER_PAGE = 8;
-const MIN_IMAGE_WIDTH = 1200;
-const MIN_IMAGE_HEIGHT = 700;
-
-function parsePositiveNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+export function isValidGooglePlaceId(value: string | null | undefined) {
+  const id = normalize(value);
+  if (!id) return false;
+  return !id.toLowerCase().startsWith("pexels:");
 }
 
-function pickPhotoUrl(photo: PexelsPhoto): string | null {
-  const candidates = [photo.src?.large2x, photo.src?.large, photo.src?.original, photo.src?.medium];
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
-  }
-  return null;
+function getGooglePhotoMaxWidth() {
+  const raw = Number.parseInt((process.env.GOOGLE_PLACE_PHOTO_MAX_WIDTH || "").trim(), 10);
+  if (!Number.isFinite(raw) || raw <= 0) return GOOGLE_PLACE_PHOTO_MAX_WIDTH_DEFAULT;
+  return raw;
 }
 
-function stableHash(input: string) {
-  let hash = 2166136261;
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i);
-    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-  }
-  return hash >>> 0;
+function buildGoogleImageProxyUrl(params: Record<string, string>) {
+  const search = new URLSearchParams(params);
+  return `${GOOGLE_IMAGE_PROXY_PATH}?${search.toString()}`;
 }
 
-function collectEligiblePhotos(photos: PexelsPhoto[]) {
-  const eligible: Array<{ imageUrl: string; photoId: number; alt: string }> = [];
-  for (const photo of photos) {
-    const photoId = parsePositiveNumber(photo.id);
-    const width = parsePositiveNumber(photo.width);
-    const height = parsePositiveNumber(photo.height);
-    if (!photoId || !width || !height) continue;
-    if (width < height) continue;
-    if (width < MIN_IMAGE_WIDTH || height < MIN_IMAGE_HEIGHT) continue;
-
-    const imageUrl = pickPhotoUrl(photo);
-    if (!imageUrl) continue;
-
-    eligible.push({ imageUrl, photoId, alt: typeof photo.alt === "string" ? photo.alt.trim() : "" });
-  }
-
-  return eligible;
-}
-
-function normalizeWords(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-const TITLE_STOP_WORDS = new Set([
-  "a",
-  "an",
-  "and",
-  "at",
-  "for",
-  "from",
-  "in",
-  "of",
-  "on",
-  "the",
-  "to",
-  "tour",
-  "landmark",
-  "overview",
-  "historic",
-  "national",
-  "site",
-]);
-
-function meaningfulTokens(value: string) {
-  const normalized = normalizeWords(value);
-  if (!normalized) return [];
-  return normalized
-    .split(/\s+/)
-    .filter((token) => token.length >= 3 && !TITLE_STOP_WORDS.has(token));
-}
-
-function scorePhotoRelevance(
-  photo: { imageUrl: string; photoId: number; alt: string },
-  titleTokens: string[],
-  cityTokens: string[],
-  normalizedTitle: string
-) {
-  const haystack = normalizeWords(`${photo.alt} ${photo.imageUrl}`);
-  if (!haystack) return 0;
-
-  let score = 0;
-  if (normalizedTitle && haystack.includes(normalizedTitle)) score += 10;
-  for (const token of titleTokens) {
-    if (haystack.includes(token)) score += 3;
-  }
-  for (const token of cityTokens) {
-    if (haystack.includes(token)) score += 1;
-  }
-  return score;
-}
-
-function selectBestPhoto(
-  photos: Array<{ imageUrl: string; photoId: number; alt: string }>,
-  seed: string,
-  title: string,
-  city: string
-): { imageUrl: string; photoId: number } | null {
-  if (!photos.length) return null;
-  const titleTokens = meaningfulTokens(title);
-  const cityTokens = meaningfulTokens(city).filter((token) => !titleTokens.includes(token));
-  const normalizedTitle = normalizeWords(title);
-
-  let bestScore = Number.NEGATIVE_INFINITY;
-  let best: Array<{ imageUrl: string; photoId: number; alt: string }> = [];
-
-  for (const photo of photos) {
-    const score = scorePhotoRelevance(photo, titleTokens, cityTokens, normalizedTitle);
-    if (score > bestScore) {
-      bestScore = score;
-      best = [photo];
-      continue;
-    }
-    if (score === bestScore) best.push(photo);
-  }
-
-  const pool = best.length ? best : photos;
-  const sortedPool = [...pool].sort((a, b) => a.photoId - b.photoId);
-  const index = stableHash(seed) % sortedPool.length;
-  const selected = sortedPool[index];
-  return { imageUrl: selected.imageUrl, photoId: selected.photoId };
-}
-
-function uniqueQueries(...queries: string[]) {
-  const seen = new Set<string>();
-  const ordered: string[] = [];
-  for (const query of queries) {
-    const normalized = query.trim().replace(/\s+/g, " ").toLowerCase();
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    ordered.push(query.trim().replace(/\s+/g, " "));
-  }
-  return ordered;
-}
-
-async function fetchEligiblePhotos(query: string, apiKey: string) {
+export function buildGooglePlacePhotoUrl(photoName: string) {
   const params = new URLSearchParams({
-    query,
-    per_page: String(PEXELS_RESULTS_PER_PAGE),
-    page: "1",
-    orientation: "landscape",
+    maxWidthPx: String(getGooglePhotoMaxWidth()),
   });
-  const url = `${PEXELS_API_URL}?${params.toString()}`;
-  const data = await fetchJsonWithRetry<PexelsSearchResponse>(
-    url,
-    {
-      cache: "no-store",
-      headers: {
-        Authorization: apiKey,
+  return buildGoogleImageProxyUrl({
+    kind: "place-photo",
+    name: photoName,
+    maxWidthPx: params.get("maxWidthPx") || String(GOOGLE_PLACE_PHOTO_MAX_WIDTH_DEFAULT),
+  });
+}
+
+export function buildGooglePlaceIdPhotoUrl(placeId: string) {
+  const params = new URLSearchParams({
+    maxWidthPx: String(getGooglePhotoMaxWidth()),
+  });
+  return buildGoogleImageProxyUrl({
+    kind: "place-id-photo",
+    placeId,
+    maxWidthPx: params.get("maxWidthPx") || String(GOOGLE_PLACE_PHOTO_MAX_WIDTH_DEFAULT),
+  });
+}
+
+export function buildGoogleStreetViewUrl(lat: number, lng: number) {
+  return buildGoogleImageProxyUrl({
+    kind: "streetview",
+    location: `${lat},${lng}`,
+    size: GOOGLE_STREETVIEW_SIZE_DEFAULT,
+  });
+}
+
+function maybeProxyDirectGoogleImageUrl(rawUrl: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return rawUrl;
+  }
+
+  if (parsed.hostname === "places.googleapis.com" && parsed.pathname.startsWith("/v1/") && parsed.pathname.endsWith("/media")) {
+    const photoName = decodeURIComponent(parsed.pathname.slice("/v1/".length, -"/media".length));
+    if (!photoName) return rawUrl;
+    return buildGoogleImageProxyUrl({
+      kind: "place-photo",
+      name: photoName,
+      maxWidthPx: parsed.searchParams.get("maxWidthPx") || String(getGooglePhotoMaxWidth()),
+    });
+  }
+
+  if (parsed.hostname === "maps.googleapis.com" && parsed.pathname === "/maps/api/streetview") {
+    const location = normalize(parsed.searchParams.get("location"));
+    if (!location) return rawUrl;
+    return buildGoogleImageProxyUrl({
+      kind: "streetview",
+      location,
+      size: normalize(parsed.searchParams.get("size")) || GOOGLE_STREETVIEW_SIZE_DEFAULT,
+    });
+  }
+
+  return rawUrl;
+}
+
+export function proxyGoogleImageUrl(value: string | null | undefined) {
+  const normalized = normalize(value);
+  if (!normalized) return normalized;
+  if (normalized.startsWith("/")) return normalized;
+  return maybeProxyDirectGoogleImageUrl(normalized);
+}
+
+function isFiniteCoord(lat: number, lng: number) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+}
+
+function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
+  const avgLatRad = ((aLat + bLat) / 2) * (Math.PI / 180);
+  const metersPerLat = 111_320;
+  const metersPerLng = 111_320 * Math.cos(avgLatRad);
+  const dLat = (aLat - bLat) * metersPerLat;
+  const dLng = (aLng - bLng) * metersPerLng;
+  return Math.hypot(dLat, dLng);
+}
+
+function titleMatchScore(title: string, candidateName: string) {
+  const t = normalize(title).toLowerCase();
+  const c = normalize(candidateName).toLowerCase();
+  if (!t || !c) return 0;
+  if (c === t) return 40;
+  if (c.includes(t) || t.includes(c)) return 20;
+
+  const tTokens = new Set(t.split(/\s+/).filter(Boolean));
+  const cTokens = c.split(/\s+/).filter(Boolean);
+  let overlap = 0;
+  for (const token of cTokens) {
+    if (tTokens.has(token)) overlap += 1;
+  }
+  return overlap * 4;
+}
+
+async function fetchGooglePlacesNew(
+  apiKey: string,
+  body: {
+    textQuery: string;
+    locationBias?: {
+      circle: {
+        center: { latitude: number; longitude: number };
+        radius: number;
+      };
+    };
+    pageSize?: number;
+  }
+): Promise<GooglePlacesNewResponse | null> {
+  const res = await fetch(GOOGLE_TEXT_SEARCH_NEW_ENDPOINT, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": apiKey,
+      "X-Goog-FieldMask": "places.id,places.name,places.displayName,places.location,places.photos",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return null;
+  const payload = (await res.json()) as GooglePlacesNewResponse;
+  if (payload.error) return null;
+  if (!Array.isArray(payload.places) || payload.places.length === 0) return null;
+  return payload;
+}
+
+function placeIdFromNewPlace(place: GooglePlaceNew) {
+  const id = normalize(place.id);
+  if (id) return id;
+  const resourceName = normalize(place.name);
+  if (resourceName.startsWith("places/")) return resourceName.slice("places/".length);
+  return "";
+}
+
+function pickBestPlace(
+  places: GooglePlaceNew[],
+  input: ResolveInput
+): { place: GooglePlaceNew; photoName: string; score: number } | null {
+  let best: { place: GooglePlaceNew; photoName: string; score: number } | null = null;
+
+  for (const place of places) {
+    const placeId = placeIdFromNewPlace(place);
+    const name = normalize(place.displayName?.text);
+    const photoName = normalize(place.photos?.[0]?.name);
+    if (!isValidGooglePlaceId(placeId) || !name || !photoName) continue;
+
+    const pLat = Number(place.location?.latitude);
+    const pLng = Number(place.location?.longitude);
+    const hasCoord = isFiniteCoord(pLat, pLng);
+    const distPenalty = hasCoord ? distanceMeters(input.lat, input.lng, pLat, pLng) / 50 : 0;
+    const score = titleMatchScore(input.title, name) - distPenalty;
+
+    if (!best || score > best.score) {
+      best = { place, photoName, score };
+    }
+  }
+
+  return best;
+}
+
+async function resolveFromTextSearch(apiKey: string, input: ResolveInput) {
+  const withLocationBias = await fetchGooglePlacesNew(apiKey, {
+    textQuery: input.title,
+    locationBias: {
+      circle: {
+        center: { latitude: input.lat, longitude: input.lng },
+        radius: SEARCH_RADIUS_METERS,
       },
     },
-  );
-  return collectEligiblePhotos(data.photos ?? []);
+    pageSize: 10,
+  });
+
+  const withCityFallback = await fetchGooglePlacesNew(apiKey, {
+    textQuery: `${input.title} ${input.city}`,
+    pageSize: 10,
+  });
+
+  const pooled = [
+    ...(withLocationBias?.places ?? []),
+    ...(withCityFallback?.places ?? []),
+  ];
+
+  if (pooled.length === 0) return null;
+  return pickBestPlace(pooled, input);
 }
 
 export async function resolvePlaceImage(input: ResolveInput): Promise<PlaceImageResult | null> {
-  const apiKey = process.env.PEXELS_API_KEY?.trim();
+  const apiKey = normalize(process.env.GOOGLE_PLACES_API_KEY);
   if (!apiKey) return null;
 
-  const titleQuery = `${input.title}`;
-  const titleOnlyQuery = `${input.title} landmark`;
-  const titleCityQuery = `${input.title} ${input.city} landmark`;
-  const queries = uniqueQueries(titleQuery, titleOnlyQuery, titleCityQuery);
-  const seedBase = `${input.title}|${input.city}|${input.lat.toFixed(4)}|${input.lng.toFixed(4)}`;
+  const selected = await resolveFromTextSearch(apiKey, input);
+  if (!selected) return null;
 
-  for (const query of queries) {
-    const eligible = await fetchEligiblePhotos(query, apiKey);
-    const selected = selectBestPhoto(eligible, `${seedBase}|${query.toLowerCase()}`, input.title, input.city);
-    if (!selected) continue;
-    return {
-      imageUrl: selected.imageUrl,
-      placeId: `pexels:${selected.photoId}`,
-    };
-  }
+  const googlePlaceId = placeIdFromNewPlace(selected.place);
+  if (!isValidGooglePlaceId(googlePlaceId)) return null;
 
-  return null;
+  return {
+    imageUrl: buildGooglePlacePhotoUrl(selected.photoName),
+    googlePlaceId,
+  };
 }

@@ -1,0 +1,9 @@
+{
+  "city": "boston",
+  "overview": {
+    "label": "Boston",
+    "lat": 42.3601,
+    "lng": -71.0589,
+    "fallbackImage": "/api/google-image?kind=place-photo&name=places%2FChIJKyNuvJ1w44kRBE-pe_yDhj8%2Fphotos%2FATCDNfXDGOGHNYIXRFE2qkrkloFQa3GXY6lyJPgl69hhicFiNf6h19XZc3TSxd6LcE1ckFGsKh1a3_5A-jxr-WI7aVVvsYtlPy0kY1YUwD6UHjDVIU3rmEpyWMlwwZcIENOAsp6774mBukap1hRR4hlzIAjjbYgCIkZEnbnnFIfQgHvzAtAPU63Fqa2aoSsN1tmmXy1f9Bg9Er_sNubnbQkTTeZeYBGf-0vBohWpqWdLGgK0eZqhgBL-wOb46Npfmr0Tud_16Ke5RLQJ2xoiPVDtKMwxcVq5Ef9Ewyqkdfy5VtqHeUhySktjTt3CTSm1pi-Aho2kmGbhaLQfFE6ebS3In13COzybpxCWMkJFux8rbzPQPruOj90IEcWUjmDtnkqcbKs9ZvT8RT83-DLYTYmdoOm8tQU7UpkDV85TTHjvvuEUHg&maxWidthPx=1400"
+  }
+}

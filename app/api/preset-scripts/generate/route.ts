@@ -15,7 +15,7 @@ type Body = {
   routeId: string;
   stopId: string;
   persona: Persona;
-  city?: "salem" | "boston" | "concord";
+  city?: "salem" | "boston" | "concord" | "nyc";
 };
 
 function getAdmin() {
@@ -28,9 +28,12 @@ function getAdmin() {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
+    if (body.persona === "custom") {
+      return NextResponse.json({ error: "Custom narrator is only available for custom tours." }, { status: 400 });
+    }
     const route = getRouteById(body.routeId);
     if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
-    const city = normalizePresetCity(body.city);
+    const city = route.city ?? normalizePresetCity(body.city);
     const stops = buildPresetStopsWithOverview(route.stops, city);
     const stopIndex = stops.findIndex((s) => s.id === body.stopId);
     if (stopIndex < 0) return NextResponse.json({ error: "Unknown stop for preset route" }, { status: 404 });
@@ -69,7 +72,7 @@ export async function POST(req: Request) {
       apiKey,
       city,
       "walk",
-      parseInt(route.durationLabel, 10) || 30,
+      route.durationMinutes || 30,
       body.persona,
       {
         id: stop.id,

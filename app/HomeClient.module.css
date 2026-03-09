@@ -1,3 +1,5 @@
+
+
 .container {
   max-width: 860px;
   margin: 0 auto;
@@ -72,8 +74,7 @@
 }
 
 .sectionBody {
-  opacity: 0.8;
-  line-height: 1.5;
+  opacity: 0.8; 
 }
 
 .buttonRow {
@@ -90,35 +91,115 @@
 }
 
 .landingLayout {
+  --landing-bg: #07080c;
+  --landing-fg: #f4f4f6;
+  --landing-muted: rgba(244, 244, 246, 0.82);
+  --landing-divider: #34353b;
+  --landing-card-bg: #14161b;
+  --landing-card-border: #333;
+  --landing-card-border-hover: #666;
+  --landing-card-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+  --landing-selected-shadow: 0 0 0 2px rgba(255, 121, 168, 0.82), 0 18px 50px rgba(0, 0, 0, 0.3);
+  --landing-card-overlay: rgba(0, 0, 0, 0.5);
+  --landing-icon-circle-bg: rgba(255, 255, 255, 0.08);
+  --landing-icon-filter: invert(1);
+  --landing-badge-bg: rgba(7, 8, 12, 0.5);
+  --landing-image-pane-bg: #c9c9cc;
+  --landing-mobile-hero-fg: #f4f4f6;
+  --landing-scrim: linear-gradient(180deg, rgba(7, 8, 12, 0.04) 0%, rgba(7, 8, 12, 0.08) 34%, rgba(7, 8, 12, 0.18) 58%, rgba(7, 8, 12, 1) 100%);
+  --landing-toggle-bg: rgba(255, 255, 255, 0.06);
+  --landing-toggle-bg-hover: rgba(255, 255, 255, 0.12);
+  --landing-toggle-border: rgba(255, 255, 255, 0.18);
+  --landing-toggle-track-bg: rgba(255, 255, 255, 0.12);
+  --landing-toggle-thumb-bg: #ff5f92;
+  --landing-toggle-thumb-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  --landing-brand-shadow: 0 0 18px rgba(0, 0, 0, 0.9);
   margin-top: 0;
   min-height: 100vh;
   position: relative;
-  background: #07080c;
-  color: #f4f4f6;
+  background: var(--landing-bg);
+  color: var(--landing-fg);
   display: grid;
-  grid-template-columns: 42% 58%;
+  grid-template-columns: minmax(0, 42%) minmax(0, 58%);
+  grid-template-areas: "info media";
+}
+
+.landingThemeDark {
+  color-scheme: dark;
+}
+
+.landingThemeLight {
+  --landing-bg: #f5efe5;
+  --landing-fg: #171412;
+  --landing-muted: rgba(23, 20, 18, 0.72);
+  --landing-divider: rgba(23, 20, 18, 0.14);
+  --landing-card-bg: #ede2d2;
+  --landing-card-border: rgba(23, 20, 18, 0.12);
+  --landing-card-border-hover: rgba(23, 20, 18, 0.32);
+  --landing-card-shadow: 0 18px 45px rgba(87, 63, 40, 0.12);
+  --landing-selected-shadow: 0 0 0 2px rgba(255, 121, 168, 0.58), 0 18px 45px rgba(87, 63, 40, 0.18);
+  --landing-card-overlay: rgba(30, 22, 16, 0.26);
+  --landing-icon-circle-bg: rgba(23, 20, 18, 0.08);
+  --landing-icon-filter: none;
+  --landing-badge-bg: rgba(245, 239, 229, 0.7);
+  --landing-image-pane-bg: #e6dfd5;
+  --landing-toggle-bg: rgba(255, 255, 255, 0.58);
+  --landing-toggle-bg-hover: rgba(255, 255, 255, 0.78);
+  --landing-toggle-border: rgba(23, 20, 18, 0.12);
+  --landing-toggle-track-bg: rgba(23, 20, 18, 0.1);
+  --landing-toggle-thumb-bg: #171412;
+  --landing-toggle-thumb-shadow: 0 8px 18px rgba(87, 63, 40, 0.18);
+  --landing-brand-shadow: none;
 }
 
 .landingInfo {
+  grid-area: info;
   padding: 34px 32px 28px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.landingDesktopIntro {
   display: flex;
   flex-direction: column;
 }
 
 .landingBrand {
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  text-shadow: var(--landing-brand-shadow);
+}
+
+.landingMobileBrand {
+  align-self: flex-start;
 }
 
 .landingCopyBlock {
   margin-top: 88px;
 }
 
+.landingCopyBlockMobile {
+  margin-top: 0;
+  max-width: 380px;
+  margin:0 auto;
+  text-align: center;
+}
+
+.landingCopyBlockMobile .landingCopy {
+  margin-left: auto;
+}
+
 .landingHeading {
   margin: 0;
   font-size: 54px;
-  line-height: 1.05;
   font-weight: 500;
+  line-height: 1.02;
+  text-wrap: balance;
 }
 
 .landingCopy {
@@ -135,6 +216,229 @@
   font-weight: 700;
 }
 
+.landingSecondaryLabel {
+  margin-top: 24px;
+  font-size: 17px;
+  font-weight: 700;
+  opacity: 1;
+}
+
+.landingFeaturedGrid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.landingFeaturedCard {
+  position: relative;
+  min-height: 258px;
+  border: 0;
+  border-radius: 20px;
+  overflow: hidden;
+  background-color: var(--landing-card-bg);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  isolation: isolate;
+  box-shadow: var(--landing-card-shadow);
+  transform: translateY(0);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+  border: 1px solid var(--landing-card-border);
+}
+
+.landingFeaturedCard:hover {
+  border: 1px solid var(--landing-card-border-hover);
+}
+
+.landingFeaturedCard:focus-visible {
+  outline: 2px solid rgba(255, 121, 168, 0.95);
+  outline-offset: 3px;
+}
+
+.landingFeaturedCardSelected {
+  box-shadow: var(--landing-selected-shadow);
+}
+
+.landingFeaturedCardOverlay {
+  position: absolute;
+  inset: 0;
+  background: var(--landing-card-overlay);
+}
+
+.landingFeaturedCardContent {
+  position: relative;
+  z-index: 1;
+  min-height: 258px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 16px;
+}
+
+.landingFeaturedCardSpacer {
+  flex: 1 1 auto;
+}
+
+.landingFeaturedCardTitleWrap {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.landingFeaturedCardTitle {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 0.95;
+  text-shadow: 0 4px 4px rgba(0, 0, 0, 0.75);
+  max-width: 82%;
+}
+
+.landingFeaturedCardTitleRevolutionary {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 0.98;
+  text-transform: uppercase;
+}
+
+.landingFeaturedCardTitleTaverns {
+  font-size: 26px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 0.98;
+}
+
+.landingFeaturedCardTitleArchitecture {
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 0.96;
+}
+
+.landingFeaturedCardTitleSalem {
+  font-size: 36px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 0.92;
+}
+
+.landingFeaturedCardMeta {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.landingFeaturedCardBadge {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 0px solid rgba(255, 255, 255, 0.16);
+  background: var(--landing-badge-bg);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+}
+
+.landingFeaturedCardBadgeIcon {
+  width: 18px;
+  height: 18px;
+  filter: var(--landing-icon-filter);
+  opacity: 0.94;
+}
+
+.landingFeaturedCardMetaText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.landingFeaturedCardMetaPrimary {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.landingFeaturedCardMetaSecondary {
+  font-size: 15px;
+  line-height: 1.2;
+  opacity: 0.84;
+}
+
+.landingRouteList {
+  margin-top: 12px;
+  border-top: 1px solid var(--landing-divider);
+  border-bottom: 1px solid var(--landing-divider);
+}
+
+.landingRouteList .pickRouteRow:last-child {
+  border-bottom: 0;
+}
+
+.landingSecondaryRow {
+  padding: 18px 0;
+}
+
+.landingSecondaryRow .pickRouteIconCircle {
+  width: 44px;
+  height: 44px;
+  background: var(--landing-icon-circle-bg);
+}
+
+.landingSecondaryRow .pickRouteTitle {
+  font-size: 22px;
+}
+
+.landingSecondaryRow .pickRouteMeta {
+  font-size: 15px;
+}
+
+.landingPaidLabel {
+  margin-top: 24px;
+}
+
+.landingPaidList {
+  margin-top: 14px;
+  width: 100%;
+  border-top: 1px solid var(--landing-divider);
+  border-bottom: 1px solid var(--landing-divider);
+}
+
+.landingPaidRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-bottom: 1px solid var(--landing-divider);
+  padding: 12px 0 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.landingPaidRow:last-child {
+  border-bottom: 0;
+}
+
+.landingPaidRowDisabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .landingTourRow {
   margin-top: 14px;
   width: 100%;
@@ -144,8 +448,8 @@
   background: transparent;
   color: inherit;
   border: 0;
-  border-top: 1px solid #34353b;
-  border-bottom: 1px solid #34353b;
+  border-top: 1px solid var(--landing-divider);
+  border-bottom: 1px solid var(--landing-divider);
   padding: 12px 0 14px;
   text-align: left;
   cursor: pointer;
@@ -153,7 +457,7 @@
 
 .landingTourRowMuted {
   width: 100%;
-  border-bottom: 1px solid #34353b;
+  border-bottom: 1px solid var(--landing-divider);
   padding: 12px 0 14px;
 }
 
@@ -164,34 +468,32 @@
 }
 
 .landingTourTitle {
-  font-size: 36px;
-  line-height: 1.1;
-  font-weight: 700;
+  font-size: 36px; 
+  font-weight: 500;
 }
 
 .landingTourTitleMuted {
-  font-size: 36px;
-  line-height: 1.1;
-  font-weight: 700;
-  color: #8f9198;
+  font-size: 36px; 
+  font-weight: 500;
+  color: color-mix(in srgb, var(--landing-fg) 52%, transparent);
 }
 
 .landingTourSub {
   margin-top: 4px;
   font-size: 16px;
-  color: #777;
+  color: var(--landing-muted);
 }
 
 .landingArrow {
   font-size: 54px;
   line-height: 1;
-  color: #fff;
+  color: var(--landing-fg);
 }
 
 .landingArrowIcon {
   width: 28px;
   height: 28px;
-  filter: invert(1);
+  filter: var(--landing-icon-filter);
 }
 
 .landingCtaWrap {
@@ -199,13 +501,16 @@
   padding-top: 24px;
   display: flex;
   justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .landingCtaButton {
   border: 0;
   border-radius: 999px;
-  background: #44464d;
-  color: #fff;
+  background: var(--landing-toggle-bg);
+  color: var(--landing-fg);
   padding: 12px 34px;
   font-size: 16px;
   font-weight: 600;
@@ -218,15 +523,25 @@
 }
 
 .landingImagePane {
+  grid-area: media;
   min-height: 100%;
-  background: #c9c9cc;
+  background: var(--landing-image-pane-bg);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
 }
 
-.landingImagePlaceholder {
-  width: 100%;
-  height: 100%;
-  min-height: 100%;
-  background: #c9c9cc;
+.landingVideoScrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: transparent;
+}
+
+.landingMobileHeroContent {
+  display: none;
+  color: var(--landing-mobile-hero-fg);
 }
 
 .landingVideo {
@@ -262,9 +577,8 @@
 
 .pickHeading {
   margin: 0;
-  font-size: 44px;
-  line-height: 1.05;
-  font-weight: 700;
+  font-size: 44px; 
+  font-weight: 500;
 }
 
 .pickHeadingBelowClose {
@@ -320,72 +634,113 @@
   gap: 10px;
 }
 
-.buildMixLinkRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.buildMixSearchRow {
+  display: block;
 }
 
-.buildMixLinkTextarea {
+.buildMixSearchInputWrap {
+  position: relative;
   width: 100%;
-  flex: 1 1 auto;
+}
+
+.buildMixSearchInput {
+  width: 100%;
   border: 1px solid #34353b;
   background: #fff;
   color: #111;
   font: inherit;
   font-size: 15px;
   line-height: 1.4;
-  padding: 14px 12px;
-  resize: none;
-  height: 52px;
-  min-height: 52px;
-  max-height: 52px;
+  padding: 14px 96px 14px 12px;
   border-radius: 30px;
+  height: 52px;
 }
 
-.buildMixLinkAddButton {
-  width: 52px;
-  height: 52px;
-  border-radius: 999px;
-  border: 0;
-  background: #ff5f92;
-  color: #16161d;
+.buildMixSearchActions {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.buildMixSearchActionButton {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px; 
+  background: #ddd;
+  color: #111;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  flex: 0 0 auto;
 }
 
-.buildMixLinkAddButton:disabled {
+.buildMixSearchActionButton:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.buildMixLinkAddIcon {
-  width: 22px;
-  height: 22px;  
+.buildMixSearchIcon {
+  width: 24px;
+  height: 24px;
 }
 
-.buildMixLinkAddLoading {
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  border: 2px solid rgba(255, 255, 255, 0.4);
-  border-top-color: #fff;
-  animation: buildMixLinkSpin 0.8s linear infinite;
+.buildMixSearchClearIcon {
+  width: 14px;
+  height: 14px;
 }
 
-@keyframes buildMixLinkSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.buildMixLinkSummary {
+.buildMixSearchError {
   font-size: 14px;
-  opacity: 0.9;
-  line-height: 1.4;
+  color: #ffd3df;
+}
+
+.buildMixSearchDropdown {
+  margin-top: 2px;
+  border: 1px solid #34353b;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #0e1015;
+}
+
+.buildMixSearchDropdownRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #34353b;
+}
+
+.buildMixSearchDropdownRow:last-child {
+  border-bottom: 0;
+}
+
+.buildMixSearchDropdownTitle {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.buildMixSelectedLabel {
+  margin-top: 16px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+
+.buildMixEmptyState {
+  border: 1px dashed #34353b;
+  border-radius: 14px;
+  padding: 14px 12px;
+  font-size: 15px;
+  opacity: 0.82;
+  margin-top: 8px;
 }
 
 .pickSectionDivider {
@@ -410,7 +765,7 @@
   border-bottom: 1px solid #34353b;
   background: transparent;
   color: inherit;
-  padding: 12px 0;
+  padding: 22px 0;
   cursor: pointer;
   text-align: left;
 }
@@ -452,8 +807,8 @@
 }
 
 .pickRouteIconCircle {
-  width: 52px;
-  height: 52px;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.1);
   flex-shrink: 0;
@@ -477,6 +832,11 @@
 .pickRouteMeta {
   font-size: 16px;
   opacity: 0.82;
+  line-height: 1.2;
+}
+
+.pickRouteMetaSecondary {
+  opacity: 0.5;
 }
 
 .pickRouteArrow {
@@ -498,11 +858,81 @@
   cursor: pointer;
 }
 
+.buildMixTitleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.buildMixStopTitleWithIndex {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.buildMixReorderButtons {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.buildMixReorderButton {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid #34353b;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.buildMixReorderButton:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.buildMixReorderIcon {
+  width: 14px;
+  height: 14px;
+  filter: invert(1);
+}
+
+.buildMixReorderIconUp {
+  transform: rotate(-90deg);
+}
+
+.buildMixReorderIconDown {
+  transform: rotate(90deg);
+}
+
 .pickRouteArrowIcon {
   width: 24px;
   height: 24px;
   filter: invert(1);
   opacity: 0.92;
+}
+
+.landingLayout .pickRouteRow {
+  border-bottom-color: var(--landing-divider);
+}
+
+.landingLayout .pickRouteIconCircle {
+  background: var(--landing-icon-circle-bg);
+}
+
+.landingLayout .pickRouteWalkIcon,
+.landingLayout .pickRouteArrowIcon {
+  filter: var(--landing-icon-filter);
+}
+
+.landingLayout .pickRouteMeta {
+  color: var(--landing-muted);
 }
 
 .pickRouteToggleIcon {
@@ -625,6 +1055,48 @@
   opacity: 0.9;
 }
 
+.customNarratorPanel {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.customNarratorLabel {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.customNarratorHelp {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  opacity: 0.82;
+}
+
+.customNarratorTextarea {
+  width: 100%;
+  min-height: 148px;
+  resize: vertical;
+  border: 1px solid #34353b;
+  border-radius: 18px;
+  background: #0e1015;
+  color: #f4f4f6;
+  font: inherit;
+  line-height: 1.5;
+  padding: 14px 16px;
+}
+
+.customNarratorTextarea::placeholder {
+  color: rgba(244, 244, 246, 0.52);
+}
+
+.customNarratorCount {
+  font-size: 13px;
+  opacity: 0.7;
+  text-align: right;
+}
+
 .pickImagePane {
   min-height: 100%;
   position: relative;
@@ -659,7 +1131,7 @@
   overflow: hidden;
 }
 
-.generatingVideo {
+.generatingImage {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -689,7 +1161,7 @@
   margin: 0;
   font-size: 44px;
   line-height: 1.05;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .generatingCopy {
@@ -812,6 +1284,21 @@
   padding: 12px 32px 16px;
   border-top: 1px solid #2b2b33;
   background: #0a0a10;
+}
+
+.buildMixStickyCtaEnter {
+  animation: buildMixStickyCtaSlideUp 220ms ease-out;
+}
+
+@keyframes buildMixStickyCtaSlideUp {
+  from {
+    transform: translateY(18px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .buildMixInfo .pickRouteList {
@@ -980,7 +1467,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 0px;
 }
 
 .walkDot {
@@ -999,9 +1486,8 @@
 
 .walkNarratorAvatarWrap {
   position: relative;
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
+  
+  border-radius: 0px;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -1042,9 +1528,10 @@
 .walkHeadline {
   margin: 0;
   font-size: 44px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 0.98;
   letter-spacing: -0.02em;
+  margin-top: 10px;
 }
 
 .walkSubline {
@@ -1065,6 +1552,49 @@
 
 .walkActionRow .nowPlayingButton {
   margin-left: auto;
+}
+
+.walkFindMoreButton {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  justify-content: flex-start;
+  cursor: pointer;
+}
+
+.walkFindMoreButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.walkFindMoreIconCircle {
+  width: 84px;
+  padding: 8px 0;
+  border-radius: 999px;
+  background: #4a4a52;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.walkFindMoreIcon {
+  width: 20px;
+  height: 20px;
+  filter: invert(1);
+}
+
+.walkFindMoreLabel {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.1;
+  opacity: 0.9;
 }
 
 .pillButton {
@@ -1130,7 +1660,7 @@
 .stopTitle {
   font-size: 24px;
   font-weight: 700;
-  opacity: 0.9;
+  opacity: 0.9; 
 }
 
 .stopTitleActive {
@@ -1286,29 +1816,31 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 0px;
 }
 
 .scriptModal {
   width: min(760px, 100%);
-  max-height: 82vh;
+  max-height: 100%;
   overflow: auto;
-  background: #f7f2e8;
+  background: #f3f3f3;
   color: #000;
   position: relative;
-  padding: 56px 24px 24px;
+  padding: 0 0 24px;
+  margin-top:60px;
 }
 
 .scriptModalClose {
   position: absolute;
   top: 12px;
   left: 12px;
-  width: 36px;
-  height: 36px;
-  border: 0;
+  z-index: 5;
+  width: 40px;
+  height: 40px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.1);
-  color: #000;
+  border: 0;
+  background: rgba(24, 24, 31, 0.82);
+  color: #fff;
   padding: 0;
   cursor: pointer;
   display: inline-flex;
@@ -1317,20 +1849,145 @@
 }
 
 .scriptModalCloseIcon {
-  width: 16px;
-  height: 16px;
+  width: 26px;
+  height: 26px;
+  filter: invert(1);
 }
 
 .scriptModalBody {
+  margin: 18px 0;
+  padding: 0 24px;
   font-size: 20px;
   line-height: 1.45;
   white-space: pre-wrap;
+}
+
+.scriptModalImageWrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 0;
+  overflow: clip;
+  background: #d6d0c5;
+}
+
+.scriptModalImage {
+  object-fit: cover;
 }
 
 .walkImagesGrid {
   margin-top: 0;
   padding: 16px 20px 20px;
   background: #11111a;
+}
+
+.followAlongLayout {
+  min-height: 100vh;
+}
+
+.followAlongInfo {
+  gap: 18px;
+}
+
+.followAlongLead {
+  margin: 8px 0 0;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.followAlongFieldBlock {
+  display: grid;
+  gap: 10px;
+}
+
+.followAlongSummaryCard {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: #f6f6f8;
+  border: 1px solid #e4e4ea;
+}
+
+.followAlongSummaryRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.followAlongStatsRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.followAlongStat {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.followAlongStatLabel {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7c7c86;
+}
+
+.followAlongStatValue {
+  font-size: 15px;
+  font-weight: 600;
+  color: #11111a;
+}
+
+.followAlongSearchRow {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.followAlongSearchRow:hover {
+  background: rgba(17, 17, 26, 0.04);
+}
+
+.followAlongStoryCard {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.followAlongStoryImageWrap {
+  position: relative;
+  min-height: 120px;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.followAlongStoryBody {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.followAlongStoryEyebrow {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ea0ae;
 }
 
 .mapFrame {
@@ -1397,8 +2054,7 @@
 
 .narrationText {
   margin-top: 10px;
-  opacity: 0.85;
-  line-height: 1.5;
+  opacity: 0.85; 
 }
 
 .imagesGrid {
@@ -1439,8 +2095,7 @@
 }
 
 .semiMuted {
-  opacity: 0.85;
-  line-height: 1.5;
+  opacity: 0.85; 
 }
 
 .lightMuted {
@@ -1471,28 +2126,120 @@
   font-size: 13px;
 }
 
+.landingFooter {
+  margin-top: auto;
+  padding-top: 24px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.landingThemeToggle {
+  width: 100%;
+  max-width: 250px;
+  border: 1px solid var(--landing-toggle-border);
+  background: var(--landing-toggle-bg);
+  color: var(--landing-fg);
+  border-radius: 999px;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+  backdrop-filter: blur(14px);
+}
+
+.landingThemeToggle:hover {
+  background: var(--landing-toggle-bg-hover);
+}
+
+.landingThemeToggle:focus-visible {
+  outline: 2px solid rgba(255, 121, 168, 0.95);
+  outline-offset: 3px;
+}
+
+.landingThemeToggleCopy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.landingThemeToggleLabel {
+  font-size: 12px;
+  line-height: 1.1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--landing-muted);
+}
+
+.landingThemeToggleValue {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.landingThemeToggleTrack {
+  width: 54px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--landing-toggle-track-bg);
+  padding: 3px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.landingThemeToggleThumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--landing-toggle-thumb-bg);
+  box-shadow: var(--landing-toggle-thumb-shadow);
+  transform: translateX(0);
+  transition: transform 180ms ease;
+}
+
+.landingThemeLight .landingThemeToggleThumb {
+  transform: translateX(24px);
+}
+
 @media (max-width: 860px) {
   .landingLayout {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "media"
+      "info";
   }
 
   .landingImagePane {
-    order: 1;
-    min-height: 360px;
+    min-height: min(62vh, 640px);
   }
 
   .landingInfo {
-    order: 2;
-    padding: 20px 24px 30px;
+    padding: 0 0px 30px 16px;
+  }
+
+  .landingDesktopIntro {
+    display: none;
+  }
+
+  .landingMobileHeroContent {
+    position: absolute;
+    inset: 20px 16px 24px;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .landingVideoScrim {
+    background: var(--landing-scrim);
   }
 
   .landingBrand {
-    position: absolute;
-    top: 18px;
-    left: 24px;
-    z-index: 1;
-    font-size: 24px;
-    display:none;
+    font-size: 18px;
   }
 
   .landingCopyBlock {
@@ -1500,11 +2247,71 @@
   }
 
   .landingHeading {
-    font-size: 54px;
+    font-size: 54px; 
   }
 
   .landingPopular {
-    margin-top: 36px;
+    margin-top: 18px;
+  }
+
+  .landingSecondaryLabel {
+    margin-top: 20px;
+  }
+
+  .landingFeaturedGrid {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(232px, 72vw);
+    grid-template-columns: none;
+    gap: 14px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding-bottom: 6px;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+
+  .landingFeaturedGrid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .landingFeaturedCard {
+    min-height: 252px;
+    scroll-snap-align: start;
+  }
+
+  .landingFeaturedCardContent {
+    min-height: 252px;
+  }
+
+  .landingFeaturedCardTitleWrap {
+    max-width: none;
+  }
+
+  .landingFeaturedCardTitle { 
+    max-width: 100%;
+  }
+
+  
+
+  .landingRouteList {
+    margin-top: 24px;
+  }
+
+  .landingSecondaryRow {
+    padding: 18px 0;
+  }
+
+  .landingSecondaryRow .pickRouteTitle {
+    font-size: 20px;
+  }
+
+  .landingPaidLabel {
+    margin-top: 22px;
+  }
+
+  .landingPaidList {
+    margin-top: 12px;
   }
 
   .landingTourTitle,
@@ -1518,6 +2325,16 @@
 
   .landingCtaWrap {
     margin-top: 24px;
+    justify-content: flex-start;
+  }
+
+  .landingFooter {
+    padding-top: 22px;
+    padding-right: 16px;
+  }
+
+  .landingThemeToggle {
+    max-width: none;
   }
 
   .pickLayout {
@@ -1628,9 +2445,38 @@
     top: auto;
     width: 100%;
   }
+
+  .followAlongStatsRow {
+    grid-template-columns: 1fr;
+  }
+
+  .followAlongStoryCard {
+    grid-template-columns: 1fr;
+  }
+
+  .followAlongStoryImageWrap {
+    min-height: 180px;
+  }
 }
 
 @media (min-width: 1024px) {
+  .landingLayout {
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .landingInfo {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .landingImagePane {
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .buildMixLayout {
     height: 100vh;
     overflow: hidden;
@@ -1640,7 +2486,7 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding-bottom: 30px;
+    padding-bottom: 0px;
   }
 
   .buildMixInfo .pickRouteList {
@@ -1651,6 +2497,13 @@
     height: 100vh;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .followAlongInfo {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 24px;
   }
 
   .buildMixStickyCtaWrap {

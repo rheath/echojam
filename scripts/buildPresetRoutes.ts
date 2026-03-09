@@ -1,0 +1,402 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+// @ts-expect-error Node --experimental-strip-types requires explicit .ts extension in ESM mode.
+import { PresetCitySeedSchema, PresetMetaSchema, type PresetCitySeed, type PresetMeta } from "../lib/presets/schema.ts";
+
+type Persona = "adult" | "preteen" | "ghost";
+
+type CanonicalStopRow = {
+  id: string;
+  city: string;
+  title: string;
+  lat: number;
+  lng: number;
+  image_url: string | null;
+  image_source: "places" | "curated" | "placeholder" | "link_seed" | null;
+  google_place_id: string | null;
+};
+
+type StopResolved = {
+  id: string;
+  title: string;
+  lat: number;
+  lng: number;
+  googlePlaceId: string;
+};
+
+type GeneratedRoute = {
+  id: string;
+  title: string;
+  durationLabel: string;
+  durationMinutes: number;
+  description: string;
+  defaultPersona: Persona;
+  city: string;
+  stops: StopResolved[];
+};
+
+type PlaceDetailsNewResponse = {
+  id?: string;
+  displayName?: { text?: string };
+  location?: { latitude?: number; longitude?: number };
+  error?: {
+    message?: string;
+    status?: string;
+  };
+};
+
+const ROOT = process.cwd();
+const PRESET_DIR = path.join(ROOT, "app/content/presets");
+const GENERATED_FILE = path.join(ROOT, "app/content/generated/presetRoutes.generated.ts");
+const DIAGNOSTICS_FILE = path.join(ROOT, "app/content/generated/presetRoutes.diagnostics.json");
+const ENV_FILE = path.join(ROOT, ".env.local");
+
+const LEGACY_FALLBACK_BY_PLACE_ID: Record<string, StopResolved> = {
+  ChIJ_salem_harbor_seed: {
+    id: "preset-stop-salem-harbor",
+    title: "Salem Harbor",
+    lat: 42.5212,
+    lng: -70.8877,
+    googlePlaceId: "ChIJ_salem_harbor_seed",
+  },
+  ChIJ_house_of_the_seven_gables_seed: {
+    id: "preset-stop-house-seven-gables",
+    title: "House of the Seven Gables",
+    lat: 42.521756,
+    lng: -70.883507,
+    googlePlaceId: "ChIJ_house_of_the_seven_gables_seed",
+  },
+  ChIJ_old_burying_point_seed: {
+    id: "preset-stop-old-burying-point",
+    title: "Old Burying Point Cemetery",
+    lat: 42.5206,
+    lng: -70.8922,
+    googlePlaceId: "ChIJ_old_burying_point_seed",
+  },
+  ChIJ_salem_witch_trials_memorial_seed: {
+    id: "preset-stop-witch-trials-memorial",
+    title: "Salem Witch Trials Memorial",
+    lat: 42.5232,
+    lng: -70.8958,
+    googlePlaceId: "ChIJ_salem_witch_trials_memorial_seed",
+  },
+  ChIJ_joshua_ward_house_seed: {
+    id: "preset-stop-joshua-ward-house",
+    title: "Joshua Ward House",
+    lat: 42.5203982,
+    lng: -70.8959536,
+    googlePlaceId: "ChIJ_joshua_ward_house_seed",
+  },
+  ChIJ_ropes_mansion_garden_seed: {
+    id: "preset-stop-ropes-mansion-garden",
+    title: "Ropes Mansion & Garden",
+    lat: 42.5211,
+    lng: -70.8972,
+    googlePlaceId: "ChIJ_ropes_mansion_garden_seed",
+  },
+  ChIJ_salem_witch_house_seed: {
+    id: "preset-stop-salem-witch-house",
+    title: "Salem Witch House",
+    lat: 42.5229,
+    lng: -70.8985,
+    googlePlaceId: "ChIJ_salem_witch_house_seed",
+  },
+};
+
+function slug(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function makeStopId(city: string, placeId: string, title: string) {
+  const candidate = slug(title) || slug(placeId) || "stop";
+  return `preset-${city}-${candidate}`;
+}
+
+function parseArgs() {
+  const args = new Set(process.argv.slice(2));
+  return {
+    check: args.has("--check"),
+    allowUnresolved: args.has("--allow-unresolved"),
+  };
+}
+
+async function loadEnvFromDotLocal() {
+  try {
+    const raw = await fs.readFile(ENV_FILE, "utf8");
+    const lines = raw.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const idx = trimmed.indexOf("=");
+      if (idx <= 0) continue;
+      const key = trimmed.slice(0, idx).trim();
+      if (!key || process.env[key]) continue;
+      let value = trimmed.slice(idx + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      process.env[key] = value;
+    }
+  } catch {
+    // .env.local is optional here; script can still run with shell env vars.
+  }
+}
+
+function getAdmin(): SupabaseClient | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+async function readJson<T>(filePath: string): Promise<T> {
+  const raw = await fs.readFile(filePath, "utf8");
+  return JSON.parse(raw) as T;
+}
+
+async function readPresetSeeds() {
+  const entries = await fs.readdir(PRESET_DIR, { withFileTypes: true });
+  const routeFiles = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".routes.json"))
+    .map((entry) => path.join(PRESET_DIR, entry.name))
+    .sort();
+
+  const metaFiles = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".meta.json"))
+    .map((entry) => path.join(PRESET_DIR, entry.name))
+    .sort();
+
+  const seeds: PresetCitySeed[] = [];
+  const metas = new Map<string, PresetMeta>();
+
+  for (const file of routeFiles) {
+    const json = await readJson<unknown>(file);
+    seeds.push(PresetCitySeedSchema.parse(json));
+  }
+  for (const file of metaFiles) {
+    const json = await readJson<unknown>(file);
+    const parsed = PresetMetaSchema.parse(json);
+    metas.set(parsed.city, parsed);
+  }
+
+  return { seeds, metas };
+}
+
+async function getCanonicalByPlaceId(admin: SupabaseClient, city: string, placeId: string) {
+  const { data, error } = await admin
+    .from("canonical_stops")
+    .select("id,city,title,lat,lng,image_url,image_source,google_place_id")
+    .eq("city", city)
+    .eq("google_place_id", placeId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data ?? null) as CanonicalStopRow | null;
+}
+
+async function upsertCanonicalFromResolved(
+  admin: SupabaseClient,
+  city: string,
+  placeId: string,
+  resolved: StopResolved
+): Promise<CanonicalStopRow | null> {
+  const { data, error } = await admin
+    .from("canonical_stops")
+    .upsert(
+      {
+        id: `canon-place-${slug(city)}-${slug(placeId).slice(0, 32)}`,
+        city,
+        title: resolved.title,
+        lat: resolved.lat,
+        lng: resolved.lng,
+        source: "preset_seed",
+        google_place_id: placeId,
+        image_source: "placeholder",
+      },
+      { onConflict: "id" }
+    )
+    .select("id,city,title,lat,lng,image_url,image_source,google_place_id")
+    .single();
+
+  if (error) {
+    console.warn(`Failed to upsert canonical stop for ${city}:${placeId}: ${error.message}`);
+    return null;
+  }
+  return data as CanonicalStopRow;
+}
+
+async function resolveFromPlaceDetails(placeId: string): Promise<StopResolved | null> {
+  const apiKey = (process.env.GOOGLE_PLACES_API_KEY || "").trim();
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": "id,displayName,location",
+      },
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as PlaceDetailsNewResponse;
+    if (body.error) return null;
+    const resolvedId = (body.id || "").trim();
+    const displayName = (body.displayName?.text || "").trim();
+    if (!resolvedId || !displayName) return null;
+
+    const lat = Number(body.location?.latitude);
+    const lng = Number(body.location?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+    return {
+      id: makeStopId("seed", placeId, displayName),
+      title: displayName,
+      lat,
+      lng,
+      googlePlaceId: resolvedId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveStop(
+  admin: SupabaseClient | null,
+  city: string,
+  placeId: string,
+  diagnostics: { unresolved: Array<{ city: string; placeId: string; reason: string }> }
+): Promise<StopResolved | null> {
+  if (admin) {
+    const canonical = await getCanonicalByPlaceId(admin, city, placeId);
+    if (canonical) {
+      return {
+        id: makeStopId(city, placeId, canonical.title),
+        title: canonical.title,
+        lat: canonical.lat,
+        lng: canonical.lng,
+        googlePlaceId: placeId,
+      };
+    }
+  }
+
+  const fromPlaces = await resolveFromPlaceDetails(placeId);
+  if (fromPlaces) {
+    const resolved: StopResolved = {
+      ...fromPlaces,
+      id: makeStopId(city, placeId, fromPlaces.title),
+      googlePlaceId: placeId,
+    };
+    if (admin) await upsertCanonicalFromResolved(admin, city, placeId, resolved);
+    return resolved;
+  }
+
+  const fallback = LEGACY_FALLBACK_BY_PLACE_ID[placeId];
+  if (fallback) {
+    return {
+      ...fallback,
+      id: makeStopId(city, placeId, fallback.title),
+      googlePlaceId: placeId,
+    };
+  }
+
+  diagnostics.unresolved.push({ city, placeId, reason: "Not found in canonical_stops and Google Place Details unavailable." });
+  return null;
+}
+
+function toTsLiteral(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+async function main() {
+  await loadEnvFromDotLocal();
+  const { check, allowUnresolved } = parseArgs();
+  const admin = getAdmin();
+
+  const { seeds, metas } = await readPresetSeeds();
+  const globalRouteIds = new Set<string>();
+  for (const seed of seeds) {
+    for (const route of seed.routes) {
+      if (globalRouteIds.has(route.id)) {
+        throw new Error(`Duplicate route id across city seeds: ${route.id}`);
+      }
+      globalRouteIds.add(route.id);
+    }
+  }
+
+  const diagnostics = {
+    generatedAt: new Date().toISOString(),
+    unresolved: [] as Array<{ city: string; placeId: string; reason: string }>,
+  };
+
+  const generatedRoutes: GeneratedRoute[] = [];
+
+  for (const seed of seeds) {
+    for (const route of seed.routes) {
+      const resolvedStops: StopResolved[] = [];
+      for (const placeId of route.stopPlaceIds) {
+        const resolved = await resolveStop(admin, seed.city, placeId, diagnostics);
+        if (!resolved) continue;
+        resolvedStops.push(resolved);
+      }
+
+      const uniqueStops = resolvedStops.filter((stop, idx) =>
+        resolvedStops.findIndex((other) => other.googlePlaceId === stop.googlePlaceId) === idx
+      );
+
+      if (uniqueStops.length === 0) {
+        throw new Error(`Route ${route.id} resolved zero stops.`);
+      }
+
+      generatedRoutes.push({
+        id: route.id,
+        title: route.title,
+        durationLabel: `${route.durationMinutes} mins`,
+        durationMinutes: route.durationMinutes,
+        description: route.description,
+        defaultPersona: route.defaultPersona,
+        city: seed.city,
+        stops: uniqueStops,
+      });
+    }
+  }
+
+  if (!allowUnresolved && diagnostics.unresolved.length > 0) {
+    throw new Error(`Found ${diagnostics.unresolved.length} unresolved place IDs. Re-run with --allow-unresolved to emit diagnostics only.`);
+  }
+
+  const generatedPayload = {
+    generatedAt: diagnostics.generatedAt,
+    cities: Array.from(new Set(seeds.map((seed) => seed.city))).sort(),
+    routes: generatedRoutes,
+    cityMeta: Object.fromEntries(Array.from(metas.entries()).map(([city, meta]) => [city, meta.overview])),
+  };
+
+  const source = `// AUTO-GENERATED FILE. DO NOT EDIT BY HAND.\n// Generated by scripts/buildPresetRoutes.ts\n\nexport const presetRouteData = ${toTsLiteral(generatedPayload)} as const;\n`;
+
+  if (!check) {
+    await fs.writeFile(GENERATED_FILE, source, "utf8");
+    await fs.writeFile(DIAGNOSTICS_FILE, `${JSON.stringify(diagnostics, null, 2)}\n`, "utf8");
+  }
+
+  console.log(
+    JSON.stringify(
+      {
+        check,
+        routes: generatedRoutes.length,
+        unresolved: diagnostics.unresolved.length,
+        output: GENERATED_FILE,
+      },
+      null,
+      2
+    )
+  );
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

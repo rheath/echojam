@@ -3,7 +3,7 @@ import "server-only";
 import { cache } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { getRouteById, type Persona } from "@/app/content/salemRoutes";
-import { cityPlaceholderImage } from "@/lib/placesImages";
+import { cityPlaceholderImage, proxyGoogleImageUrl } from "@/lib/placesImages";
 import { personaCatalog } from "@/lib/personas/catalog";
 
 type JamRow = {
@@ -55,7 +55,7 @@ function toNullableTrimmed(value: string | null | undefined) {
 function isStrongImage(value: string | null | undefined) {
   const v = toNullableTrimmed(value);
   if (!v) return false;
-  return !v.toLowerCase().includes("/placeholder-");
+  return !v.toLowerCase().includes("/placeholder");
 }
 
 function firstImage(candidates: Array<string | null | undefined>) {
@@ -70,7 +70,7 @@ function firstImage(candidates: Array<string | null | undefined>) {
 }
 
 function isPersona(value: string | null | undefined): value is Persona {
-  return value === "adult" || value === "preteen" || value === "ghost";
+  return value === "adult" || value === "preteen" || value === "ghost" || value === "custom";
 }
 
 function toPersonaLabel(persona: string | null | undefined) {
@@ -124,7 +124,8 @@ async function resolveCustomRouteSummary(routeId: string) {
   const typedStops = (stops ?? []) as CustomRouteStopRow[];
 
   const imageUrl =
-    firstImage(typedStops.map((stop) => stop.image_url)) || cityPlaceholderImage(typedRoute.city || DEFAULT_CITY);
+    proxyGoogleImageUrl(firstImage(typedStops.map((stop) => stop.image_url))) ||
+    cityPlaceholderImage(typedRoute.city || DEFAULT_CITY);
   const stopCount = typedStops.length;
   const minutes = typedRoute.length_minutes && typedRoute.length_minutes > 0 ? typedRoute.length_minutes : null;
 
@@ -147,14 +148,14 @@ async function resolvePresetRouteSummary(routeId: string) {
     for (const image of stop.images) imageCandidates.push(image);
   }
 
-  const imageUrl = firstImage(imageCandidates) || cityPlaceholderImage(DEFAULT_CITY);
+  const imageUrl = proxyGoogleImageUrl(firstImage(imageCandidates)) || cityPlaceholderImage(DEFAULT_CITY);
   return {
     routeTitle: route.title,
     imageUrl,
     stopCount: route.stops.length,
     minutes: parseRouteMinutes(route.durationLabel),
     transportMode: "walk" as const,
-    city: DEFAULT_CITY,
+    city: route.city || DEFAULT_CITY,
   };
 }
 
@@ -205,7 +206,7 @@ export const getJamSharePayload = cache(async (jamId: string): Promise<JamShareP
   const personaLabel = toPersonaLabel(jamRow.persona);
   const description = makeDescription([
     personaLabel ? `${personaLabel} narration` : null,
-    summary.stopCount > 0 ? `${summary.stopCount} stops` : null,
+    summary.stopCount > 0 ? `${summary.stopCount} stop${summary.stopCount === 1 ? "" : "s"}` : null,
     summary.minutes ? `${summary.minutes} mins` : null,
     summary.transportMode === "drive" ? "Drive route" : "Walk route",
   ]);
