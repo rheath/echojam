@@ -521,7 +521,7 @@ const [isEditingStopsFromWalk, setIsEditingStopsFromWalk] = useState(false);
 const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
 const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null>(null);
 const previousStepRef = useRef<FlowStep>("landing");
-const scriptModalCloseTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+const scriptModalCloseTimeoutRef = useRef<number | null>(null);
 const followAlongLastPositionRef = useRef<{
   lat: number;
   lng: number;
