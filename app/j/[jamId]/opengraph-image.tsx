@@ -26,6 +26,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
   const backgroundUrl = payload.posterBackgroundImageUrl
     ? toAbsoluteUrl(payload.posterBackgroundImageUrl, baseUrl)
     : null;
+  const logoUrl = toAbsoluteUrl("/images/marketing/Wandrful-logo-v2.svg", baseUrl);
 
   return new ImageResponse(
     (
@@ -59,7 +60,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
             position: "absolute",
             inset: 0,
             background:
-              "linear-gradient(180deg, rgba(7, 8, 12, 0.12) 0%, rgba(7, 8, 12, 0.28) 32%, rgba(7, 8, 12, 0.62) 68%, rgba(7, 8, 12, 0.94) 100%)",
+              "linear-gradient(180deg, rgba(7, 8, 12, 0.22) 0%, rgba(7, 8, 12, 0.4) 30%, rgba(7, 8, 12, 0.72) 68%, rgba(7, 8, 12, 0.96) 100%)",
           }}
         />
 
@@ -68,7 +69,16 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
             position: "absolute",
             inset: 0,
             background:
-              "linear-gradient(90deg, rgba(7, 8, 12, 0.7) 0%, rgba(7, 8, 12, 0.24) 42%, rgba(7, 8, 12, 0.08) 68%, rgba(7, 8, 12, 0.16) 100%)",
+              "linear-gradient(90deg, rgba(7, 8, 12, 0.82) 0%, rgba(7, 8, 12, 0.42) 42%, rgba(7, 8, 12, 0.16) 68%, rgba(7, 8, 12, 0.18) 100%)",
+          }}
+        />
+
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background:
+              "radial-gradient(circle at 18% 84%, rgba(7, 8, 12, 0.84) 0%, rgba(7, 8, 12, 0.68) 24%, rgba(7, 8, 12, 0.38) 46%, rgba(7, 8, 12, 0) 72%)",
           }}
         />
 
@@ -79,28 +89,23 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
             left: 48,
             display: "flex",
             alignItems: "center",
-            gap: 14,
-            padding: "12px 18px",
+            justifyContent: "center",
+            padding: "14px 20px",
             borderRadius: 999,
             background: "rgba(7, 8, 12, 0.44)",
             border: "1px solid rgba(255, 255, 255, 0.14)",
-            color: "#f4f4f6",
-            fontFamily: BODY_FONT,
-            fontSize: 24,
-            letterSpacing: "0.18em",
-            textTransform: "uppercase",
+            minWidth: 180,
           }}
         >
-          <div
+          <img
+            src={logoUrl}
+            alt="Wandrful"
             style={{
-              width: 12,
-              height: 12,
-              borderRadius: 999,
-              background: "#ff5f92",
-              boxShadow: "0 0 18px rgba(255, 95, 146, 0.55)",
+              width: 122,
+              height: 28,
+              objectFit: "contain",
             }}
           />
-          EchoJam
         </div>
 
         {!backgroundUrl ? (
@@ -145,7 +150,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
               lineHeight: 1.02,
               letterSpacing: "-0.03em",
               textWrap: "balance",
-              textShadow: "0 12px 38px rgba(0, 0, 0, 0.38)",
+              textShadow: "0 16px 44px rgba(0, 0, 0, 0.62)",
             }}
           >
             {payload.posterTitle}
@@ -157,7 +162,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
               fontSize: 30,
               lineHeight: 1.3,
               color: "rgba(244, 244, 246, 0.88)",
-              textShadow: "0 10px 30px rgba(0, 0, 0, 0.36)",
+              textShadow: "0 12px 34px rgba(0, 0, 0, 0.58)",
             }}
           >
             {payload.posterSubtitle}
