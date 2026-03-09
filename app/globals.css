@@ -1,5 +1,4 @@
 @import "tailwindcss"; 
-@import "maplibre-gl/dist/maplibre-gl.css";
 
 
 :root {
@@ -30,4 +29,3 @@ body {
 html, body {
   line-height: 1.1;
 }
-

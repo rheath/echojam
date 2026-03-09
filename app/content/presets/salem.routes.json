@@ -8,11 +8,11 @@
       "description": "Ghost stories and folklore.",
       "defaultPersona": "ghost",
       "stopPlaceIds": [
+        "ChIJB916r2UU44kRKAWug1nsKlI",
+        "ChIJw6yCIDsV44kRyjucYZkurnQ",
+        "ChIJj3C7yHsU44kRW5X36nsvAnc",
         "ChIJo15HrGUU44kREi4broJXhBE",
         "ChIJaxSbrXsU44kRlkuQDQIsixM",
-        "ChIJB916r2UU44kRKAWug1nsKlI",
-        "ChIJj3C7yHsU44kRW5X36nsvAnc",
-        "ChIJw6yCIDsV44kRyjucYZkurnQ",
         "ChIJRcN-b_UV44kRA2e4omgKIqU"
       ]
     }

@@ -3918,6 +3918,8 @@ async function startStopNarration() {
               currentStopIndex={currentStopIndex ?? -1}
               myPos={myPos}
               initialFitRoute
+              showRoutePath
+              routeTravelMode="walk"
             />
             <button onClick={goHome} className={styles.mapBackButton} aria-label="Close">
               <Image

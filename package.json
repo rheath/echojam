@@ -11,9 +11,9 @@
     "presets:check": "node --experimental-strip-types scripts/buildPresetRoutes.ts --check"
   },
   "dependencies": {
+    "@googlemaps/js-api-loader": "^2.0.2",
     "@supabase/supabase-js": "^2.97.0",
     "howler": "^2.2.4",
-    "maplibre-gl": "^5.19.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3"
