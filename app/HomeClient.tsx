@@ -207,7 +207,7 @@ const FEATURED_PRESET_ROUTE_IDS = [
   "nyc-architecture-walk",
   "salem-after-dark",
 ] as const satisfies readonly RouteDef["id"][];
-const NEARBY_STORY_ENABLED = ["1", "true", "yes", "on"].includes(
+const DEFAULT_NEARBY_STORY_ENABLED = ["1", "true", "yes", "on"].includes(
   (process.env.NEXT_PUBLIC_ENABLE_NEARBY_STORY || "").trim().toLowerCase()
 );
 
@@ -543,6 +543,7 @@ const followAlongLastPositionRef = useRef<{
   // For MVP: Salem-only. This just controls whether we use geolocation-derived distances.
   const [geoAllowed, setGeoAllowed] = useState<boolean | null>(null);
   const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [isNearbyStoryEnabled, setIsNearbyStoryEnabled] = useState(DEFAULT_NEARBY_STORY_ENABLED);
 
   const jamIdFromUrl = searchParams.get("jam");
   const debugStepFromUrl = searchParams.get("debugStep");
@@ -709,6 +710,29 @@ const followAlongLastPositionRef = useRef<{
       // Ignore localStorage access failures; the toggle still works for this session.
     }
   }, [hasLoadedLandingTheme, landingTheme]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetch("/api/feature-flags", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Feature flag request failed");
+        }
+        return await response.json() as { nearbyStoryEnabled?: boolean };
+      })
+      .then((payload) => {
+        if (cancelled || typeof payload.nearbyStoryEnabled !== "boolean") return;
+        setIsNearbyStoryEnabled(payload.nearbyStoryEnabled);
+      })
+      .catch(() => {
+        // Keep the build-time fallback if the runtime flag lookup fails.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ---------- Supabase: load jam ----------
   async function loadJamById(id: string) {
@@ -1250,7 +1274,7 @@ async function startStopNarration() {
 }
 
   async function handleNearbyStory() {
-    if (!NEARBY_STORY_ENABLED || isGeneratingNearbyStory || isResolvingNearbyGeo) return;
+    if (!isNearbyStoryEnabled || isGeneratingNearbyStory || isResolvingNearbyGeo) return;
     const previousStep = step;
 
     try {
@@ -2487,7 +2511,7 @@ async function startStopNarration() {
     return waypoints ? `${base}&waypoints=${encodeURIComponent(waypoints)}` : base;
   }, [route]);
   const buildMixSubmitDisabled = isEditingStopsFromWalk ? isGeneratingMix : (!selectionValidation.ok || isGeneratingMix);
-  const isSurpriseMixUnavailable = !NEARBY_STORY_ENABLED;
+  const isSurpriseMixUnavailable = !isNearbyStoryEnabled;
   const isSurpriseMixLoading = isGeneratingNearbyStory || isResolvingNearbyGeo;
   const isSurpriseMixDisabled = isSurpriseMixUnavailable || isSurpriseMixLoading;
   const surpriseMixSubtitle = isResolvingNearbyGeo
