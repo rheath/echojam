@@ -19,6 +19,7 @@ import dynamic from "next/dynamic";
 import styles from "./HomeClient.module.css";
 
 const RouteMap = dynamic(() => import("./components/RouteMap"), { ssr: false });
+const SCRIPT_MODAL_EXIT_MS = 240;
 
 const landingRevolutionaryFont = Cinzel({
   subsets: ["latin"],
@@ -510,6 +511,7 @@ const [followAlongRouteProgressM, setFollowAlongRouteProgressM] = useState<numbe
 const [followAlongOffRoute, setFollowAlongOffRoute] = useState(false);
 const [followAlongStatusCopy, setFollowAlongStatusCopy] = useState("Waiting for route preview");
 const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
+const [isScriptModalClosing, setIsScriptModalClosing] = useState(false);
 const [isGeneratingScriptForModal, setIsGeneratingScriptForModal] = useState(false);
 const [isGeneratingAudioForCurrentStop, setIsGeneratingAudioForCurrentStop] = useState(false);
 const [isGeneratingNearbyStory, setIsGeneratingNearbyStory] = useState(false);
@@ -519,6 +521,7 @@ const [isEditingStopsFromWalk, setIsEditingStopsFromWalk] = useState(false);
 const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
 const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null>(null);
 const previousStepRef = useRef<FlowStep>("landing");
+const scriptModalCloseTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 const followAlongLastPositionRef = useRef<{
   lat: number;
   lng: number;
@@ -889,12 +892,17 @@ const followAlongLastPositionRef = useRef<{
   }
 
   function goHome() {
+    if (scriptModalCloseTimeoutRef.current) {
+      window.clearTimeout(scriptModalCloseTimeoutRef.current);
+      scriptModalCloseTimeoutRef.current = null;
+    }
     router.replace("/");
     setJam(null);
     setCustomRoute(null);
     setGenerationJobId(null);
     setGenerationJobKind(null);
     setIsScriptModalOpen(false);
+    setIsScriptModalClosing(false);
     setReturnToWalkOnClose(false);
     setNarratorFlowSource(null);
     setSelectedRouteId(null);
@@ -1429,6 +1437,11 @@ async function startStopNarration() {
 
   async function openScriptModal() {
     if (!currentStop || !jam?.route_id) return;
+    if (scriptModalCloseTimeoutRef.current) {
+      window.clearTimeout(scriptModalCloseTimeoutRef.current);
+      scriptModalCloseTimeoutRef.current = null;
+    }
+    setIsScriptModalClosing(false);
     setIsScriptModalOpen(true);
     const isPresetRoute = !jam.route_id.startsWith("custom:");
     const customRouteId = isPresetRoute ? null : getCustomRouteId(jam.route_id);
@@ -1480,6 +1493,19 @@ async function startStopNarration() {
       setIsGeneratingScriptForModal(false);
       setIsGeneratingAudioForCurrentStop(false);
     }
+  }
+
+  function closeScriptModal() {
+    if (!isScriptModalOpen || isScriptModalClosing) return;
+    setIsScriptModalClosing(true);
+    if (scriptModalCloseTimeoutRef.current) {
+      window.clearTimeout(scriptModalCloseTimeoutRef.current);
+    }
+    scriptModalCloseTimeoutRef.current = window.setTimeout(() => {
+      setIsScriptModalOpen(false);
+      setIsScriptModalClosing(false);
+      scriptModalCloseTimeoutRef.current = null;
+    }, SCRIPT_MODAL_EXIT_MS);
   }
 
   // ---------- Step transitions ----------
@@ -2380,6 +2406,14 @@ async function startStopNarration() {
     if (!["landing", "pickDuration", "buildMix", "followAlongSetup", "generating", "walk", "followAlongDrive"].includes(step)) return;
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [step]);
+
+  useEffect(() => {
+    return () => {
+      if (scriptModalCloseTimeoutRef.current) {
+        window.clearTimeout(scriptModalCloseTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const stopList = useMemo(() => {
     if (!route) return [];
@@ -3830,29 +3864,30 @@ async function startStopNarration() {
                   className={`${styles.audioSeek} ${styles.nowPlayingSeek}`}
                 />
                 <div className={`${styles.nowPlayingContent} ${styles.nowPlayingContentEnter}`}>
-                  <div className={styles.nowPlayingMeta}>
+                  <div className={styles.nowPlayingMetaGroup}>
                     <button
                       type="button"
-                      className={styles.nowPlayingTitleLink}
+                      className={styles.nowPlayingMetaButton}
                       onClick={openScriptModal}
                     >
-                      {currentStop.title}
-                      <Image
-                        src="/icons/file-earmark-text.svg"
-                        alt=""
-                        width={14}
-                        height={14}
-                        className={styles.nowPlayingTitleLinkIcon}
-                        aria-hidden="true"
-                      />
-                    </button>
-                    <div className={styles.nowPlayingLinksRow}>
-                      <div className={styles.nowPlayingSubtitle}>
-                        {hasCurrentAudio
-                          ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
-                          : "Audio not generated yet"}
+                      <div className={styles.nowPlayingThumbWrap}>
+                        <Image
+                          src={toSafeStopImage(currentStop.images[0])}
+                          alt={currentStop.title}
+                          fill
+                          className={styles.nowPlayingThumb}
+                          unoptimized
+                        />
                       </div>
-                    </div>
+                      <div className={styles.nowPlayingMeta}>
+                        <div className={styles.nowPlayingTitleText}>{currentStop.title}</div>
+                        <div className={styles.nowPlayingSubtitle}>
+                          {hasCurrentAudio
+                            ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
+                            : "Audio not generated yet"}
+                        </div>
+                      </div>
+                    </button>
                   </div>
                   <button
                     className={`${styles.nowPlayingButton} ${styles.nowPlayingBarButton}`}
@@ -3872,13 +3907,18 @@ async function startStopNarration() {
                 </div>
               </div>
             )}
-            {isScriptModalOpen && currentStop && (
-              <div className={styles.scriptModalOverlay} role="dialog" aria-modal="true" aria-label="Narration script">
-                <div className={styles.scriptModal}>
+            {(isScriptModalOpen || isScriptModalClosing) && currentStop && (
+              <div
+                className={`${styles.scriptModalOverlay} ${isScriptModalClosing ? styles.scriptModalOverlayClosing : ""}`}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Narration script"
+              >
+                <div className={`${styles.scriptModal} ${isScriptModalClosing ? styles.scriptModalClosing : ""}`}>
                   <button
                     type="button"
                     className={styles.scriptModalClose}
-                    onClick={() => setIsScriptModalOpen(false)}
+                    onClick={closeScriptModal}
                     aria-label="Close script"
                   >
                     <Image
@@ -4117,43 +4157,44 @@ async function startStopNarration() {
                   className={`${styles.audioSeek} ${styles.nowPlayingSeek}`}
                 />
                 <div className={`${styles.nowPlayingContent} ${styles.nowPlayingContentEnter}`}>
-                  <div className={styles.nowPlayingMeta}>
+                  <div className={styles.nowPlayingMetaGroup}>
                     <button
                       type="button"
-                      className={styles.nowPlayingTitleLink}
+                      className={styles.nowPlayingMetaButton}
                       onClick={openScriptModal}
                     >
-                      {currentStop.title}
-                      <Image
-                        src="/icons/file-earmark-text.svg"
-                        alt=""
-                        width={14}
-                        height={14}
-                        className={styles.nowPlayingTitleLinkIcon}
-                        aria-hidden="true"
-                      />
-                    </button>
-                    <div className={styles.nowPlayingLinksRow}>
-                      <div className={styles.nowPlayingSubtitle}>
-                        {isGeneratingScriptForModal
-                          ? "Generating script..."
-                          : isGeneratingAudioForCurrentStop
-                            ? "Generating audio..."
-                            : hasCurrentAudio
-                              ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
-                              : "Audio not generated yet"}
+                      <div className={styles.nowPlayingThumbWrap}>
+                        <Image
+                          src={toSafeStopImage(currentStop.images[0])}
+                          alt={currentStop.title}
+                          fill
+                          className={styles.nowPlayingThumb}
+                          unoptimized
+                        />
                       </div>
-                      {hasCurrentAudio ? (
-                        <a
-                          className={styles.nowPlayingInlineLink}
-                          href={currentStopAudio}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          View audio
-                        </a>
-                      ) : null}
-                    </div>
+                      <div className={styles.nowPlayingMeta}>
+                        <div className={styles.nowPlayingTitleText}>{currentStop.title}</div>
+                        <div className={styles.nowPlayingSubtitle}>
+                          {isGeneratingScriptForModal
+                            ? "Generating script..."
+                            : isGeneratingAudioForCurrentStop
+                              ? "Generating audio..."
+                              : hasCurrentAudio
+                                ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
+                                : "Audio not generated yet"}
+                        </div>
+                      </div>
+                    </button>
+                    {hasCurrentAudio ? (
+                      <a
+                        className={styles.nowPlayingInlineLink}
+                        href={currentStopAudio}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        View audio
+                      </a>
+                    ) : null}
                   </div>
                   <button
                     className={`${styles.nowPlayingButton} ${styles.nowPlayingBarButton}`}
@@ -4173,13 +4214,18 @@ async function startStopNarration() {
                 </div>
               </div>
             )}
-            {isScriptModalOpen && currentStop && (
-              <div className={styles.scriptModalOverlay} role="dialog" aria-modal="true" aria-label="Narration script">
-                <div className={styles.scriptModal}>
+            {(isScriptModalOpen || isScriptModalClosing) && currentStop && (
+              <div
+                className={`${styles.scriptModalOverlay} ${isScriptModalClosing ? styles.scriptModalOverlayClosing : ""}`}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Narration script"
+              >
+                <div className={`${styles.scriptModal} ${isScriptModalClosing ? styles.scriptModalClosing : ""}`}>
                   <button
                     type="button"
                     className={styles.scriptModalClose}
-                    onClick={() => setIsScriptModalOpen(false)}
+                    onClick={closeScriptModal}
                     aria-label="Close script"
                   >
                     <Image
