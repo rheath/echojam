@@ -1,7 +1,7 @@
 "use client";
 
-import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
 import { useEffect, useRef, useState } from "react";
+import { loadGoogleMapsLibraries } from "@/lib/googleMapsLoader";
 import styles from "./RouteMap.module.css";
 
 type Stop = {
@@ -49,15 +49,6 @@ type DisplayStop = {
   lat: number;
   lng: number;
 };
-type GoogleMapsLibraries = {
-  Map: typeof google.maps.Map;
-  InfoWindow: typeof google.maps.InfoWindow;
-  Polyline: typeof google.maps.Polyline;
-  Marker: typeof google.maps.Marker;
-  LatLngBounds: typeof google.maps.LatLngBounds;
-  DirectionsService: typeof google.maps.DirectionsService;
-};
-
 const DEFAULT_CENTER = { lat: 42.5195, lng: -70.8967 };
 const ROUTE_LINE_COLOR = "#2b1b3f";
 const ROUTE_LINE_UNDERLAY = "#ffffff";
@@ -137,40 +128,6 @@ const MINIMAL_TOURISM_MAP_STYLES: google.maps.MapTypeStyle[] = [
     stylers: [{ color: "#666666" }],
   },
 ];
-
-let googleMapsLibrariesPromise: Promise<GoogleMapsLibraries> | null = null;
-let configuredGoogleMapsKey: string | null = null;
-
-function loadGoogleMapsLibraries(): Promise<GoogleMapsLibraries> {
-  const apiKey = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "").trim();
-  if (!apiKey) {
-    throw new Error("Missing NEXT_PUBLIC_GOOGLE_MAPS_API_KEY.");
-  }
-
-  if (configuredGoogleMapsKey && configuredGoogleMapsKey !== apiKey) {
-    throw new Error("NEXT_PUBLIC_GOOGLE_MAPS_API_KEY changed after Google Maps was initialized.");
-  }
-
-  if (!googleMapsLibrariesPromise) {
-    configuredGoogleMapsKey = apiKey;
-    setOptions({ key: apiKey, v: "weekly" });
-    googleMapsLibrariesPromise = Promise.all([
-      importLibrary("core"),
-      importLibrary("maps"),
-      importLibrary("marker"),
-      importLibrary("routes"),
-    ]).then(([coreLibrary, mapsLibrary, markerLibrary, routesLibrary]) => ({
-      Map: mapsLibrary.Map,
-      InfoWindow: mapsLibrary.InfoWindow,
-      Polyline: mapsLibrary.Polyline,
-      Marker: markerLibrary.Marker,
-      LatLngBounds: coreLibrary.LatLngBounds,
-      DirectionsService: routesLibrary.DirectionsService,
-    }));
-  }
-
-  return googleMapsLibrariesPromise;
-}
 
 export default function RouteMap({
   stops,
