@@ -53,10 +53,26 @@ export default function RouteMap({
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const initialViewRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
+  const [isMapReady, setIsMapReady] = useState(false);
   const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(
     providedRouteCoords
   );
   const [routeStatus, setRouteStatus] = useState<"loading" | "ready" | "failed">("loading");
+
+  if (!initialViewRef.current) {
+    const first =
+      stops[0] ??
+      endpoints?.origin ??
+      myPos ??
+      cityCenter ??
+      { lat: 42.5195, lng: -70.8967 };
+    initialViewRef.current = {
+      lat: first.lat,
+      lng: first.lng,
+      zoom: stops.length ? 15 : 13,
+    };
+  }
 
   useEffect(() => {
     if (providedRouteCoords?.length) {
@@ -124,119 +140,104 @@ export default function RouteMap({
 
       const maplibregl = await import("maplibre-gl");
       if (cancelled) return;
-
-      const first =
-        stops[0] ??
-        endpoints?.origin ??
-        myPos ??
-        cityCenter ??
-        { lat: 42.5195, lng: -70.8967 };
+      const initialView = initialViewRef.current ?? { lat: 42.5195, lng: -70.8967, zoom: 13 };
 
       const map = new maplibregl.Map({
         container: containerRef.current,
         style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
-        center: [first.lng, first.lat],
-        zoom: stops.length ? 15 : 13,
+        center: [initialView.lng, initialView.lat],
+        zoom: initialView.zoom,
         attributionControl: { compact: true },
       });
 
       mapRef.current = map;
-      map.on("load", () => map.resize());
 
       map.on("load", () => {
         if (cancelled) return;
 
-        const hasPrimaryGeometry =
-          stops.length > 0 ||
-          Boolean(endpoints?.origin) ||
-          Boolean(endpoints?.destination) ||
-          Boolean(routeCoords?.length);
+        map.resize();
 
-        if (hasPrimaryGeometry) {
-          map.addSource("route", {
-            type: "geojson",
-            data: routeGeoJSON(stops, showRoutePath ? routeCoords : null, showRoutePath ? routeStatus : "loading"),
-          });
+        map.addSource("route", {
+          type: "geojson",
+          data: routeGeoJSON([], null, "loading"),
+        });
 
-          map.addLayer({
-            id: "route-line-underlay",
-            type: "line",
-            source: "route",
-            paint: {
-              "line-color": "#ffffff",
-              "line-width": 8,
-              "line-opacity": 0.8,
-            },
-          });
+        map.addLayer({
+          id: "route-line-underlay",
+          type: "line",
+          source: "route",
+          paint: {
+            "line-color": "#ffffff",
+            "line-width": 8,
+            "line-opacity": 0.8,
+          },
+        });
 
-          map.addLayer({
-            id: "route-line",
-            type: "line",
-            source: "route",
-            paint: {
-              "line-color": "#2b1b3f",
-              "line-width": 5,
-              "line-opacity": 0.9,
-            },
-          });
+        map.addLayer({
+          id: "route-line",
+          type: "line",
+          source: "route",
+          paint: {
+            "line-color": "#2b1b3f",
+            "line-width": 5,
+            "line-opacity": 0.9,
+          },
+        });
 
-          // Stops
-          map.addSource("stops", {
-            type: "geojson",
-            data: stopsGeoJSON(stops, 0, spreadOverlappingStops),
-          });
+        map.addSource("stops", {
+          type: "geojson",
+          data: stopsGeoJSON([], 0, false),
+        });
 
-          map.addLayer({
-            id: "stops-circle",
-            type: "circle",
-            source: "stops",
-            paint: {
-              "circle-color": [
-                "match",
-                ["get", "status"],
-                "current",
-                "#ff5f92",
-                "arrival",
-                "#2e78ff",
-                "visited",
-                "#8e93a3",
-                "#2b1b3f",
-              ],
-              "circle-radius": [
-                "match",
-                ["get", "status"],
-                "current",
-                12,
-                9,
-              ],
-              "circle-stroke-color": "#ffffff",
-              "circle-stroke-width": 2,
-              "circle-opacity": 0.95,
-            },
-          });
+        map.addLayer({
+          id: "stops-circle",
+          type: "circle",
+          source: "stops",
+          paint: {
+            "circle-color": [
+              "match",
+              ["get", "status"],
+              "current",
+              "#ff5f92",
+              "arrival",
+              "#2e78ff",
+              "visited",
+              "#8e93a3",
+              "#2b1b3f",
+            ],
+            "circle-radius": [
+              "match",
+              ["get", "status"],
+              "current",
+              12,
+              9,
+            ],
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 2,
+            "circle-opacity": 0.95,
+          },
+        });
 
-          map.addLayer({
-            id: "stops-label",
-            type: "symbol",
-            source: "stops",
-            layout: {
-              "text-field": ["get", "label"],
-              "text-size": 12,
-              "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
-            },
-            paint: {
-              "text-color": [
-                "match",
-                ["get", "status"],
-                "current",
-                "#111111",
-                "#ffffff",
-              ],
-            },
-          });
-        }
+        map.addLayer({
+          id: "stops-label",
+          type: "symbol",
+          source: "stops",
+          layout: {
+            "text-field": ["get", "label"],
+            "text-size": 12,
+            "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          },
+          paint: {
+            "text-color": [
+              "match",
+              ["get", "status"],
+              "current",
+              "#111111",
+              "#ffffff",
+            ],
+          },
+        });
 
-        // My position
         map.addSource("me", {
           type: "geojson",
           data: myPosGeoJSON(null),
@@ -257,7 +258,7 @@ export default function RouteMap({
 
         map.addSource("endpoints", {
           type: "geojson",
-          data: endpointGeoJSON(endpoints),
+          data: endpointGeoJSON(null),
         });
 
         map.addLayer({
@@ -302,36 +303,31 @@ export default function RouteMap({
           },
         });
 
-        if (stops.length) {
-          map.on("mouseenter", "stops-circle", () => {
-            map.getCanvas().style.cursor = "pointer";
-          });
+        map.on("mouseenter", "stops-circle", () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
 
-          map.on("mouseleave", "stops-circle", () => {
-            map.getCanvas().style.cursor = "";
-          });
+        map.on("mouseleave", "stops-circle", () => {
+          map.getCanvas().style.cursor = "";
+        });
 
-          map.on("click", "stops-circle", (e) => {
-            const feature = e.features?.[0];
-            if (!feature || feature.geometry.type !== "Point") return;
+        map.on("click", "stops-circle", (e) => {
+          const feature = e.features?.[0];
+          if (!feature || feature.geometry.type !== "Point") return;
 
-            const props = feature.properties ?? {};
-            const title = typeof props.title === "string" ? props.title : "Stop";
-            const subtitle = typeof props.subtitle === "string" ? props.subtitle : "";
-            const image = typeof props.image === "string" ? props.image : "";
-            const coordinates = feature.geometry.coordinates as [number, number];
+          const props = feature.properties ?? {};
+          const title = typeof props.title === "string" ? props.title : "Stop";
+          const subtitle = typeof props.subtitle === "string" ? props.subtitle : "";
+          const image = typeof props.image === "string" ? props.image : "";
+          const coordinates = feature.geometry.coordinates as [number, number];
 
-            new maplibregl.Popup({ closeButton: false, offset: 14 })
-              .setLngLat(coordinates)
-              .setDOMContent(buildStopPopupContent(title, subtitle, image))
-              .addTo(map);
-          });
+          new maplibregl.Popup({ closeButton: false, offset: 14 })
+            .setLngLat(coordinates)
+            .setDOMContent(buildStopPopupContent(title, subtitle, image))
+            .addTo(map);
+        });
 
-        }
-
-        if (hasPrimaryGeometry) {
-          fitMapToPoints(map, stops, null, endpoints);
-        }
+        setIsMapReady(true);
       });
     }
 
@@ -339,10 +335,11 @@ export default function RouteMap({
 
     return () => {
       cancelled = true;
+      setIsMapReady(false);
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [stops, myPos, cityCenter, spreadOverlappingStops, showRoutePath, endpoints, routeStatus]);
+  }, []);
 
   useEffect(() => {
     const onResize = () => mapRef.current?.resize();
@@ -354,7 +351,7 @@ export default function RouteMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (!map.isStyleLoaded()) return;
+    if (!isMapReady || !map.isStyleLoaded()) return;
 
     const routeSrc = map.getSource("route") as GeoJSONSource | undefined;
     routeSrc?.setData?.(
@@ -373,14 +370,14 @@ export default function RouteMap({
 
     const endpointSrc = map.getSource("endpoints") as GeoJSONSource | undefined;
     endpointSrc?.setData?.(endpointGeoJSON(endpoints));
-  }, [stops, currentStopIndex, myPos, routeCoords, routeStatus, spreadOverlappingStops, showRoutePath, endpoints]);
+  }, [currentStopIndex, endpoints, isMapReady, myPos, routeCoords, routeStatus, showRoutePath, spreadOverlappingStops, stops]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (!map.isStyleLoaded()) return;
+    if (!isMapReady || !map.isStyleLoaded()) return;
 
-    if (initialFitRoute && currentStopIndex === 0) {
+    if (initialFitRoute && currentStopIndex <= 0) {
       fitMapToRoute(map, routeCoords, stops, endpoints);
       return;
     }
@@ -388,27 +385,27 @@ export default function RouteMap({
     if (!followCurrentStop) return;
     const cur = stops[currentStopIndex];
     if (cur) map.easeTo({ center: [cur.lng, cur.lat], duration: 450 });
-  }, [stops, currentStopIndex, followCurrentStop, initialFitRoute, routeCoords, endpoints]);
+  }, [currentStopIndex, endpoints, followCurrentStop, initialFitRoute, isMapReady, routeCoords, stops]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (!map.isStyleLoaded()) return;
+    if (!isMapReady || !map.isStyleLoaded()) return;
     if (followCurrentStop) return;
     if (!stops.length) return;
 
     fitMapToRoute(map, routeCoords, stops, endpoints);
-  }, [followCurrentStop, routeCoords, stops, endpoints]);
+  }, [endpoints, followCurrentStop, isMapReady, routeCoords, stops]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (!map.isStyleLoaded()) return;
+    if (!isMapReady || !map.isStyleLoaded()) return;
     if (stops.length > 0) return;
     if (!myPos) return;
 
     map.easeTo({ center: [myPos.lng, myPos.lat], duration: 350 });
-  }, [stops, myPos]);
+  }, [isMapReady, myPos, stops]);
 
   return (
     <div className={styles.mapShell}>
@@ -577,39 +574,6 @@ function myPosGeoJSON(
       },
     ],
   };
-}
-
-function fitMapToPoints(
-  map: MapLibreMap,
-  stops: Stop[],
-  myPos?: { lat: number; lng: number } | null,
-  endpoints?: Props["endpoints"]
-) {
-  const coords: [number, number][] = stops.map((s) => [s.lng, s.lat]);
-  if (myPos) coords.push([myPos.lng, myPos.lat]);
-  if (endpoints?.origin) coords.push([endpoints.origin.lng, endpoints.origin.lat]);
-  if (endpoints?.destination) coords.push([endpoints.destination.lng, endpoints.destination.lat]);
-  if (!coords.length) return;
-
-  let minX = coords[0][0],
-    minY = coords[0][1],
-    maxX = coords[0][0],
-    maxY = coords[0][1];
-
-  for (const [x, y] of coords) {
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x);
-    maxY = Math.max(maxY, y);
-  }
-
-  map.fitBounds(
-    [
-      [minX, minY],
-      [maxX, maxY],
-    ],
-    { padding: 40, duration: 0 }
-  );
 }
 
 function fitMapToRoute(
