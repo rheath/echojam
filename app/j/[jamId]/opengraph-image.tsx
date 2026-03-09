@@ -106,8 +106,8 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
             src={logoUrl}
             alt="Wandrful"
             style={{
-              width: 183,
-              height: 42,
+              width: 244,
+              height: 56,
               objectFit: "contain",
             }}
           />
