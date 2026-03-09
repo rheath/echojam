@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { getJamSharePayload } from "@/lib/server/jamShare";
 import { getSiteBaseUrl, toAbsoluteUrl } from "@/lib/server/siteUrl";
@@ -26,7 +28,13 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
   const backgroundUrl = payload.posterBackgroundImageUrl
     ? toAbsoluteUrl(payload.posterBackgroundImageUrl, baseUrl)
     : null;
-  const logoUrl = toAbsoluteUrl("/images/marketing/Wandrful-logo-white-v2.svg", baseUrl);
+  let logoUrl: string | null = null;
+  try {
+    const logoSvg = await readFile(join(process.cwd(), "public/images/marketing/Wandrful-logo-white-v2.svg"), "utf8");
+    logoUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(logoSvg)}`;
+  } catch (error) {
+    console.warn("og image: failed to load logo asset", error);
+  }
 
   return new ImageResponse(
     (
@@ -91,27 +99,29 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
           }}
         />
 
-        <div
-          style={{
-            position: "absolute",
-            top: 40,
-            left: 48,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 0,
-          }}
-        >
-          <img
-            src={logoUrl}
-            alt="Wandrful"
+        {logoUrl ? (
+          <div
             style={{
-              width: 244,
-              height: 56,
-              objectFit: "contain",
+              position: "absolute",
+              top: 28,
+              left: 40,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 0,
             }}
-          />
-        </div>
+          >
+            <img
+              src={logoUrl}
+              alt="Wandrful"
+              style={{
+                width: 252,
+                height: 194,
+                objectFit: "contain",
+              }}
+            />
+          </div>
+        ) : null}
 
         {!backgroundUrl ? (
           <div
