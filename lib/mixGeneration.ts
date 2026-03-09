@@ -2,9 +2,13 @@ import { createClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import type { Persona } from "@/app/content/salemRoutes";
 import { personaCatalog } from "@/lib/personas/catalog";
+import { customNarratorPersonaPrompt } from "@/lib/personas/customNarrator";
 
-export type Persona = "adult" | "preteen" | "ghost";
+export type { FixedPersona, Persona } from "@/app/content/salemRoutes";
+export const CUSTOM_NARRATOR_VOICES = ["alloy", "nova", "shimmer", "onyx"] as const;
+export type CustomNarratorVoice = (typeof CUSTOM_NARRATOR_VOICES)[number];
 export type GenerationMode =
   | "reuse_existing"
   | "force_regenerate_all"
@@ -22,6 +26,7 @@ export type StopInput = {
   lat: number;
   lng: number;
   image: string;
+  googlePlaceId?: string;
 };
 
 const DEFAULT_SWITCH: Required<GenerationSwitch> = {
@@ -29,17 +34,110 @@ const DEFAULT_SWITCH: Required<GenerationSwitch> = {
   replay_audio: {},
 };
 
-const VOICE_BY_PERSONA: Record<Persona, string> = {
+const VOICE_BY_PERSONA: Record<Exclude<Persona, "custom">, string> = {
   adult: "alloy",
   preteen: "nova",
   ghost: "alloy",
 };
 
-const PERSONA_PROMPTS = {
+const FIXED_PERSONA_PROMPTS = {
   adult: personaCatalog.adult.prompt,
   preteen: personaCatalog.preteen.prompt,
   ghost: personaCatalog.ghost.prompt,
 } as const;
+
+function getPersonaPrompt(persona: Persona) {
+  if (persona === "custom") return customNarratorPersonaPrompt;
+  return FIXED_PERSONA_PROMPTS[persona];
+}
+
+export function toCustomNarratorVoice(value: string | null | undefined): CustomNarratorVoice | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "alloy" || normalized === "nova" || normalized === "shimmer" || normalized === "onyx") {
+    return normalized;
+  }
+  return null;
+}
+
+export function selectCustomNarratorVoice(guidance: string): CustomNarratorVoice {
+  const normalized = guidance.toLowerCase();
+  const scores: Record<CustomNarratorVoice, number> = {
+    alloy: 0,
+    nova: 0,
+    shimmer: 0,
+    onyx: 0,
+  };
+
+  const applyScore = (voice: CustomNarratorVoice, terms: string[], weight = 1) => {
+    for (const term of terms) {
+      if (normalized.includes(term)) scores[voice] += weight;
+    }
+  };
+
+  applyScore("nova", [
+    "kid",
+    "kids",
+    "child",
+    "children",
+    "fun",
+    "playful",
+    "energetic",
+    "excited",
+    "adventure",
+    "adventurous",
+    "young",
+    "8 year",
+    "8-year",
+    "family friendly",
+    "family-friendly",
+  ]);
+  applyScore("onyx", [
+    "spooky",
+    "haunting",
+    "haunted",
+    "eerie",
+    "mysterious",
+    "mystery",
+    "ghost",
+    "dark",
+    "dramatic",
+    "ominous",
+    "gothic",
+    "whisper",
+  ]);
+  applyScore("shimmer", [
+    "calm",
+    "warm",
+    "gentle",
+    "soft",
+    "reflective",
+    "soothing",
+    "peaceful",
+    "quiet",
+    "intimate",
+    "thoughtful",
+    "meditative",
+    "comforting",
+  ]);
+
+  const ranked: CustomNarratorVoice[] = ["nova", "onyx", "shimmer", "alloy"];
+  let bestVoice: CustomNarratorVoice = "alloy";
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const voice of ranked) {
+    const score = scores[voice];
+    if (score > bestScore) {
+      bestVoice = voice;
+      bestScore = score;
+    }
+  }
+  return bestVoice;
+}
+
+function getNarrationVoice(persona: Persona, customVoice?: CustomNarratorVoice | null) {
+  if (persona === "custom") return customVoice ?? "alloy";
+  return VOICE_BY_PERSONA[persona];
+}
 
 export function toNullableTrimmed(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
@@ -91,9 +189,14 @@ export async function generateScriptWithOpenAI(
   persona: Persona,
   stop: StopInput,
   stopIndex: number,
-  totalStops: number
+  totalStops: number,
+  narratorGuidance?: string | null
 ) {
-  const personaPrompt = PERSONA_PROMPTS[persona];
+  const personaPrompt = getPersonaPrompt(persona);
+  const normalizedNarratorGuidance = toNullableTrimmed(narratorGuidance);
+  if (persona === "custom" && !normalizedNarratorGuidance) {
+    throw new Error("Narrator guidance is required for custom narrator generation.");
+  }
   const systemPrompt = [
     ...personaPrompt.system,
     "Write natural spoken narration for one tour stop.",
@@ -104,6 +207,7 @@ export async function generateScriptWithOpenAI(
     `Transport: ${transportMode}`,
     `Tour length: ${lengthMinutes} minutes`,
     `Narrator persona: ${personaPrompt.name}`,
+    ...(normalizedNarratorGuidance ? [`Narrator guidance: ${normalizedNarratorGuidance}`] : []),
     `Target spoken duration for this stop: ${personaPrompt.lengthTarget.durationSeconds} seconds`,
     `Stop ${stopIndex + 1} of ${totalStops}: ${stop.title}`,
     "Style guidelines:",
@@ -148,10 +252,16 @@ export async function generateScriptWithOpenAI(
   return data.choices?.[0]?.message?.content?.trim() || "";
 }
 
-export async function synthesizeSpeechWithOpenAI(apiKey: string, persona: Persona, text: string) {
+export async function synthesizeSpeechWithOpenAI(
+  apiKey: string,
+  persona: Persona,
+  text: string,
+  customVoice?: CustomNarratorVoice | null
+) {
+  const voice = getNarrationVoice(persona, customVoice);
   const attempts = [
-    { model: "gpt-4o-mini-tts", voice: VOICE_BY_PERSONA[persona] },
-    { model: "tts-1", voice: VOICE_BY_PERSONA[persona] },
+    { model: "gpt-4o-mini-tts", voice },
+    { model: "tts-1", voice },
   ];
   const failures: string[] = [];
 
@@ -238,7 +348,7 @@ export async function uploadNarrationAudio(audioBytes: Uint8Array, routeId: stri
 
 export function fallbackScript(city: string, persona: Persona, stop: StopInput, index: number) {
   if (persona === "adult") {
-    const personaPrompt = PERSONA_PROMPTS.adult;
+    const personaPrompt = FIXED_PERSONA_PROMPTS.adult;
     return [
       personaPrompt.fallbackTemplate.line1(stop.title, city),
       personaPrompt.fallbackTemplate.line2,
@@ -246,8 +356,8 @@ export function fallbackScript(city: string, persona: Persona, stop: StopInput, 
       personaPrompt.fallbackTemplate.line4(index + 2),
     ].join(" ");
   }
-  const personaPrompt = PERSONA_PROMPTS.preteen;
   if (persona === "preteen") {
+    const personaPrompt = FIXED_PERSONA_PROMPTS.preteen;
     return [
       personaPrompt.fallbackTemplate.line1(stop.title),
       personaPrompt.fallbackTemplate.line2,
@@ -255,8 +365,15 @@ export function fallbackScript(city: string, persona: Persona, stop: StopInput, 
       personaPrompt.fallbackTemplate.line4,
     ].join(" ");
   }
+  if (persona === "custom") {
+    return [
+      `You are at ${stop.title}, one of the places that gives ${city} its character.`,
+      "Take in the details around you and let this stop set the tone for the rest of the tour.",
+      "There is something worth noticing here before we move on.",
+    ].join(" ");
+  }
 
-  const ghostPrompt = PERSONA_PROMPTS.ghost;
+  const ghostPrompt = FIXED_PERSONA_PROMPTS.ghost;
   return [
     ghostPrompt.fallbackTemplate.line1(stop.title, city),
     ghostPrompt.fallbackTemplate.line2,

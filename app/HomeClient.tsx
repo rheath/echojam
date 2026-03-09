@@ -3,16 +3,42 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
+import { Bree_Serif, Cinzel, Forum, Grenze } from "next/font/google";
 import { supabase } from "@/lib/supabaseClient";
-import { getRouteById, salemRoutes, type Persona, type RouteDef } from "@/app/content/salemRoutes";
-import { buildPresetOverviewStop, isPresetOverviewStopId } from "@/lib/presetOverview";
+import { getPresetRoutesByCity, getRouteById, type Persona, type PresetCity, type RouteDef } from "@/app/content/salemRoutes";
+import { buildPresetOverviewStop, getPresetCityMeta, isPresetOverviewStopId } from "@/lib/presetOverview";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { getMaxStops, validateMixSelection } from "@/lib/mixConstraints";
+import {
+  nextFollowAlongStopIndex,
+  normalizeRouteProgress,
+  shouldTriggerFollowAlongStop,
+  type FollowAlongLocation,
+} from "@/lib/followAlong";
 import dynamic from "next/dynamic";
 import styles from "./HomeClient.module.css";
 
 const RouteMap = dynamic(() => import("./components/RouteMap"), { ssr: false });
 
+const landingRevolutionaryFont = Cinzel({
+  subsets: ["latin"],
+  weight: ["600", "700"],
+});
+
+const landingTavernsFont = Bree_Serif({
+  subsets: ["latin"],
+  weight: "400",
+});
+
+const landingArchitectureFont = Forum({
+  subsets: ["latin"],
+  weight: "400",
+});
+
+const landingSalemFont = Grenze({
+  subsets: ["latin"],
+  weight: ["500", "600"],
+});
 
 
 type JamRow = {
@@ -28,13 +54,23 @@ type JamRow = {
   // Legacy fields (keep if present in table)
   is_playing?: boolean | null;
   position_ms?: number | null;
+  listen_count?: number | null;
 };
 
-type FlowStep = "landing" | "presetRoutes" | "pickDuration" | "buildMix" | "generating" | "walk" | "end";
+type FlowStep =
+  | "landing"
+  | "pickDuration"
+  | "buildMix"
+  | "followAlongSetup"
+  | "generating"
+  | "walk"
+  | "followAlongDrive"
+  | "end";
 type PickDurationPage = "narrator" | "routes";
 type NarratorFlowSource = "buildMix" | "walkEdit" | null;
-type CityOption = "salem" | "boston" | "concord";
+type CityOption = PresetCity;
 type TransportMode = "walk" | "drive";
+type LandingTheme = "dark" | "light";
 
 type CustomMixStop = {
   id: string;
@@ -42,15 +78,30 @@ type CustomMixStop = {
   lat: number;
   lng: number;
   image: string;
+  googlePlaceId?: string;
 };
 
 type CustomRouteResponse = {
   route: {
     id: string;
     title: string;
+    city?: string | null;
     length_minutes: number;
     transport_mode: TransportMode;
+    experience_kind?: "mix" | "follow_along" | null;
     status: "queued" | "generating" | "generating_script" | "generating_audio" | "ready" | "ready_with_warnings" | "failed";
+    narrator_default?: Persona | null;
+    narrator_guidance?: string | null;
+    narrator_voice?: string | null;
+    origin_label?: string | null;
+    origin_lat?: number | null;
+    origin_lng?: number | null;
+    destination_label?: string | null;
+    destination_lat?: number | null;
+    destination_lng?: number | null;
+    route_distance_meters?: number | null;
+    route_duration_seconds?: number | null;
+    route_polyline?: [number, number][] | null;
   };
   stops: Array<{
     stop_id: string;
@@ -58,12 +109,17 @@ type CustomRouteResponse = {
     lat: number;
     lng: number;
     image_url: string | null;
+    stop_kind?: "story" | "arrival" | null;
+    distance_along_route_meters?: number | null;
+    trigger_radius_meters?: number | null;
     script_adult: string | null;
     script_preteen: string | null;
     script_ghost: string | null;
+    script_custom?: string | null;
     audio_url_adult: string | null;
     audio_url_preteen: string | null;
     audio_url_ghost: string | null;
+    audio_url_custom?: string | null;
     is_overview?: boolean;
     position: number;
   }>;
@@ -86,26 +142,39 @@ type ActiveGenerationJobRow = {
   status: MixJobResponse["status"];
 };
 
-type ResolveLinksResponse = {
-  resolved: CustomMixStop[];
-  failed: Array<{ input: string; reason: string }>;
-  duplicatesSkipped: number;
+type SearchPlacesResponse = {
+  candidates: CustomMixStop[];
 };
 
-type ResolveSummary = {
-  added: number;
-  skippedDuplicate: number;
-  skippedLimit: number;
-  failed: Array<{ input: string; reason: string }>;
+type FollowAlongSearchResponse = {
+  results: Array<
+    FollowAlongLocation & {
+      title: string;
+      types: string[];
+    }
+  >;
 };
 
-type NearbyStoryResponse = {
-  routeRef: string;
-  insertedStopId: string;
-  insertedStopIndex: number;
-  autoplay: true;
-  source: "canonical" | "google_places" | "locality_fallback";
-  distanceMeters: number | null;
+type FollowAlongPreviewResponse = {
+  origin: FollowAlongLocation;
+  destination: FollowAlongLocation;
+  routeCoords: [number, number][];
+  distanceMeters: number;
+  durationSeconds: number;
+};
+
+type NearbyPlacesResponse = {
+  stops: CustomMixStop[];
+  cityUsed: string;
+  sourceSummary: Record<string, number>;
+};
+
+type StartCustomMixOptions = {
+  source?: "manual" | "instant";
+  routeTitle?: string;
+  errorStep?: FlowStep;
+  cityOverride?: string;
+  narratorGuidance?: string | null;
 };
 
 const GENERATION_STATUS_LABELS: Record<MixJobResponse["status"], string> = {
@@ -121,14 +190,32 @@ const POLL_INTERVAL_MS = 1500;
 const POLL_REQUEST_TIMEOUT_MS = 8000;
 const POLL_FAILURE_THRESHOLD = 5;
 const START_JOB_TIMEOUT_MS = 15000;
-const PERSONA_KEYS: Persona[] = ["adult", "preteen", "ghost"];
-const DEFAULT_STOP_IMAGE = "/images/salem/placeholder-01.png";
+const PERSONA_KEYS: Array<Exclude<Persona, "custom">> = ["adult", "preteen", "ghost"];
+const CUSTOM_NARRATOR_MAX_CHARS = 500;
+const DEFAULT_STOP_IMAGE = "/images/salem/placeholder.png";
+const LANDING_THEME_STORAGE_KEY = "wandrful-theme";
+const CITY_META: Record<CityOption, { label: string; center: { lat: number; lng: number } }> = {
+  salem: { label: "Salem", center: { lat: 42.5195, lng: -70.8967 } },
+  boston: { label: "Boston", center: { lat: 42.3601, lng: -71.0589 } },
+  concord: { label: "Concord", center: { lat: 42.4604, lng: -71.3489 } },
+  nyc: { label: "New York City", center: { lat: 40.7527, lng: -73.9772 } },
+};
+const FEATURED_PRESET_ROUTE_IDS = [
+  "boston-revolutionary-secrets",
+  "boston-old-taverns",
+  "nyc-architecture-walk",
+  "salem-after-dark",
+] as const satisfies readonly RouteDef["id"][];
 const NEARBY_STORY_ENABLED = ["1", "true", "yes", "on"].includes(
   (process.env.NEXT_PUBLIC_ENABLE_NEARBY_STORY || "").trim().toLowerCase()
 );
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function isLandingTheme(value: string | null): value is LandingTheme {
+  return value === "dark" || value === "light";
 }
 
 function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
@@ -169,14 +256,6 @@ function toSafeStopImage(value: string | null | undefined) {
   return DEFAULT_STOP_IMAGE;
 }
 
-function getInitialStopSubtitle(distanceToStopM: number | null, fallbackMinutes: number) {
-  if (distanceToStopM !== null) {
-    if (distanceToStopM < 50) return "at this location";
-    return `${estimateWalkMinutes(distanceToStopM)} mins away`;
-  }
-  return `${fallbackMinutes} mins away`;
-}
-
 function getRouteMiles(stops: RouteDef["stops"]) {
   if (stops.length < 2) return 0;
   let totalMeters = 0;
@@ -188,6 +267,66 @@ function getRouteMiles(stops: RouteDef["stops"]) {
 
 function formatRouteMiles(miles: number) {
   return `${miles.toFixed(miles < 1 ? 2 : 1)} miles`;
+}
+
+function formatStopCount(count: number) {
+  return `${count} stop${count === 1 ? "" : "s"}`;
+}
+
+function getPresetRouteStopCount(route: Pick<RouteDef, "city" | "stops">) {
+  if (route.stops.some((stop) => Boolean(stop.isOverview) || isPresetOverviewStopId(stop.id))) {
+    return route.stops.length;
+  }
+  return route.city ? route.stops.length + 1 : route.stops.length;
+}
+
+function getPresetRouteIcon() {
+  return "/icons/stars.svg";
+}
+
+function hashString(value: string) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+function getLandingTitleFontClass(routeId: string) {
+  if (routeId === "boston-revolutionary-secrets") return landingRevolutionaryFont.className;
+  if (routeId === "boston-old-taverns") return landingTavernsFont.className;
+  if (routeId === "nyc-architecture-walk") return landingArchitectureFont.className;
+  if (routeId === "salem-after-dark") return landingSalemFont.className;
+  return "";
+}
+
+function getLandingTitleStyleClass(routeId: string) {
+  if (routeId === "boston-revolutionary-secrets") return styles.landingFeaturedCardTitleRevolutionary;
+  if (routeId === "boston-old-taverns") return styles.landingFeaturedCardTitleTaverns;
+  if (routeId === "nyc-architecture-walk") return styles.landingFeaturedCardTitleArchitecture;
+  if (routeId === "salem-after-dark") return styles.landingFeaturedCardTitleSalem;
+  return "";
+}
+
+function getLandingRouteImage(route: RouteDef) {
+  const stopsWithPlaceIds = route.stops.filter((stop) => (stop.googlePlaceId || "").trim().length > 0);
+  if (stopsWithPlaceIds.length > 0) {
+    const index = hashString(route.id) % stopsWithPlaceIds.length;
+    const placeId = (stopsWithPlaceIds[index]?.googlePlaceId || "").trim();
+    if (placeId) {
+      return `/api/google-image?kind=place-id-photo&placeId=${encodeURIComponent(placeId)}&maxWidthPx=1400`;
+    }
+  }
+  if (route.city) {
+    return getPresetCityMeta(route.city).fallbackImage;
+  }
+  return DEFAULT_STOP_IMAGE;
+}
+
+function toKnownCityOption(value: string | null | undefined): RouteDef["city"] | undefined {
+  const normalized = (value || "").trim().toLowerCase();
+  if (normalized === "salem" || normalized === "boston" || normalized === "concord" || normalized === "nyc") return normalized;
+  return undefined;
 }
 
 function formatAudioTime(seconds: number) {
@@ -202,7 +341,10 @@ function getStopCoordKey(stop: { lat: number; lng: number }) {
 }
 
 function stopMatches(a: CustomMixStop, b: CustomMixStop) {
-  return a.id === b.id || getStopCoordKey(a) === getStopCoordKey(b);
+  const aId = (a.id || "").trim();
+  const bId = (b.id || "").trim();
+  if (aId && bId) return aId === bId;
+  return getStopCoordKey(a) === getStopCoordKey(b);
 }
 
 function mergeUniqueStops(primary: CustomMixStop[], secondary: CustomMixStop[]) {
@@ -216,6 +358,28 @@ function mergeUniqueStops(primary: CustomMixStop[], secondary: CustomMixStop[]) 
     merged.push(stop);
   }
   return merged;
+}
+
+function moveItem<T>(items: T[], from: number, to: number) {
+  if (!Array.isArray(items) || items.length === 0) return items;
+  if (from === to) return items;
+  if (from < 0 || to < 0 || from >= items.length || to >= items.length) return items;
+  const next = [...items];
+  const [moved] = next.splice(from, 1);
+  if (typeof moved === "undefined") return items;
+  next.splice(to, 0, moved);
+  return next;
+}
+
+function mapNearbyStopsToCustomStops(stops: CustomMixStop[]) {
+  return stops.map((stop) => ({
+    id: stop.id,
+    title: stop.title,
+    lat: stop.lat,
+    lng: stop.lng,
+    image: stop.image || DEFAULT_STOP_IMAGE,
+    googlePlaceId: stop.googlePlaceId,
+  }));
 }
 
 function prioritizeOverviewById<T extends { id: string }>(stops: T[]) {
@@ -308,28 +472,46 @@ const audioRef = useRef<HTMLAudioElement | null>(null);
 const [isPlaying, setIsPlaying] = useState(false);
 const [audioTime, setAudioTime] = useState(0);
 const [audioDuration, setAudioDuration] = useState(0);
-const [connectedCount, setConnectedCount] = useState(0);
+const [listenCount, setListenCount] = useState(0);
 const [selectedRouteId, setSelectedRouteId] = useState<RouteDef["id"] | null>(null);
+const [isCreateOwnSelected, setIsCreateOwnSelected] = useState(false);
 const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
+const [customNarratorGuidance, setCustomNarratorGuidance] = useState("");
 const [pickDurationPage, setPickDurationPage] = useState<PickDurationPage>("routes");
 const [narratorFlowSource, setNarratorFlowSource] = useState<NarratorFlowSource>(null);
 const [selectedCity, setSelectedCity] = useState<CityOption>("salem");
+const [instantDiscoveryCity, setInstantDiscoveryCity] = useState<string | null>(null);
 const [builderSelectedStops, setBuilderSelectedStops] = useState<CustomMixStop[]>([]);
 const [buildMixOrderedStops, setBuildMixOrderedStops] = useState<CustomMixStop[]>([]);
-const [linkBatchInput, setLinkBatchInput] = useState("");
-const [isResolvingLinks, setIsResolvingLinks] = useState(false);
-const [resolveSummary, setResolveSummary] = useState<ResolveSummary | null>(null);
+const [searchInput, setSearchInput] = useState("");
+const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
+const [searchCandidates, setSearchCandidates] = useState<CustomMixStop[]>([]);
+const [searchError, setSearchError] = useState<string | null>(null);
 const [isGeneratingMix, setIsGeneratingMix] = useState(false);
 const [generationJobId, setGenerationJobId] = useState<string | null>(null);
 const [generationJobKind, setGenerationJobKind] = useState<GenerationJobKind | null>(null);
 const [generationProgress, setGenerationProgress] = useState(0);
 const [generationStatusLabel, setGenerationStatusLabel] = useState(GENERATION_STATUS_LABELS.queued);
 const [generationMessage, setGenerationMessage] = useState("Queued");
+const [landingTheme, setLandingTheme] = useState<LandingTheme>("dark");
+const [hasLoadedLandingTheme, setHasLoadedLandingTheme] = useState(false);
 const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
+const [followAlongOrigin, setFollowAlongOrigin] = useState<FollowAlongLocation | null>(null);
+const [followAlongDestinationQuery, setFollowAlongDestinationQuery] = useState("");
+const [followAlongDestinationResults, setFollowAlongDestinationResults] = useState<
+  FollowAlongSearchResponse["results"]
+>([]);
+const [followAlongDestination, setFollowAlongDestination] = useState<FollowAlongLocation | null>(null);
+const [followAlongPreview, setFollowAlongPreview] = useState<FollowAlongPreviewResponse | null>(null);
+const [isSearchingFollowAlongDestinations, setIsSearchingFollowAlongDestinations] = useState(false);
+const [isLoadingFollowAlongPreview, setIsLoadingFollowAlongPreview] = useState(false);
+const [isCreatingFollowAlong, setIsCreatingFollowAlong] = useState(false);
+const [followAlongRouteProgressM, setFollowAlongRouteProgressM] = useState<number | null>(null);
+const [followAlongOffRoute, setFollowAlongOffRoute] = useState(false);
+const [followAlongStatusCopy, setFollowAlongStatusCopy] = useState("Waiting for route preview");
 const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
 const [isGeneratingScriptForModal, setIsGeneratingScriptForModal] = useState(false);
 const [isGeneratingAudioForCurrentStop, setIsGeneratingAudioForCurrentStop] = useState(false);
-const [isBackfillingNarratorAudio, setIsBackfillingNarratorAudio] = useState(false);
 const [isGeneratingNearbyStory, setIsGeneratingNearbyStory] = useState(false);
 const [isResolvingNearbyGeo, setIsResolvingNearbyGeo] = useState(false);
 const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
@@ -337,14 +519,23 @@ const [isEditingStopsFromWalk, setIsEditingStopsFromWalk] = useState(false);
 const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
 const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null>(null);
 const previousStepRef = useRef<FlowStep>("landing");
+const followAlongLastPositionRef = useRef<{
+  lat: number;
+  lng: number;
+  timestamp: number;
+} | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const [err, setErr] = useState<string | null>(null);
   const [jam, setJam] = useState<JamRow | null>(null);
+  const countedJamOpenRef = useRef<Set<string>>(new Set());
 
   const [step, setStep] = useState<FlowStep>("landing");
+  const toggleLandingTheme = useCallback(() => {
+    setLandingTheme((currentTheme) => (currentTheme === "dark" ? "light" : "dark"));
+  }, []);
 
   // For MVP: Salem-only. This just controls whether we use geolocation-derived distances.
   const [geoAllowed, setGeoAllowed] = useState<boolean | null>(null);
@@ -352,6 +543,7 @@ const previousStepRef = useRef<FlowStep>("landing");
 
   const jamIdFromUrl = searchParams.get("jam");
   const debugStepFromUrl = searchParams.get("debugStep");
+  const nextLandingTheme = landingTheme === "dark" ? "light" : "dark";
 
   // Derive route + stop from jam
   const route: RouteDef | null = useMemo(
@@ -360,7 +552,6 @@ const previousStepRef = useRef<FlowStep>("landing");
   );
   const persona: Persona = (jam?.persona ?? "adult") as Persona;
   const isPresetWalkRoute = Boolean(jam?.route_id && !jam.route_id.startsWith("custom:"));
-
   const currentStopIndex = useMemo(() => {
     if (!route || activeStopIndex === null) return null;
     return clamp(activeStopIndex, 0, route.stops.length - 1);
@@ -376,33 +567,33 @@ const previousStepRef = useRef<FlowStep>("landing");
     return (currentStop.audio[persona] || "").trim();
   }, [currentStop, persona]);
   const hasCurrentAudio = currentStopAudio.length > 0;
-  const isNearbyStoryButtonDisabled =
-    !NEARBY_STORY_ENABLED ||
-    step !== "walk" ||
-    !jam?.id ||
-    !route ||
-    isGeneratingNearbyStory ||
-    isResolvingNearbyGeo ||
-    geoAllowed !== true;
+  const customRouteCity = instantDiscoveryCity ?? route?.city ?? "nearby";
   const routeMilesLabel = useMemo(() => {
     if (!route) return "";
+    if (typeof route.routeDistanceMeters === "number" && route.routeDistanceMeters > 0) {
+      return formatDistance(route.routeDistanceMeters);
+    }
     return formatRouteMiles(getRouteMiles(route.stops));
   }, [route]);
+  const displayListenerCount = Math.max(listenCount, 1);
+  const featuredPresetRoutes = useMemo(
+    () =>
+      FEATURED_PRESET_ROUTE_IDS.map((routeId) => getRouteById(routeId)).filter(
+        (route): route is RouteDef => Boolean(route)
+      ),
+    []
+  );
+  const routesForSelectedCity = useMemo(() => getPresetRoutesByCity(selectedCity), [selectedCity]);
   const selectedRoute = useMemo(
-    () => (selectedRouteId ? salemRoutes.find((r) => r.id === selectedRouteId) ?? null : null),
+    () => (selectedRouteId ? getRouteById(selectedRouteId) : null),
     [selectedRouteId]
   );
   const selectedCityLabel = useMemo(
-    () => (selectedCity === "salem" ? "Salem" : selectedCity === "boston" ? "Boston" : "Concord"),
+    () => CITY_META[selectedCity].label,
     [selectedCity]
   );
   const selectedCityCenter = useMemo(
-    () =>
-      selectedCity === "salem"
-        ? { lat: 42.5195, lng: -70.8967 }
-        : selectedCity === "boston"
-          ? { lat: 42.3601, lng: -71.0589 }
-          : { lat: 42.4604, lng: -71.3489 },
+    () => CITY_META[selectedCity].center,
     [selectedCity]
   );
   const availableStopsForCity = useMemo<CustomMixStop[]>(() => {
@@ -415,8 +606,7 @@ const previousStepRef = useRef<FlowStep>("landing");
       lng: overview.lng,
       image: overview.image,
     });
-    if (selectedCity !== "salem") return Array.from(byId.values());
-    for (const r of salemRoutes) {
+    for (const r of routesForSelectedCity) {
       for (const s of r.stops) {
         if (byId.has(s.id)) continue;
         byId.set(s.id, {
@@ -429,9 +619,28 @@ const previousStepRef = useRef<FlowStep>("landing");
       }
     }
     return Array.from(byId.values());
-  }, [selectedCity]);
-  const buildMixDisplayStops = buildMixOrderedStops;
+  }, [routesForSelectedCity, selectedCity]);
+  const buildMixDisplayStops = useMemo(() => {
+    const orderedSelected = buildMixOrderedStops.filter((ordered) =>
+      builderSelectedStops.some((selected) => stopMatches(selected, ordered))
+    );
+    const missingSelected = builderSelectedStops.filter((selected) =>
+      !orderedSelected.some((ordered) => stopMatches(ordered, selected))
+    );
+    return [...orderedSelected, ...missingSelected];
+  }, [buildMixOrderedStops, builderSelectedStops]);
   const activePersonaDisplayName = personaCatalog[persona].displayName;
+  const isAiPersona = (personaKey: Persona) => personaCatalog[personaKey].displayName.startsWith("AI");
+  const usesNarratorIcon = (personaKey: Persona) => personaKey === "custom" || isAiPersona(personaKey);
+  const customNarratorEnabled =
+    step === "followAlongSetup" ||
+    narratorFlowSource === "buildMix" ||
+    (narratorFlowSource === "walkEdit" && !isPresetWalkRoute);
+  const trimmedCustomNarratorGuidance = customNarratorGuidance.trim();
+  const narratorSubmitDisabled =
+    !selectedPersona ||
+    isGeneratingMix ||
+    (selectedPersona === "custom" && trimmedCustomNarratorGuidance.length === 0);
   const maxStopsForSelection = useMemo(
     () => getMaxStops(),
     []
@@ -455,6 +664,48 @@ const previousStepRef = useRef<FlowStep>("landing");
     const routeStopIds = new Set(route.stops.map((s) => s.id));
     return builderSelectedStops.some((s) => !routeStopIds.has(s.id));
   }, [isEditingStopsFromWalk, route, builderSelectedStops]);
+  const availableSearchCandidates = useMemo(
+    () => searchCandidates.filter((candidate) => !builderSelectedStops.some((selected) => stopMatches(selected, candidate))),
+    [searchCandidates, builderSelectedStops]
+  );
+  const generatingBackgroundImage = useMemo(() => {
+    if (generationJobKind === "custom") {
+      const sourceStops = buildMixOrderedStops.length > 0 ? buildMixOrderedStops : builderSelectedStops;
+      const stopWithImage = sourceStops.find((stop) => (stop.image || "").trim().length > 0);
+      if (stopWithImage) return toSafeStopImage(stopWithImage.image);
+    }
+
+    const presetRoute = selectedRouteId ? getRouteById(selectedRouteId) : selectedRoute;
+    if (presetRoute) return getLandingRouteImage(presetRoute);
+
+    const routeStopWithImage = route?.stops.find((stop) => (stop.images[0] || "").trim().length > 0);
+    if (routeStopWithImage) return toSafeStopImage(routeStopWithImage.images[0]);
+
+    return DEFAULT_STOP_IMAGE;
+  }, [buildMixOrderedStops, builderSelectedStops, generationJobKind, route, selectedRoute, selectedRouteId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const storedTheme = window.localStorage.getItem(LANDING_THEME_STORAGE_KEY);
+      if (isLandingTheme(storedTheme)) {
+        setLandingTheme(storedTheme);
+      }
+    } catch {
+      // Ignore localStorage access failures and keep the default theme.
+    } finally {
+      setHasLoadedLandingTheme(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedLandingTheme || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(LANDING_THEME_STORAGE_KEY, landingTheme);
+    } catch {
+      // Ignore localStorage access failures; the toggle still works for this session.
+    }
+  }, [hasLoadedLandingTheme, landingTheme]);
 
   // ---------- Supabase: load jam ----------
   async function loadJamById(id: string) {
@@ -510,7 +761,7 @@ const previousStepRef = useRef<FlowStep>("landing");
     if (!data.route_id) {
       setPickDurationPage("routes");
       setNarratorFlowSource(null);
-      setStep("presetRoutes");
+      setStep("landing");
     }
     else if (data.completed_at) setStep("end");
     else setStep("walk");
@@ -556,8 +807,7 @@ const previousStepRef = useRef<FlowStep>("landing");
       // Put it in URL like your existing flow
       router.replace(`/?jam=${data.id}`);
       if (!routeId) {
-        setPickDurationPage("routes");
-        setStep("pickDuration");
+        setStep("landing");
       }
       else setStep("walk");
     }
@@ -584,77 +834,53 @@ const previousStepRef = useRef<FlowStep>("landing");
     return true;
   }
 
-  async function backfillNarratorAudioForMissingStops(nextPersona: Persona) {
-    if (!jam?.route_id || !route) return;
-    const missingStops = route.stops.filter((stop) => !(stop.audio[nextPersona] || "").trim());
-    if (missingStops.length === 0) return;
-
-    const isPresetRoute = !jam.route_id.startsWith("custom:");
-    const customRouteId = isPresetRoute ? null : getCustomRouteId(jam.route_id);
-    if (!isPresetRoute && !customRouteId) {
-      setErr("Failed to resolve custom route for narrator audio generation.");
+  function handleNarratorSelect(nextPersona: Persona) {
+    setErr(null);
+    setSelectedPersona(nextPersona);
+    if (nextPersona !== "custom") {
+      setCustomNarratorGuidance((current) => current.trim());
+    }
+    if (customNarratorEnabled) {
       return;
     }
-
-    setIsBackfillingNarratorAudio(true);
-    setErr(null);
-    let failedCount = 0;
-    let generatedCount = 0;
-    for (const stop of missingStops) {
-      try {
-        const endpoint = isPresetRoute ? "/api/preset-audio/generate" : "/api/custom-audio/generate";
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            routeId: isPresetRoute ? jam.route_id : customRouteId,
-            stopId: stop.id,
-            persona: nextPersona,
-            city: selectedCity,
-          }),
-        });
-        const body = (await res.json()) as { error?: string };
-        if (!res.ok) {
-          failedCount += 1;
-          console.warn("Failed to backfill narrator audio", { stopId: stop.id, error: body.error || "unknown" });
-          continue;
-        }
-        generatedCount += 1;
-      } catch {
-        failedCount += 1;
-      }
-    }
-
-    if (generatedCount > 0) {
-      try {
-        await loadResolvedRoute(jam.route_id);
-      } catch {
-        // Keep walk state even if route refresh fails.
-      }
-    }
-    if (failedCount > 0) {
-      setErr(`Updated narrator, but ${failedCount} stop audio file(s) failed to generate.`);
-    }
-    setIsBackfillingNarratorAudio(false);
+    void submitNarratorSelection(nextPersona);
   }
 
-  async function handleNarratorSelect(nextPersona: Persona) {
-    setSelectedPersona(nextPersona);
-    if (returnToWalkOnClose && jam?.route_id) {
-      const updated = await updateJam({ persona: nextPersona });
-      if (!updated) return;
-      setReturnToWalkOnClose(false);
-      setNarratorFlowSource(null);
-      setStep("walk");
-      void backfillNarratorAudioForMissingStops(nextPersona);
+  async function submitNarratorSelection(personaOverride?: Persona) {
+    const personaForSubmit = personaOverride ?? selectedPersona;
+    if (!personaForSubmit) return;
+    if (personaForSubmit === "custom" && trimmedCustomNarratorGuidance.length === 0) {
+      setErr("Add narrator guidance to create a custom narrator.");
       return;
     }
+
     if (narratorFlowSource === "buildMix") {
-      await startCustomMixGeneration(builderSelectedStops, nextPersona);
+      await startCustomMixGeneration(builderSelectedStops, personaForSubmit, {
+        narratorGuidance: personaForSubmit === "custom" ? trimmedCustomNarratorGuidance : null,
+      });
       return;
     }
+
+    if (returnToWalkOnClose && jam?.route_id && route) {
+      const currentStops = route.stops.map((stop) => ({
+        id: stop.id,
+        title: stop.title,
+        lat: stop.lat,
+        lng: stop.lng,
+        image: toSafeStopImage(stop.images[0]),
+      }));
+      setReturnToWalkOnClose(false);
+      await startCustomMixGeneration(currentStops, personaForSubmit, {
+        errorStep: "pickDuration",
+        cityOverride: customRouteCity,
+        routeTitle: route.title,
+        narratorGuidance: personaForSubmit === "custom" ? trimmedCustomNarratorGuidance : null,
+      });
+      return;
+    }
+
     setNarratorFlowSource(null);
-    setPickDurationPage("routes");
+    setStep("landing");
   }
 
   async function copyShareLink() {
@@ -671,8 +897,187 @@ const previousStepRef = useRef<FlowStep>("landing");
     setIsScriptModalOpen(false);
     setReturnToWalkOnClose(false);
     setNarratorFlowSource(null);
+    setSelectedRouteId(null);
+    setIsCreateOwnSelected(false);
+    setSelectedPersona(null);
+    setCustomNarratorGuidance("");
+    setInstantDiscoveryCity(null);
+    setFollowAlongOrigin(null);
+    setFollowAlongDestinationQuery("");
+    setFollowAlongDestinationResults([]);
+    setFollowAlongDestination(null);
+    setFollowAlongPreview(null);
+    setFollowAlongOffRoute(false);
+    setFollowAlongRouteProgressM(null);
+    setFollowAlongStatusCopy("Waiting for route preview");
     setPickDurationPage("routes");
     setStep("landing");
+  }
+
+  function openPresetCity(city: CityOption) {
+    setErr(null);
+    setSelectedCity(city);
+    setSelectedRouteId(null);
+    setSelectedPersona(null);
+    setCustomNarratorGuidance("");
+    setNarratorFlowSource(null);
+    setPickDurationPage("routes");
+    setStep("pickDuration");
+  }
+
+  function toFollowAlongOrigin(coords: { lat: number; lng: number }): FollowAlongLocation {
+    return {
+      label: "Current location",
+      subtitle: "Live location",
+      lat: coords.lat,
+      lng: coords.lng,
+    };
+  }
+
+  async function openFollowAlongSetup() {
+    setErr(null);
+    setSelectedRouteId(null);
+    setSelectedPersona((current) => current ?? "adult");
+    setCustomNarratorGuidance((current) => current.trim());
+    setFollowAlongDestinationQuery("");
+    setFollowAlongDestinationResults([]);
+    setFollowAlongDestination(null);
+    setFollowAlongPreview(null);
+    setFollowAlongStatusCopy("Enter a destination to preview the drive.");
+    setStep("followAlongSetup");
+
+    if (myPos) {
+      setFollowAlongOrigin(toFollowAlongOrigin(myPos));
+      return;
+    }
+
+    try {
+      const coords = await requestCurrentGeoPosition();
+      setMyPos(coords);
+      setGeoAllowed(true);
+      setFollowAlongOrigin(toFollowAlongOrigin(coords));
+    } catch (e) {
+      setGeoAllowed(false);
+      setFollowAlongOrigin(null);
+      setErr(e instanceof Error ? e.message : "Location permission is required.");
+    }
+  }
+
+  async function searchFollowAlongDestinations() {
+    const query = followAlongDestinationQuery.trim();
+    if (query.length < 2) {
+      setErr("Enter at least 2 characters to search.");
+      return;
+    }
+    setErr(null);
+    setIsSearchingFollowAlongDestinations(true);
+    try {
+      const res = await fetch("/api/follow-along/search-destinations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      const body = (await res.json()) as
+        | FollowAlongSearchResponse
+        | { error?: string };
+      if (!res.ok || !("results" in body)) {
+        throw new Error(("error" in body && body.error) || "Destination search failed.");
+      }
+      setFollowAlongDestinationResults(body.results);
+      if (body.results.length === 0) {
+        setErr("No destinations found for that search.");
+      }
+    } catch (e) {
+      setFollowAlongDestinationResults([]);
+      setErr(e instanceof Error ? e.message : "Destination search failed.");
+    } finally {
+      setIsSearchingFollowAlongDestinations(false);
+    }
+  }
+
+  async function previewFollowAlongRoute(destinationOverride?: FollowAlongLocation) {
+    const origin = followAlongOrigin;
+    const destination = destinationOverride ?? followAlongDestination;
+    if (!origin || !destination) {
+      setErr("Choose a destination to preview the route.");
+      return;
+    }
+    setErr(null);
+    setIsLoadingFollowAlongPreview(true);
+    try {
+      const preview = await fetchJsonWithTimeout<FollowAlongPreviewResponse>(
+        "/api/follow-along/preview",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ origin, destination }),
+        },
+        START_JOB_TIMEOUT_MS
+      );
+      setFollowAlongDestination(preview.destination);
+      setFollowAlongPreview(preview);
+      setFollowAlongStatusCopy("Route preview ready. Choose a storyteller and start driving.");
+    } catch (e) {
+      setFollowAlongPreview(null);
+      setErr(e instanceof Error ? e.message : "Route preview failed.");
+    } finally {
+      setIsLoadingFollowAlongPreview(false);
+    }
+  }
+
+  async function startFollowAlongExperience() {
+    if (!followAlongOrigin || !followAlongDestination || !selectedPersona) {
+      setErr("Choose a destination and storyteller first.");
+      return;
+    }
+    if (selectedPersona === "custom" && trimmedCustomNarratorGuidance.length === 0) {
+      setErr("Add narrator guidance to create a custom narrator.");
+      return;
+    }
+
+    setErr(null);
+    setIsCreatingFollowAlong(true);
+    setGenerationProgress(0);
+    setGenerationStatusLabel(GENERATION_STATUS_LABELS.queued);
+    setGenerationMessage("Building your route stories...");
+    setStep("generating");
+
+    try {
+      const body = await fetchJsonWithTimeout<{
+        jamId?: string;
+        routeId?: string;
+        routeRef?: string;
+        jobId?: string;
+      }>(
+        "/api/follow-along/create",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jamId: jam?.id ?? null,
+            origin: followAlongOrigin,
+            destination: followAlongDestination,
+            persona: selectedPersona,
+            narratorGuidance:
+              selectedPersona === "custom" ? trimmedCustomNarratorGuidance : null,
+          }),
+        },
+        START_JOB_TIMEOUT_MS
+      );
+      if (!body.jamId || !body.jobId) {
+        throw new Error("Missing follow along generation metadata.");
+      }
+      setGenerationJobId(body.jobId);
+      setGenerationJobKind("custom");
+      router.replace(`/?jam=${body.jamId}`);
+    } catch (e) {
+      setStep("followAlongSetup");
+      setGenerationJobId(null);
+      setGenerationJobKind(null);
+      setErr(e instanceof Error ? e.message : "Failed to create Follow Along.");
+    } finally {
+      setIsCreatingFollowAlong(false);
+    }
   }
 
   function closeRoutePicker() {
@@ -698,7 +1103,7 @@ const previousStepRef = useRef<FlowStep>("landing");
       return;
     }
     setNarratorFlowSource(null);
-    setPickDurationPage("routes");
+    setStep("landing");
   }
 
   function getCustomRouteId(routeRef: string | null | undefined) {
@@ -720,7 +1125,7 @@ const previousStepRef = useRef<FlowStep>("landing");
     }
     const endpoint = isCustom
       ? `/api/custom-routes/${customRouteId}`
-      : `/api/preset-routes/${routeRef}?city=${encodeURIComponent(selectedCity)}`;
+      : `/api/preset-routes/${routeRef}`;
     const res = await fetch(endpoint);
     if (!res.ok) {
       let detail: string | null = null;
@@ -733,7 +1138,9 @@ const previousStepRef = useRef<FlowStep>("landing");
       throw new Error(detail || `Failed to load ${isCustom ? "custom" : "preset"} route`);
     }
     const payload = (await res.json()) as CustomRouteResponse;
-    const landmarkStops = payload.stops.filter((s) => !s.is_overview);
+    const resolvedCity = isCustom
+      ? (payload.route.city || "").trim().toLowerCase() || instantDiscoveryCity || "nearby"
+      : (presetRoute?.city ?? selectedCity);
     const mappedStops: RouteDef["stops"] = payload.stops.map((s, idx) => {
       const stopId = s.stop_id || `custom-${idx}`;
       return {
@@ -742,16 +1149,27 @@ const previousStepRef = useRef<FlowStep>("landing");
       lat: s.lat,
       lng: s.lng,
       isOverview: Boolean(s.is_overview) || isPresetOverviewStopId(stopId),
+      stopKind: s.stop_kind || "story",
+      distanceAlongRouteMeters:
+        typeof s.distance_along_route_meters === "number"
+          ? s.distance_along_route_meters
+          : null,
+      triggerRadiusMeters:
+        typeof s.trigger_radius_meters === "number"
+          ? s.trigger_radius_meters
+          : null,
       images: [toSafeStopImage(s.image_url)],
       audio: {
         adult: s.audio_url_adult || "",
         preteen: s.audio_url_preteen || "",
         ghost: s.audio_url_ghost || "",
+        custom: s.audio_url_custom || "",
       },
       text: {
         adult: s.script_adult || "",
         preteen: s.script_preteen || "",
         ghost: s.script_ghost || "",
+        custom: s.script_custom || "",
       },
     };
     });
@@ -759,13 +1177,57 @@ const previousStepRef = useRef<FlowStep>("landing");
       id: routeRef,
       title: payload.route.title,
       durationLabel: `${payload.route.length_minutes} mins`,
-      description: `${payload.route.transport_mode === "drive" ? "Drive" : "Walk"} • ${landmarkStops.length} stops`,
-      defaultPersona: isCustom ? ((jam?.persona ?? "adult") as Persona) : (presetRoute?.defaultPersona ?? "adult"),
+      durationMinutes: payload.route.length_minutes,
+      description: `${payload.route.transport_mode === "drive" ? "Drive" : "Walk"} • ${formatStopCount(mappedStops.length)}`,
+      defaultPersona: isCustom ? ((payload.route.narrator_default ?? jam?.persona ?? "adult") as RouteDef["defaultPersona"]) : (presetRoute?.defaultPersona ?? "adult"),
+      city: isCustom ? toKnownCityOption(resolvedCity) : presetRoute?.city,
+      transportMode: payload.route.transport_mode,
+      experienceKind: isCustom ? (payload.route.experience_kind ?? "mix") : "preset",
+      routePathCoords:
+        isCustom && Array.isArray(payload.route.route_polyline)
+          ? payload.route.route_polyline
+          : null,
+      origin:
+        isCustom &&
+        typeof payload.route.origin_lat === "number" &&
+        typeof payload.route.origin_lng === "number" &&
+        payload.route.origin_label
+          ? {
+              lat: payload.route.origin_lat,
+              lng: payload.route.origin_lng,
+              label: payload.route.origin_label,
+            }
+          : null,
+      destination:
+        isCustom &&
+        typeof payload.route.destination_lat === "number" &&
+        typeof payload.route.destination_lng === "number" &&
+        payload.route.destination_label
+          ? {
+              lat: payload.route.destination_lat,
+              lng: payload.route.destination_lng,
+              label: payload.route.destination_label,
+            }
+          : null,
+      routeDistanceMeters:
+        typeof payload.route.route_distance_meters === "number"
+          ? payload.route.route_distance_meters
+          : null,
+      routeDurationSeconds:
+        typeof payload.route.route_duration_seconds === "number"
+          ? payload.route.route_duration_seconds
+          : null,
       stops: prioritizeOverviewById(mappedStops),
     };
+    if (isCustom) {
+      setInstantDiscoveryCity(resolvedCity);
+      setCustomNarratorGuidance((payload.route.narrator_guidance || "").trim());
+    } else {
+      setCustomNarratorGuidance("");
+    }
     setCustomRoute(nextRoute);
     return nextRoute;
-  }, [selectedCity, jam?.persona]);
+  }, [selectedCity, jam?.persona, instantDiscoveryCity]);
 
   // ---------- "Start stop” handler ----------
 async function startStopNarration() {
@@ -780,15 +1242,19 @@ async function startStopNarration() {
 }
 
   async function handleNearbyStory() {
-    if (!NEARBY_STORY_ENABLED || step !== "walk" || !jam?.id || !route) return;
-    if (geoAllowed !== true) {
-      setErr("Location permission is required to tell nearby stories.");
-      return;
-    }
+    if (!NEARBY_STORY_ENABLED || isGeneratingNearbyStory || isResolvingNearbyGeo) return;
+    const previousStep = step;
 
     try {
       setErr(null);
       setIsGeneratingNearbyStory(true);
+      setSelectedPersona("adult");
+      setGenerationJobId(null);
+      setGenerationJobKind(null);
+      setGenerationProgress(0);
+      setGenerationStatusLabel(GENERATION_STATUS_LABELS.queued);
+      setGenerationMessage("Locating your position...");
+      setStep("generating");
       let coords = myPos;
 
       if (!coords) {
@@ -798,43 +1264,131 @@ async function startStopNarration() {
         setGeoAllowed(true);
       }
 
-      const res = await fetch("/api/nearby-story/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jamId: jam.id,
-          persona,
-          lat: coords.lat,
-          lng: coords.lng,
-          currentStopIndex,
-          city: selectedCity,
-        }),
-      });
+      setGenerationMessage("Finding a nearby landmark...");
 
-      const body = (await res.json()) as NearbyStoryResponse | { error?: string };
-      if (!res.ok || !("routeRef" in body)) {
-        throw new Error(("error" in body && body.error) || "Failed to generate nearby story");
+      const nearby = await fetchJsonWithTimeout<NearbyPlacesResponse>(
+        "/api/nearby-story/places",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            city: null,
+            lat: coords.lat,
+            lng: coords.lng,
+            minStops: 1,
+            maxStops: 1,
+          }),
+        },
+        START_JOB_TIMEOUT_MS
+      );
+
+      if (!Array.isArray(nearby.stops) || nearby.stops.length < 1) {
+        throw new Error("No nearby places were returned.");
       }
 
-      await loadResolvedRoute(body.routeRef);
-      setJam((prev) =>
-        prev
-          ? {
-              ...prev,
-              route_id: body.routeRef,
-              persona,
-              current_stop: body.insertedStopIndex,
-              completed_at: null,
-            }
-          : prev
-      );
-      setActiveStopIndex(body.insertedStopIndex);
-      setPendingAutoplayStopId(body.insertedStopId);
+      const mappedStops = mapNearbyStopsToCustomStops(nearby.stops);
+      const firstStop = mappedStops[0];
+      if (!firstStop) {
+        throw new Error("No nearby landmark was returned.");
+      }
+
+      setInstantDiscoveryCity((nearby.cityUsed || "").trim() || null);
+      const started = await startCustomMixGeneration([firstStop], "adult", {
+        source: "instant",
+        routeTitle: firstStop.title,
+        errorStep: previousStep,
+        cityOverride: (nearby.cityUsed || "").trim() || undefined,
+      });
+      if (!started) {
+        setStep(previousStep);
+      }
     } catch (e) {
+      setGenerationJobId(null);
+      setGenerationJobKind(null);
+      setGenerationProgress(0);
       setErr(e instanceof Error ? e.message : "Failed to generate nearby story");
+      setStep(previousStep);
     } finally {
       setIsResolvingNearbyGeo(false);
       setIsGeneratingNearbyStory(false);
+    }
+  }
+
+  async function handleFindMoreAroundLocation() {
+    if (!route || route.stops.length === 0 || isGeneratingNearbyStory || isResolvingNearbyGeo) return;
+
+    const fallbackStop = currentStop ?? route.stops[0];
+    const baseRouteStops: CustomMixStop[] = route.stops.map((stop) => ({
+      id: stop.id,
+      title: stop.title,
+      lat: stop.lat,
+      lng: stop.lng,
+      image: toSafeStopImage(stop.images[0]),
+    }));
+    let lookupCoords = myPos;
+
+    try {
+      setErr(null);
+      setIsGeneratingNearbyStory(true);
+
+      if (!lookupCoords) {
+        setIsResolvingNearbyGeo(true);
+        try {
+          lookupCoords = await requestCurrentGeoPosition();
+          setMyPos(lookupCoords);
+          setGeoAllowed(true);
+        } catch {
+          setGeoAllowed(false);
+        } finally {
+          setIsResolvingNearbyGeo(false);
+        }
+      }
+
+      const anchorCoords = lookupCoords ?? (fallbackStop ? { lat: fallbackStop.lat, lng: fallbackStop.lng } : null);
+      if (!anchorCoords) {
+        throw new Error("No location is available for nearby search.");
+      }
+
+      const nearby = await fetchJsonWithTimeout<NearbyPlacesResponse>(
+        "/api/nearby-story/places",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            city: instantDiscoveryCity ?? selectedCity,
+            lat: anchorCoords.lat,
+            lng: anchorCoords.lng,
+            minStops: 1,
+            maxStops: maxStopsForSelection,
+            minSpreadMeters: 100,
+          }),
+        },
+        START_JOB_TIMEOUT_MS
+      );
+
+      if (!Array.isArray(nearby.stops) || nearby.stops.length < 1) {
+        throw new Error("No nearby places were returned.");
+      }
+
+      const nearbyStops = mapNearbyStopsToCustomStops(nearby.stops);
+      const mergedStops = mergeUniqueStops(baseRouteStops, nearbyStops).slice(0, maxStopsForSelection);
+
+      setBuilderSelectedStops(mergedStops);
+      setBuildMixOrderedStops(mergedStops);
+      setInstantDiscoveryCity((nearby.cityUsed || "").trim() || instantDiscoveryCity);
+      setSearchInput("");
+      setSearchCandidates([]);
+      setSearchError(null);
+      setSelectedPersona((jam?.persona ?? "adult") as Persona);
+      setNarratorFlowSource(null);
+      setIsEditingStopsFromWalk(true);
+      setReturnToWalkOnClose(true);
+      setStep("buildMix");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to find more nearby places");
+    } finally {
+      setIsGeneratingNearbyStory(false);
+      setIsResolvingNearbyGeo(false);
     }
   }
 
@@ -894,7 +1448,7 @@ async function startStopNarration() {
             routeId: isPresetRoute ? jam.route_id : customRouteId,
             stopId: currentStop.id,
             persona,
-            city: selectedCity,
+            city: isPresetRoute ? selectedCity : customRouteCity,
           }),
         });
         const scriptBody = (await scriptRes.json()) as { error?: string };
@@ -910,7 +1464,7 @@ async function startStopNarration() {
             routeId: isPresetRoute ? jam.route_id : customRouteId,
             stopId: currentStop.id,
             persona,
-            city: selectedCity,
+            city: isPresetRoute ? selectedCity : customRouteCity,
           }),
         });
         const audioBody = (await audioRes.json()) as { error?: string };
@@ -931,6 +1485,7 @@ async function startStopNarration() {
   // ---------- Step transitions ----------
 
   async function startPresetTour(routeId: RouteDef["id"], personaSelection: Persona) {
+    const routeCity = (getRouteById(routeId)?.city ?? selectedCity) as CityOption;
     if (
       returnToWalkOnClose &&
       jam?.id &&
@@ -952,7 +1507,7 @@ async function startStopNarration() {
     if (!jamId) {
       jamId = await createJam(routeId, personaSelection, { skipStep: true });
       if (!jamId) {
-        setStep("presetRoutes");
+        setStep("landing");
         return;
       }
     } else {
@@ -974,7 +1529,7 @@ async function startStopNarration() {
           jamId,
           routeId,
           persona: personaSelection,
-          city: selectedCity,
+          city: routeCity,
         }),
         signal: controller.signal,
       });
@@ -997,119 +1552,205 @@ async function startStopNarration() {
         setErr(e instanceof Error ? e.message : "Failed to generate preset tour");
       }
       setGenerationJobKind(null);
-      setStep("presetRoutes");
+      setStep("landing");
     }
   }
 
+  function selectPresetRoute(routeId: RouteDef["id"]) {
+    if (isCreateOwnSelected) {
+      setIsCreateOwnSelected(false);
+    }
+    const selectedRoute = getRouteById(routeId);
+    if (!selectedRoute) {
+      setErr("Unknown preset route");
+      return null;
+    }
+    setErr(null);
+    setSelectedRouteId(routeId);
+    setIsCreateOwnSelected(false);
+    setSelectedPersona(selectedRoute.defaultPersona);
+    setCustomNarratorGuidance("");
+    return selectedRoute;
+  }
+
+  function selectCreateOwnMix() {
+    setErr(null);
+    setSelectedRouteId(null);
+    setIsCreateOwnSelected(true);
+    setSelectedPersona(null);
+    setCustomNarratorGuidance("");
+  }
+
+  function goToCreateOwnMixBuilder() {
+    selectCreateOwnMix();
+    setNarratorFlowSource(null);
+    setStep("buildMix");
+  }
+
   async function startTourFromSelection() {
+    if (isCreateOwnSelected) {
+      setNarratorFlowSource(null);
+      setStep("buildMix");
+      return;
+    }
     if (!selectedRouteId || !selectedPersona) return;
     await startPresetTour(selectedRouteId, selectedPersona);
   }
 
   function startTourFromRoute(routeId: RouteDef["id"]) {
-    const selectedRoute = getRouteById(routeId);
-    if (!selectedRoute) {
-      setErr("Unknown preset route");
-      return;
-    }
-    setSelectedRouteId(routeId);
-    setSelectedPersona(selectedRoute.defaultPersona);
-    void startPresetTour(routeId, selectedRoute.defaultPersona);
+    selectPresetRoute(routeId);
+  }
+
+  async function startPresetTourFromRoute(routeId: RouteDef["id"]) {
+    const selectedRoute = selectPresetRoute(routeId);
+    if (!selectedRoute) return;
+    await startPresetTour(routeId, selectedRoute.defaultPersona);
   }
 
   function toggleBuilderStop(stop: CustomMixStop) {
     setErr(null);
     setBuilderSelectedStops((prev) => {
-      const exists = prev.some((s) => s.id === stop.id);
-      if (exists) return prev.filter((s) => s.id !== stop.id);
+      const exists = prev.some((s) => stopMatches(s, stop));
+      if (exists) {
+        setBuildMixOrderedStops((ordered) => ordered.filter((s) => !stopMatches(s, stop)));
+        return prev.filter((s) => !stopMatches(s, stop));
+      }
       const nextMaxStops = getMaxStops();
       if (nextMaxStops > 0 && prev.length >= nextMaxStops) {
         setErr(`Select at most ${nextMaxStops} stops.`);
         return prev;
       }
+      setBuildMixOrderedStops((ordered) => {
+        const withoutExisting = ordered.filter((s) => !stopMatches(s, stop));
+        return [...withoutExisting, stop];
+      });
       return [...prev, stop];
     });
   }
 
-  async function addStopsFromLinks() {
-    const links = linkBatchInput
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
+  function moveSelectedStop(stop: CustomMixStop, direction: "up" | "down") {
+    setErr(null);
+    setBuilderSelectedStops((prev) => {
+      const currentIdx = prev.findIndex((candidate) => stopMatches(candidate, stop));
+      if (currentIdx < 0) return prev;
+      const nextIdx = direction === "up" ? currentIdx - 1 : currentIdx + 1;
+      const moved = moveItem(prev, currentIdx, nextIdx);
+      if (moved === prev) return prev;
 
-    if (!links.length) {
-      setErr("Paste in a Google Maps link");
+      setBuildMixOrderedStops((orderedPrev) => {
+        const nonSelected = orderedPrev.filter(
+          (candidate) => !moved.some((selected) => stopMatches(selected, candidate))
+        );
+        return [...moved, ...nonSelected];
+      });
+
+      return moved;
+    });
+  }
+
+  function addSearchedCandidate(stop: CustomMixStop) {
+    setErr(null);
+    setSearchError(null);
+
+    const stopCoordKey = getStopCoordKey(stop);
+    const isDuplicate = builderSelectedStops.some(
+      (selected) => selected.id === stop.id || getStopCoordKey(selected) === stopCoordKey
+    );
+    if (isDuplicate) {
+      setSearchError("That stop is already selected.");
+      return;
+    }
+    if (maxStopsForSelection > 0 && builderSelectedStops.length >= maxStopsForSelection) {
+      setSearchError(`Select at most ${maxStopsForSelection} stops.`);
+      return;
+    }
+
+    const nextStops = [...builderSelectedStops, stop];
+    setBuilderSelectedStops(nextStops);
+    setBuildMixOrderedStops((prev) => {
+      const withoutIncoming = prev.filter((existing) => !stopMatches(existing, stop));
+      return [stop, ...withoutIncoming];
+    });
+    setSearchCandidates((prev) => prev.filter((candidate) => !stopMatches(candidate, stop)));
+    setSearchError(null);
+  }
+
+  function clearBuildMixSearch() {
+    setSearchInput("");
+    setSearchCandidates([]);
+    setSearchError(null);
+  }
+
+  async function searchPlaces() {
+    const query = searchInput.trim();
+    if (!query) {
+      setSearchError("Enter a place name to search.");
+      return;
+    }
+    if (query.length < 2) {
+      setSearchError("Enter at least 2 characters to search.");
       return;
     }
 
     setErr(null);
-    setResolveSummary(null);
-    setIsResolvingLinks(true);
+    setSearchError(null);
+    setIsSearchingPlaces(true);
 
     try {
-      const res = await fetch("/api/stops/resolve-links", {
+      const res = await fetch("/api/stops/search-places", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ city: selectedCity, links }),
+        body: JSON.stringify({ city: selectedCity, query, limit: 5 }),
       });
-      const body = (await res.json()) as ResolveLinksResponse | { error?: string };
-      if (!res.ok || !("resolved" in body)) {
-        throw new Error(("error" in body && body.error) || "Failed to resolve links");
+      const body = (await res.json()) as SearchPlacesResponse | { error?: string };
+      if (!res.ok || !("candidates" in body)) {
+        throw new Error(("error" in body && body.error) || "Failed to search places");
       }
-
-      const nextStops = [...builderSelectedStops];
-      const prependedStops: CustomMixStop[] = [];
-      const selectedKeys = new Set(
-        builderSelectedStops.map((s) => getStopCoordKey(s))
-      );
-      let added = 0;
-      let skippedDuplicate = body.duplicatesSkipped;
-      let skippedLimit = 0;
-
-      for (const stop of body.resolved) {
-        const key = getStopCoordKey(stop);
-        if (selectedKeys.has(key)) {
-          skippedDuplicate += 1;
-          continue;
-        }
-        if (maxStopsForSelection > 0 && nextStops.length >= maxStopsForSelection) {
-          skippedLimit += 1;
-          continue;
-        }
-        selectedKeys.add(key);
-        nextStops.push(stop);
-        prependedStops.push(stop);
-        added += 1;
+      setSearchCandidates(body.candidates);
+      if (body.candidates.length === 0) {
+        setSearchError("No places found for that search.");
       }
-
-      setBuilderSelectedStops(nextStops);
-      if (prependedStops.length > 0) {
-        setBuildMixOrderedStops((prev) => {
-          const withoutPrepended = prev.filter(
-            (existing) => !prependedStops.some((incoming) => stopMatches(existing, incoming))
-          );
-          return [...prependedStops, ...withoutPrepended];
-        });
-      }
-      setResolveSummary({
-        added,
-        skippedDuplicate,
-        skippedLimit,
-        failed: body.failed,
-      });
-      setLinkBatchInput("");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to add stops from links");
+      setSearchCandidates([]);
+      setSearchError(e instanceof Error ? e.message : "Failed to search places");
     } finally {
-      setIsResolvingLinks(false);
+      setIsSearchingPlaces(false);
     }
   }
 
-  async function startCustomMixGeneration(stopsOverride?: CustomMixStop[], personaOverride?: Persona) {
+  function handleBuildMixSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (isSearchingPlaces) return;
+    void searchPlaces();
+  }
+
+  useEffect(() => {
+    if (searchInput.trim().length > 0) return;
+    if (searchCandidates.length === 0 && !searchError) return;
+    setSearchCandidates([]);
+    setSearchError(null);
+  }, [searchInput, searchCandidates.length, searchError]);
+
+  async function startCustomMixGeneration(
+    stopsOverride?: CustomMixStop[],
+    personaOverride?: Persona,
+    options?: StartCustomMixOptions
+  ) {
     const stopsToGenerate = prioritizeOverviewById(stopsOverride ?? builderSelectedStops);
     const personaForGeneration = personaOverride ?? selectedPersona;
+    const narratorGuidance =
+      personaForGeneration === "custom"
+        ? (options?.narratorGuidance ?? customNarratorGuidance).trim()
+        : null;
     if (!stopsToGenerate.length || !personaForGeneration) return false;
-    const validation = validateMixSelection(30, "walk", stopsToGenerate.length);
+    if (personaForGeneration === "custom" && !narratorGuidance) {
+      setErr("Add narrator guidance to create a custom narrator.");
+      return false;
+    }
+    const validation = validateMixSelection(30, "walk", stopsToGenerate.length, {
+      minStops: options?.source === "instant" ? 1 : undefined,
+    });
     if (!validation.ok) {
       setErr(validation.message);
       return false;
@@ -1127,11 +1768,14 @@ async function startStopNarration() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             jamId: jam?.id ?? null,
-            city: selectedCity,
+            city: options?.cityOverride ?? customRouteCity,
             transportMode: "walk",
             lengthMinutes: 30,
             persona: personaForGeneration,
             stops: stopsToGenerate,
+            source: options?.source ?? "manual",
+            routeTitle: options?.routeTitle,
+            narratorGuidance,
           }),
         },
         START_JOB_TIMEOUT_MS
@@ -1149,7 +1793,7 @@ async function startStopNarration() {
     } catch (e) {
       setGenerationJobKind(null);
       setErr(e instanceof Error ? e.message : "Failed to generate custom mix");
-      setStep("buildMix");
+      setStep(options?.errorStep ?? "buildMix");
       return false;
     } finally {
       setIsGeneratingMix(false);
@@ -1191,15 +1835,14 @@ async function startStopNarration() {
       .filter((s): s is NonNullable<typeof s> => Boolean(s))
     );
 
-    if (nextStops.filter((s) => !s.isOverview).length < 2) {
-      setErr("Choose at least 2 stops.");
+    if (nextStops.filter((s) => !s.isOverview).length < 1) {
+      setErr("Choose at least 1 stop.");
       return;
     }
 
-    const nextLandmarkCount = nextStops.filter((s) => !s.isOverview).length;
     const nextDescription =
-      route.description.includes("stops")
-        ? route.description.replace(/\d+\s+stops?/, `${nextLandmarkCount} stops`)
+      /\d+\s+stops?/.test(route.description)
+        ? route.description.replace(/\d+\s+stops?/, formatStopCount(nextStops.length))
         : route.description;
 
     setCustomRoute({
@@ -1236,6 +1879,7 @@ async function startStopNarration() {
 
     if (!jamIdFromUrl) {
       setJam(null);
+      setListenCount(0);
       setCustomRoute(null);
       setGenerationJobId(null);
       setGenerationJobKind(null);
@@ -1244,6 +1888,32 @@ async function startStopNarration() {
     }
     loadJamById(jamIdFromUrl);
   }, [jamIdFromUrl, debugStepFromUrl]);
+
+  useEffect(() => {
+    const jamId = jam?.id;
+    if (!jamId) return;
+    if (countedJamOpenRef.current.has(jamId)) return;
+    countedJamOpenRef.current.add(jamId);
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/jams/${encodeURIComponent(jamId)}/listen`, {
+          method: "POST",
+          cache: "no-store",
+        });
+        const body = (await res.json()) as { error?: string; listen_count?: number };
+        if (cancelled || !res.ok || typeof body.listen_count !== "number") return;
+        setListenCount(Math.max(body.listen_count, 1));
+      } catch {
+        // Do not block walkthrough when listener analytics write fails.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [jam?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1396,6 +2066,26 @@ async function startStopNarration() {
     };
   }, [step, generationJobId, generationJobKind, loadResolvedRoute, selectedPersona, jam?.persona]);
 
+  useEffect(() => {
+    if (!route) return;
+    if (route.experienceKind === "follow_along" && step === "walk") {
+      setStep("followAlongDrive");
+      return;
+    }
+    if (route.experienceKind !== "follow_along" && step === "followAlongDrive") {
+      setStep("walk");
+    }
+  }, [route, step]);
+
+  useEffect(() => {
+    if (!route || route.experienceKind !== "follow_along") return;
+    setActiveStopIndex(
+      typeof jam?.current_stop === "number" && jam.current_stop >= 0
+        ? jam.current_stop
+        : null
+    );
+  }, [route?.id, route?.experienceKind, jam?.current_stop]);
+
 // ---------- watchPosition ----------
   useEffect(() => {
   if (step !== "walk") return;
@@ -1440,6 +2130,103 @@ async function startStopNarration() {
 }, [step, currentStop]);
 
   useEffect(() => {
+    if (step !== "followAlongDrive") return;
+    if (!route || route.experienceKind !== "follow_along") return;
+    const routeCoords = route.routePathCoords ?? null;
+    if (!routeCoords || routeCoords.length < 2) return;
+    if (!navigator.geolocation) return;
+
+    let watchId: number | null = null;
+
+    const evaluatePosition = async (
+      nextPos: { lat: number; lng: number },
+      speedMps: number | null
+    ) => {
+      setMyPos(nextPos);
+      setGeoAllowed(true);
+
+      const progress = normalizeRouteProgress(nextPos, routeCoords);
+      setFollowAlongRouteProgressM(progress.distanceAlongMeters);
+
+      const isOffRoute = progress.distanceToRouteMeters > 180;
+      setFollowAlongOffRoute(isOffRoute);
+      if (isOffRoute) {
+        setFollowAlongStatusCopy("You drifted off route. Rejoin the route to resume stories.");
+        return;
+      }
+
+      const nextStopIdx = nextFollowAlongStopIndex(currentStopIndex, route.stops);
+      const nextStop = route.stops[nextStopIdx];
+      if (!nextStop) {
+        setFollowAlongStatusCopy("Drive in progress. You're approaching the end of the route.");
+        return;
+      }
+
+      const trigger = shouldTriggerFollowAlongStop({
+        routeCoords,
+        myPos: nextPos,
+        stop: nextStop,
+        speedMps,
+      });
+
+      setDistanceToStopM(
+        typeof trigger.aheadByMeters === "number" ? Math.max(0, trigger.aheadByMeters) : null
+      );
+      setFollowAlongStatusCopy(
+        nextStop.stopKind === "arrival"
+          ? "Final arrival story is queued as you reach your destination."
+          : `Next story: ${nextStop.title}`
+      );
+
+      if (!trigger.shouldTrigger || activeStopIndex === nextStopIdx) return;
+
+      setActiveStopIndex(nextStopIdx);
+      setPendingAutoplayStopId(nextStop.id);
+      await updateJam({ current_stop: nextStopIdx });
+    };
+
+    try {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const nextPos = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          };
+          const last = followAlongLastPositionRef.current;
+          let speedMps =
+            typeof pos.coords.speed === "number" && Number.isFinite(pos.coords.speed)
+              ? pos.coords.speed
+              : null;
+          if ((!speedMps || speedMps <= 0) && last) {
+            const elapsedSeconds = Math.max(
+              1,
+              (pos.timestamp - last.timestamp) / 1000
+            );
+            speedMps =
+              haversineMeters(last.lat, last.lng, nextPos.lat, nextPos.lng) /
+              elapsedSeconds;
+          }
+          followAlongLastPositionRef.current = {
+            ...nextPos,
+            timestamp: pos.timestamp,
+          };
+          void evaluatePosition(nextPos, speedMps);
+        },
+        () => {
+          setGeoAllowed(false);
+        },
+        { enableHighAccuracy: true, maximumAge: 2000, timeout: 8000 }
+      );
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [step, route, currentStopIndex, activeStopIndex]);
+
+  useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
 
@@ -1471,6 +2258,33 @@ async function startStopNarration() {
   }, [currentStop?.id, persona]);
 
   useEffect(() => {
+    if (step !== "followAlongDrive") return;
+    if (!route || route.experienceKind !== "follow_along") return;
+    const routeCoords = route.routePathCoords ?? null;
+    if (!routeCoords || routeCoords.length < 2) return;
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      void requestCurrentGeoPosition()
+        .then((coords) => {
+          const progress = normalizeRouteProgress(coords, routeCoords);
+          setMyPos(coords);
+          setFollowAlongRouteProgressM(progress.distanceAlongMeters);
+          setFollowAlongOffRoute(progress.distanceToRouteMeters > 180);
+          setGeoAllowed(true);
+        })
+        .catch(() => {
+          setGeoAllowed(false);
+        });
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [step, route]);
+
+  useEffect(() => {
     if (!pendingAutoplayStopId) return;
     if (!currentStop || currentStop.id !== pendingAutoplayStopId) return;
     if (!hasCurrentAudio) {
@@ -1486,7 +2300,7 @@ async function startStopNarration() {
   }, [pendingAutoplayStopId, currentStop, hasCurrentAudio]);
 
   useEffect(() => {
-    if (step !== "walk") return;
+    if (step !== "walk" && step !== "followAlongDrive") return;
     setActiveStopIndex(null);
     setPendingAutoplayStopId(null);
     const el = audioRef.current;
@@ -1502,18 +2316,19 @@ async function startStopNarration() {
   useEffect(() => {
     if (step !== "pickDuration") return;
     if (returnToWalkOnClose && jam?.route_id) {
-      const routeId = salemRoutes.some((r) => r.id === jam.route_id) ? jam.route_id : null;
+      const presetRoute = getRouteById(jam.route_id);
+      const routeId = presetRoute ? jam.route_id : null;
+      if (presetRoute?.city) {
+        setSelectedCity(presetRoute.city);
+      }
       setSelectedRouteId(routeId);
       setSelectedPersona((jam.persona ?? null) as Persona | null);
+      if ((jam.persona ?? null) !== "custom") {
+        setCustomNarratorGuidance((current) => current.trim());
+      }
       setNarratorFlowSource("walkEdit");
       setPickDurationPage("narrator");
       return;
-    }
-    if (previousStepRef.current === "landing") {
-      setPickDurationPage("routes");
-      setSelectedRouteId(null);
-      setSelectedPersona(null);
-      setNarratorFlowSource(null);
     }
   }, [step, returnToWalkOnClose, jam?.route_id, jam?.persona]);
 
@@ -1523,56 +2338,46 @@ async function startStopNarration() {
 
   useEffect(() => {
     if (step !== "buildMix") return;
-    if (!isEditingStopsFromWalk) {
+    if (!isEditingStopsFromWalk && narratorFlowSource !== "buildMix") {
       setBuilderSelectedStops([]);
-      setBuildMixOrderedStops(availableStopsForCity);
+      setBuildMixOrderedStops([]);
       setSelectedPersona(null);
+      setCustomNarratorGuidance("");
+      setInstantDiscoveryCity(null);
     }
+    setSearchInput("");
+    setSearchCandidates([]);
+    setSearchError(null);
     setGenerationJobId(null);
     setGenerationJobKind(null);
     setGenerationProgress(0);
     setGenerationStatusLabel(GENERATION_STATUS_LABELS.queued);
     setGenerationMessage("Queued");
-  }, [step, isEditingStopsFromWalk, availableStopsForCity]);
+  }, [step, isEditingStopsFromWalk, narratorFlowSource, availableStopsForCity]);
 
   useEffect(() => {
-    if (!jam?.id) {
-      setConnectedCount(0);
-      return;
-    }
+    if (step !== "buildMix") return;
+    if (myPos) return;
+    let cancelled = false;
 
-    const presenceKey =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random()}`;
-    const channel = supabase.channel(`jam:${jam.id}`, {
-      config: { presence: { key: presenceKey } },
-    });
-
-    const updateConnectedCount = () => {
-      const presence = channel.presenceState();
-      const count = Object.keys(presence).length;
-      setConnectedCount(Math.max(count, 1));
-    };
-
-    channel
-      .on("presence", { event: "sync" }, updateConnectedCount)
-      .on("presence", { event: "join" }, updateConnectedCount)
-      .on("presence", { event: "leave" }, updateConnectedCount)
-      .subscribe(async (status) => {
-        if (status !== "SUBSCRIBED") return;
-        await channel.track({ jam_id: jam.id, joined_at: new Date().toISOString() });
-        updateConnectedCount();
+    void requestCurrentGeoPosition()
+      .then((coords) => {
+        if (cancelled) return;
+        setMyPos(coords);
+        setGeoAllowed(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setGeoAllowed(false);
       });
 
     return () => {
-      void channel.untrack();
-      void supabase.removeChannel(channel);
+      cancelled = true;
     };
-  }, [jam?.id]);
+  }, [step, myPos]);
 
   useEffect(() => {
-    if (!["landing", "presetRoutes", "pickDuration", "buildMix", "generating", "walk"].includes(step)) return;
+    if (!["landing", "pickDuration", "buildMix", "followAlongSetup", "generating", "walk", "followAlongDrive"].includes(step)) return;
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [step]);
 
@@ -1581,28 +2386,35 @@ async function startStopNarration() {
     const selectedIdx = currentStopIndex ?? -1;
     return route.stops.map((stop, idx) => {
       if (selectedIdx < 0) {
+        if (stop.isOverview) {
+          return {
+            id: stop.id,
+            title: stop.title,
+            isOverview: true,
+            image: toSafeStopImage(stop.images[0]),
+            subtitle: "Starting point",
+            isActive: false,
+          };
+        }
         const fallbackMinutes =
-          idx === 0
-            ? 1
-            : estimateWalkMinutes(
+          idx > 0
+            ? estimateWalkMinutes(
                 haversineMeters(route.stops[idx - 1].lat, route.stops[idx - 1].lng, stop.lat, stop.lng)
-              );
-        const distanceFromUserM = myPos
-          ? haversineMeters(myPos.lat, myPos.lng, stop.lat, stop.lng)
-          : null;
+              )
+            : 1;
         return {
           id: stop.id,
           title: stop.title,
           isOverview: Boolean(stop.isOverview),
           image: toSafeStopImage(stop.images[0]),
-          subtitle: getInitialStopSubtitle(distanceFromUserM, fallbackMinutes),
+          subtitle: `${fallbackMinutes} mins away`,
           isActive: false,
         };
       }
 
-      let subtitle = "At this location";
-      if (idx < selectedIdx) subtitle = "Visited";
-      if (idx > selectedIdx) {
+      let subtitle = stop.isOverview ? "Starting point" : "At this location";
+      if (idx < selectedIdx) subtitle = stop.isOverview ? "Starting point" : "Visited";
+      if (idx > selectedIdx && !stop.isOverview) {
         const prev = route.stops[idx - 1];
         const meters = haversineMeters(prev.lat, prev.lng, stop.lat, stop.lng);
         subtitle = `${estimateWalkMinutes(meters)} min walk away`;
@@ -1616,25 +2428,46 @@ async function startStopNarration() {
         isActive: idx === selectedIdx,
       };
     });
-  }, [route, currentStopIndex, myPos]);
+  }, [route, currentStopIndex]);
 
   const mapsUrl = useMemo(() => {
-    if (!route || route.stops.length < 2) return "#";
-    const origin = `${route.stops[0].lat},${route.stops[0].lng}`;
-    const destination = `${route.stops[route.stops.length - 1].lat},${route.stops[route.stops.length - 1].lng}`;
+    if (!route) return "#";
+    const originPoint = route.origin ?? (route.stops[0] ? { lat: route.stops[0].lat, lng: route.stops[0].lng } : null);
+    const destinationPoint =
+      route.destination ??
+      (route.stops[route.stops.length - 1]
+        ? {
+            lat: route.stops[route.stops.length - 1].lat,
+            lng: route.stops[route.stops.length - 1].lng,
+          }
+        : null);
+    if (!originPoint || !destinationPoint) return "#";
+    const origin = `${originPoint.lat},${originPoint.lng}`;
+    const destination = `${destinationPoint.lat},${destinationPoint.lng}`;
     const waypoints = route.stops
-      .slice(1, -1)
+      .filter((stop) => stop.stopKind !== "arrival")
       .map((s) => `${s.lat},${s.lng}`)
       .join("|");
-    const base = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=walking`;
+    const mode = route.transportMode === "drive" ? "driving" : "walking";
+    const base = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=${mode}`;
     return waypoints ? `${base}&waypoints=${encodeURIComponent(waypoints)}` : base;
   }, [route]);
   const buildMixSubmitDisabled = isEditingStopsFromWalk ? isGeneratingMix : (!selectionValidation.ok || isGeneratingMix);
+  const isSurpriseMixUnavailable = !NEARBY_STORY_ENABLED;
+  const isSurpriseMixLoading = isGeneratingNearbyStory || isResolvingNearbyGeo;
+  const isSurpriseMixDisabled = isSurpriseMixUnavailable || isSurpriseMixLoading;
+  const surpriseMixSubtitle = isResolvingNearbyGeo
+    ? "Locating..."
+    : isGeneratingNearbyStory
+      ? "Generating..."
+      : isSurpriseMixUnavailable
+        ? "Coming soon"
+        : "One nearby landmark. Story by AI Historian.";
 
   // ---------- UI ----------
   return (
-    <div className={`${styles.container} ${step === "walk" || step === "landing" || step === "presetRoutes" || step === "pickDuration" || step === "buildMix" || step === "generating" ? styles.containerWide : ""}`}>
-      {step !== "walk" && step !== "landing" && step !== "presetRoutes" && step !== "pickDuration" && step !== "buildMix" && step !== "generating" && (
+    <div className={`${styles.container} ${step === "walk" || step === "followAlongDrive" || step === "landing" || step === "pickDuration" || step === "buildMix" || step === "followAlongSetup" || step === "generating" ? styles.containerWide : ""}`}>
+      {step !== "walk" && step !== "followAlongDrive" && step !== "landing" && step !== "pickDuration" && step !== "buildMix" && step !== "followAlongSetup" && step !== "generating" && (
         <header className={styles.header}>
           <div>
             <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.brandTitle}`}>Wandrful</button>
@@ -1661,66 +2494,10 @@ async function startStopNarration() {
 
       {/* LANDING */}
       {step === "landing" && (
-        <main className={styles.landingLayout}>
-          <section className={styles.landingInfo}>
-            <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>Wandrful</button>
-            <div className={styles.landingCopyBlock}>
-              <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets.</h1>
-              <p className={styles.landingCopy}>
-               Wander with intention. Experience places through a curated lens. <strong>More story. Less directions.
-              </strong></p>
-            </div>
-
-            <div className={styles.landingPopular}>Featured mixes:</div>
-
-            <button
-              className={styles.landingTourRow}
-              type="button"
-              onClick={() => {
-                setSelectedCity("salem");
-                setPickDurationPage("routes");
-                setNarratorFlowSource(null);
-                setSelectedRouteId(null);
-                setSelectedPersona(null);
-                setStep("presetRoutes");
-              }}
-            >
-              <div className={styles.landingTourText}>
-                <div className={styles.landingTourTitle}>Salem</div>
-                <div className={styles.landingTourSub}>Historic seaport, witch-trial legacy</div>
-              </div>
-              <Image
-                src="/icons/chevron-right.svg"
-                alt=""
-                width={28}
-                height={28}
-                className={styles.landingArrowIcon}
-                aria-hidden="true"
-              />
-            </button>
-
-            <div className={styles.landingTourRowMuted}>
-              <div className={styles.landingTourText}>
-                <div className={styles.landingTourTitleMuted}>Boston</div>
-                <div className={styles.landingTourSub}>Coming Soon...</div>
-              </div>
-            </div>
- 
-
-            <div className={styles.landingCtaWrap}>
-              <button
-                onClick={() => {
-                  setSelectedCity("salem");
-                  setNarratorFlowSource(null);
-                  setStep("buildMix");
-                }}
-                className={styles.landingCtaButton}
-              >
-                Create your own mix
-              </button>
-            </div>
-          </section>
-
+        <main
+          className={`${styles.landingLayout} ${landingTheme === "light" ? styles.landingThemeLight : styles.landingThemeDark}`}
+          data-theme={landingTheme}
+        >
           <section className={styles.landingImagePane}>
             <video
               className={styles.landingVideo}
@@ -1733,6 +2510,211 @@ async function startStopNarration() {
             >
               <source src="/images/marketing/ginger-walking-remix-v2.mp4" type="video/mp4" />
             </video>
+            <div className={styles.landingVideoScrim} aria-hidden="true" />
+            <div className={styles.landingMobileHeroContent}>
+              <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand} ${styles.landingMobileBrand}`}>
+                Wandrful
+              </button>
+              <div className={`${styles.landingCopyBlock} ${styles.landingCopyBlockMobile}`}>
+                <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets</h1>
+                <p className={styles.landingCopy}>
+                  Wander with intention. Experience places through a curated lens. <strong>More story. Less directions.</strong>
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section className={styles.landingInfo}>
+            <div className={styles.landingDesktopIntro}>
+              <button type="button" onClick={goHome} className={`${styles.brandLink} ${styles.landingBrand}`}>Wandrful</button>
+              <div className={styles.landingCopyBlock}>
+                <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets.</h1>
+                <p className={styles.landingCopy}>
+                  Wander with intention. Experience places through a curated lens. <strong>More story. Less directions.</strong>
+                </p>
+              </div>
+            </div>
+
+            <div className={styles.landingPopular}>Historical Mixes</div>
+
+            <div className={styles.landingFeaturedGrid}>
+              {featuredPresetRoutes.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedCity(r.city ?? "salem");
+                    void startPresetTourFromRoute(r.id);
+                  }}
+                  aria-label={`${r.title}, ${formatStopCount(getPresetRouteStopCount(r))}, by ${personaCatalog[r.defaultPersona].displayName}`}
+                  className={`${styles.landingFeaturedCard} ${selectedRouteId === r.id ? styles.landingFeaturedCardSelected : ""}`}
+                  style={{ backgroundImage: `url("${getLandingRouteImage(r)}")` }}
+                >
+                  <div className={styles.landingFeaturedCardOverlay} aria-hidden="true" />
+                  <div className={styles.landingFeaturedCardContent}>
+                    <div className={styles.landingFeaturedCardSpacer} aria-hidden="true" />
+                    <div className={styles.landingFeaturedCardTitleWrap}>
+                      <div className={`${styles.landingFeaturedCardTitle} ${getLandingTitleStyleClass(r.id)} ${getLandingTitleFontClass(r.id)}`}>
+                        {r.title}
+                      </div>
+                    </div>
+                    <div className={styles.landingFeaturedCardMeta}>
+                      <div className={styles.landingFeaturedCardBadge} aria-hidden="true">
+                        <Image
+                          src={getPresetRouteIcon()}
+                          alt=""
+                          width={20}
+                          height={20}
+                          className={styles.landingFeaturedCardBadgeIcon}
+                          aria-hidden="true"
+                        />
+                      </div>
+                      <div className={styles.landingFeaturedCardMetaText}>
+                        <div className={styles.landingFeaturedCardMetaPrimary}>{formatStopCount(getPresetRouteStopCount(r))}</div>
+                        <div className={styles.landingFeaturedCardMetaSecondary}>
+                          By {personaCatalog[r.defaultPersona].displayName}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className={styles.landingSecondaryLabel}>More ways to start</div>
+
+            <div className={`${styles.pickRouteList} ${styles.landingRouteList}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCity("salem");
+                  setInstantDiscoveryCity(null);
+                  goToCreateOwnMixBuilder();
+                }}
+                className={`${styles.pickRouteRow} ${styles.landingSecondaryRow} ${isCreateOwnSelected ? styles.pickRouteRowSelected : ""}`}
+              >
+                <div className={styles.pickRouteMainWithIcon}>
+                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                    <Image
+                      src="/icons/shuffle.svg"
+                      alt=""
+                      width={24}
+                      height={24}
+                      className={styles.pickRouteWalkIcon}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className={styles.pickRouteMain}>
+                    <div className={styles.pickRouteTitle}>Create your mix</div>
+                    <div className={styles.pickRouteMeta}>Pick your stops. Choose a storyteller.</div>
+                    <div className={`${styles.pickRouteMeta} ${styles.pickRouteMetaSecondary}`}>
+                      Publish for $1.99 and set your listening price.
+                    </div>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  void handleNearbyStory();
+                }}
+                className={`${styles.pickRouteRow} ${styles.landingSecondaryRow} ${isSurpriseMixDisabled ? styles.pickRouteRowDisabled : ""}`}
+                disabled={isSurpriseMixDisabled}
+              >
+                <div className={styles.pickRouteMainWithIcon}>
+                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                    <Image
+                      src="/icons/lightning-fill.svg"
+                      alt=""
+                      width={24}
+                      height={24}
+                      className={styles.pickRouteWalkIcon}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className={styles.pickRouteMain}>
+                    <div className={styles.pickRouteTitle}>My Location</div>
+                    <div className={styles.pickRouteMeta}>{surpriseMixSubtitle}</div>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  void openFollowAlongSetup();
+                }}
+                className={`${styles.pickRouteRow} ${styles.landingSecondaryRow}`}
+              >
+                <div className={styles.pickRouteMainWithIcon}>
+                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                    <Image
+                      src="/icons/play-fill.svg"
+                      alt=""
+                      width={24}
+                      height={24}
+                      className={styles.pickRouteWalkIcon}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className={styles.pickRouteMain}>
+                    <div className={styles.pickRouteTitle}>Follow along</div>
+                    <div className={styles.pickRouteMeta}>Pick one destination. Stories appear as you drive.</div>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            <div className={styles.landingSecondaryLabel}>Locations</div>
+
+            <div className={`${styles.pickRouteList} ${styles.landingRouteList}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  openPresetCity("boston");
+                }}
+                className={`${styles.pickRouteRow} ${styles.landingSecondaryRow}`}
+              >
+                <div className={styles.pickRouteMainWithIcon}>
+                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                    <Image
+                      src="/icons/geo-alt-fill.svg"
+                      alt=""
+                      width={24}
+                      height={24}
+                      className={styles.pickRouteWalkIcon}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className={styles.pickRouteMain}>
+                    <div className={styles.pickRouteTitle}>Boston</div>
+                    <div className={styles.pickRouteMeta}>Revolutionary secrets and old taverns.</div>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            <div className={styles.landingFooter}>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={landingTheme === "light"}
+                aria-label={`Switch to ${nextLandingTheme} mode`}
+                onClick={toggleLandingTheme}
+                className={styles.landingThemeToggle}
+              >
+                <span className={styles.landingThemeToggleCopy}>
+                  <span className={styles.landingThemeToggleLabel}>Theme</span>
+                  <span className={styles.landingThemeToggleValue}>
+                    {landingTheme === "dark" ? "Dark mode" : "Light mode"}
+                  </span>
+                </span>
+                <span className={styles.landingThemeToggleTrack} aria-hidden="true">
+                  <span className={styles.landingThemeToggleThumb} />
+                </span>
+              </button>
+            </div>
           </section>
         </main>
       )}
@@ -1756,102 +2738,10 @@ async function startStopNarration() {
   </div>
       )}
 
-      {step === "presetRoutes" && (
-        <main className={styles.pickLayout}>
-          <section className={`${styles.pickInfo} ${styles.pickInfoSelectRoute}`}>
-            <button onClick={goHome} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Back">
-              <Image
-                src="/icons/arrow-left.svg"
-                alt=""
-                width={26}
-                height={26}
-                className={styles.mapBackIconDark}
-                aria-hidden="true"
-              />
-            </button>
-            <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>
-                Choose a preset route in{" "}
-                <button type="button" className={styles.pickHeadingCityLink} onClick={goHome}>
-                  {selectedCityLabel}
-                </button>
-              </h2>
-            </div>
-
-            <div className={styles.pickRouteList}>
-              {salemRoutes.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => {
-                    startTourFromRoute(r.id);
-                  }}
-                  className={`${styles.pickRouteRow} ${selectedRouteId === r.id ? styles.pickRouteRowSelected : ""}`}
-                >
-                  <div className={styles.pickRouteMainWithIcon}>
-                    <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                      <Image
-                        src={
-                          r.id === "salem-core-15"
-                            ? "/icons/lightning-fill.svg"
-                            : r.id === "salem-deepdive-60"
-                              ? "/icons/layers.svg"
-                              : "/icons/person-walking.svg"
-                        }
-                        alt=""
-                        width={24}
-                        height={24}
-                        className={styles.pickRouteWalkIcon}
-                        aria-hidden="true"
-                      />
-                    </div>
-                    <div className={styles.pickRouteMain}>
-                      <div className={styles.pickRouteTitle}>{r.title}</div>
-                      <div className={styles.pickRouteMeta}>
-                        {r.durationLabel} • {r.stops.length} stops • {formatRouteMiles(getRouteMiles(r.stops))}
-                      </div>
-                    </div>
-                  </div>
-                  <div className={styles.pickRowArrow} aria-hidden="true">
-                    <Image
-                      src="/icons/chevron-right.svg"
-                      alt=""
-                      width={28}
-                      height={28}
-                      className={styles.landingArrowIcon}
-                      aria-hidden="true"
-                    />
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className={styles.pickImagePane}>
-            <RouteMap
-              stops={selectedRoute ? selectedRoute.stops : []}
-              currentStopIndex={0}
-              myPos={myPos}
-              cityCenter={selectedCityCenter}
-              followCurrentStop={false}
-            />
-            <button onClick={goHome} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`} aria-label="Back">
-              <Image
-                src="/icons/arrow-left.svg"
-                alt=""
-                width={26}
-                height={26}
-                className={styles.mapBackIconDark}
-                aria-hidden="true"
-              />
-            </button>
-          </section>
-        </main>
-      )}
-
       {/* PICK DURATION */}
       {step === "pickDuration" && (
         <main className={styles.pickLayout}>
-          {pickDurationPage === "narrator" ? (
+          {pickDurationPage === "narrator" && (
             <>
               <section className={`${styles.pickInfo} ${styles.pickInfoSelectRoute}`}>
                 <button onClick={closeNarratorPicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Back">
@@ -1864,7 +2754,7 @@ async function startStopNarration() {
                     aria-hidden="true"
                   />
                 </button>
-                <h2 className={`${styles.pickHeading} ${styles.pickHeadingBelowClose}`}>Select your narrator</h2>
+                <h2 className={`${styles.pickHeading} ${styles.pickHeadingBelowClose}`}>Select your storyteller</h2>
                 <div className={styles.pickPersonaRow}>
                   {PERSONA_KEYS.map((personaKey) => {
                     const personaInfo = personaCatalog[personaKey];
@@ -1876,15 +2766,26 @@ async function startStopNarration() {
                       }}
                       className={`${styles.pickNarratorOption} ${selectedPersona === personaKey ? styles.pickNarratorOptionSelected : ""}`}
                     >
-                      <div className={styles.pickNarratorOptionContent}>
-                        <div className={styles.pickNarratorWithAvatar}>
-                          <div className={styles.pickNarratorAvatarWrap}>
-                            <Image
-                              src={personaInfo.avatarSrc}
-                              alt={personaInfo.avatarAlt}
-                              fill
-                              className={styles.pickNarratorAvatar}
-                            />
+                        <div className={styles.pickNarratorOptionContent}>
+                          <div className={styles.pickNarratorWithAvatar}>
+                            <div className={styles.pickNarratorAvatarWrap}>
+                            {usesNarratorIcon(personaKey) ? (
+                              <Image
+                                src="/icons/stars.svg"
+                                alt=""
+                                width={24}
+                                height={24}
+                                className={styles.pickNarratorFutureIcon}
+                                aria-hidden="true"
+                              />
+                            ) : (
+                              <Image
+                                src={personaInfo.avatarSrc}
+                                alt={personaInfo.avatarAlt}
+                                fill
+                                className={styles.pickNarratorAvatar}
+                              />
+                            )}
                           </div>
                           <div>
                             <div className={styles.pickRouteTitle}>{personaInfo.displayName}</div>
@@ -1907,33 +2808,90 @@ async function startStopNarration() {
                   })}
                   <button
                     type="button"
-                    disabled
-                    aria-disabled="true"
-                    className={`${styles.pickNarratorOption} ${styles.pickNarratorOptionDisabled}`}
+                    disabled={!customNarratorEnabled}
+                    aria-disabled={!customNarratorEnabled}
+                    onClick={() => {
+                      if (!customNarratorEnabled) return;
+                      handleNarratorSelect("custom");
+                    }}
+                    className={`${styles.pickNarratorOption} ${selectedPersona === "custom" ? styles.pickNarratorOptionSelected : ""} ${!customNarratorEnabled ? styles.pickNarratorOptionDisabled : ""}`}
                   >
-                    <div className={styles.pickNarratorWithAvatar}>
-                      <div className={styles.pickNarratorAvatarWrap}>
+                    <div className={styles.pickNarratorOptionContent}>
+                      <div className={styles.pickNarratorWithAvatar}>
+                        <div className={styles.pickNarratorAvatarWrap}>
+                          <Image
+                            src="/icons/stars.svg"
+                            alt=""
+                            width={24}
+                            height={24}
+                            className={styles.pickNarratorFutureIcon}
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div>
+                          <div className={styles.pickRouteTitle}>Create your own storyteller</div>
+                          <div className={styles.pickNarratorSub}>
+                            {customNarratorEnabled ? "Describe the voice, audience, and tone you want." : "Available for custom tours only"}
+                          </div>
+                        </div>
+                      </div>
+                      <div className={styles.pickRowArrow} aria-hidden="true">
                         <Image
-                          src="/icons/stars.svg"
+                          src="/icons/chevron-right.svg"
                           alt=""
-                          width={24}
-                          height={24}
-                          className={styles.pickNarratorFutureIcon}
+                          width={28}
+                          height={28}
+                          className={styles.landingArrowIcon}
                           aria-hidden="true"
                         />
-                      </div>
-                      <div>
-                        <div className={styles.pickRouteTitle}>Create your own narrator</div>
-                        <div className={styles.pickNarratorSub}>Coming soon for a fee</div>
                       </div>
                     </div>
                   </button>
                 </div>
+                {customNarratorEnabled && selectedPersona === "custom" && (
+                  <div className={styles.customNarratorPanel}>
+                    <label htmlFor="customNarratorGuidance" className={styles.customNarratorLabel}>
+                      Describe your narrator
+                    </label>
+                    <p className={styles.customNarratorHelp}>
+                      Tell EchoJam who this tour is for and how the narration should sound.
+                    </p>
+                    <textarea
+                      id="customNarratorGuidance"
+                      value={customNarratorGuidance}
+                      onChange={(e) => {
+                        setErr(null);
+                        setCustomNarratorGuidance(e.target.value.slice(0, CUSTOM_NARRATOR_MAX_CHARS));
+                      }}
+                      className={styles.customNarratorTextarea}
+                      placeholder="This tour is for my niece Kate who is 8 years old. She loves animals, so make it kid friendly, fun, and mention animals whenever relevant."
+                      rows={6}
+                      maxLength={CUSTOM_NARRATOR_MAX_CHARS}
+                    />
+                    <div className={styles.customNarratorCount}>
+                      {trimmedCustomNarratorGuidance.length}/{CUSTOM_NARRATOR_MAX_CHARS}
+                    </div>
+                  </div>
+                )}
+                {customNarratorEnabled && (
+                  <div className={styles.pickDurationStartWrap}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void submitNarratorSelection();
+                      }}
+                      disabled={narratorSubmitDisabled}
+                      className={`${styles.landingCtaButton} ${styles.startTourButton}`}
+                    >
+                      {returnToWalkOnClose ? "Update Narrator" : "Create Tour"}
+                    </button>
+                  </div>
+                )}
               </section>
 
               <section className={styles.pickImagePane}>
                 <RouteMap
-                  stops={[]}
+                  stops={narratorFlowSource === "buildMix" ? buildMixDisplayStops : []}
                   currentStopIndex={0}
                   myPos={myPos}
                   cityCenter={selectedCityCenter}
@@ -1951,7 +2909,8 @@ async function startStopNarration() {
                 </button>
               </section>
             </>
-          ) : (
+          )}
+          {pickDurationPage === "routes" && (
             <>
               <section className={`${styles.pickInfo} ${styles.pickInfoSelectRoute}`}>
                 <button onClick={closeRoutePicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`} aria-label="Back">
@@ -1974,7 +2933,7 @@ async function startStopNarration() {
                 </div>
 
                 <div className={styles.pickRouteList}>
-                  {salemRoutes.map((r) => (
+                  {routesForSelectedCity.map((r) => (
                     <button
                       key={r.id}
                       onClick={() => {
@@ -1985,13 +2944,7 @@ async function startStopNarration() {
                       <div className={styles.pickRouteMainWithIcon}>
                         <div className={styles.pickRouteIconCircle} aria-hidden="true">
                           <Image
-                            src={
-                              r.id === "salem-core-15"
-                                ? "/icons/lightning-fill.svg"
-                                : r.id === "salem-deepdive-60"
-                                  ? "/icons/layers.svg"
-                                  : "/icons/person-walking.svg"
-                            }
+                            src={getPresetRouteIcon()}
                             alt=""
                             width={24}
                             height={24}
@@ -2002,7 +2955,10 @@ async function startStopNarration() {
                         <div className={styles.pickRouteMain}>
                           <div className={styles.pickRouteTitle}>{r.title}</div>
                           <div className={styles.pickRouteMeta}>
-                            {r.durationLabel} • {r.stops.length} stops • {formatRouteMiles(getRouteMiles(r.stops))}
+                            Story by {personaCatalog[r.defaultPersona].displayName}
+                          </div>
+                          <div className={`${styles.pickRouteMeta} ${styles.pickRouteMetaSecondary}`}>
+                            {r.durationLabel} • {formatStopCount(getPresetRouteStopCount(r))}
                           </div>
                         </div>
                       </div>
@@ -2038,8 +2994,8 @@ async function startStopNarration() {
                         />
                       </div>
                         <div className={styles.pickRouteMain}>
-                          <div className={styles.pickRouteTitle}>Create your own mix</div>
-                          <div className={styles.pickRouteMeta}>Select up to 9 stops</div>
+                          <div className={styles.pickRouteTitle}>Create your mix</div>
+                          <div className={styles.pickRouteMeta}>Select up to 10 stops</div>
                         </div>
                       </div>
                       <div className={styles.pickRowArrow} aria-hidden="true">
@@ -2098,122 +3054,203 @@ async function startStopNarration() {
               />
             </button>
             <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>Create your own mix</h2>
+              <h2 className={styles.pickHeading}>Create your mix</h2>
             </div>
 
+            
+            <div className={styles.buildMixLinkAddWrap}>
+              <div className={styles.buildMixSearchRow}>
+                <div className={styles.buildMixSearchInputWrap}>
+                  <input
+                    type="text"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    onKeyDown={handleBuildMixSearchKeyDown}
+                    className={styles.buildMixSearchInput}
+                    placeholder={`Search for a place`}
+                    aria-label="Search places"
+                  />
+                  <div className={styles.buildMixSearchActions}>
+                    {searchInput.trim().length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearBuildMixSearch}
+                        className={styles.buildMixSearchActionButton}
+                        aria-label="Clear search"
+                      >
+                        <svg viewBox="0 0 24 24" className={styles.buildMixSearchClearIcon} aria-hidden="true">
+                          <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={searchPlaces}
+                      disabled={isSearchingPlaces}
+                      className={styles.buildMixSearchActionButton}
+                      aria-label={isSearchingPlaces ? "Searching places" : "Search places"}
+                    >
+                      <svg viewBox="0 0 24 24" className={styles.buildMixSearchIcon} aria-hidden="true">
+                        <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                        <line x1="16.2" y1="16.2" x2="21" y2="21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {searchError && <div className={styles.buildMixSearchError}>{searchError}</div>}
+              {searchInput.trim().length > 0 && availableSearchCandidates.length > 0 && (
+                <div className={styles.buildMixSearchDropdown}>
+                  {availableSearchCandidates.map((candidate) => (
+                      <div
+                        key={candidate.id}
+                        className={styles.buildMixSearchDropdownRow}
+                      >
+                        <div className={styles.buildMixSearchDropdownTitle}>{candidate.title}</div>
+                        <button
+                          type="button"
+                          onClick={() => addSearchedCandidate(candidate)}
+                          className={styles.pickRouteToggleButton}
+                          aria-label={`Add ${candidate.title}`}
+                        >
+                          <div className={styles.pickRouteArrow}>
+                            <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                              <Image
+                                src="/icons/plus.svg"
+                                alt=""
+                                width={20}
+                                height={20}
+                                className={styles.pickRouteArrowIcon}
+                                aria-hidden="true"
+                              />
+                            </div>
+                          </div>
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
             <div className={styles.pickSectionLabel}>
                
               {builderSelectedStops.length} of {maxStopsForSelection || 0} stops selected  for {formatRouteMiles(selectedStopsDistanceMiles)}
             </div>
-            <div className={styles.buildMixLinkAddWrap}>
-              <div className={styles.buildMixLinkRow}>
-                <textarea
-                  value={linkBatchInput}
-                  onChange={(e) => setLinkBatchInput(e.target.value)}
-                  className={styles.buildMixLinkTextarea}
-                  placeholder="Paste in a Google Maps link"
-                  rows={1}
-                />
-                <button
-                  type="button"
-                  onClick={addStopsFromLinks}
-                  disabled={isResolvingLinks}
-                  className={styles.buildMixLinkAddButton}
-                  aria-label={isResolvingLinks ? "Resolving links" : "Add stop link"}
-                >
-                  {isResolvingLinks ? (
-                    <span className={styles.buildMixLinkAddLoading} aria-hidden="true" />
-                  ) : (
-                    <Image
-                      src="/icons/plus.svg"
-                      alt=""
-                      width={22}
-                      height={22}
-                      className={styles.buildMixLinkAddIcon}
-                      aria-hidden="true"
-                    />
-                  )}
-                </button>
-              </div>
-              {resolveSummary && (
-                <div className={styles.buildMixLinkSummary}>
-                  Added {resolveSummary.added}. Skipped duplicates {resolveSummary.skippedDuplicate}.
-                  {resolveSummary.skippedLimit > 0 ? ` Reached max and skipped ${resolveSummary.skippedLimit}.` : ""}
-                  {resolveSummary.failed.length > 0 ? ` Failed ${resolveSummary.failed.length} invalid/unreadable link(s).` : ""}
-                </div>
+            <div className={styles.pickRouteList}>
+              {buildMixDisplayStops.length === 0 ? (
+                null
+              ) : (
+                buildMixDisplayStops.map((stop, idx) => {
+                  const stopCoordKey = getStopCoordKey(stop);
+                  const active = builderSelectedStops.some(
+                    (s) => s.id === stop.id || getStopCoordKey(s) === stopCoordKey
+                  );
+                  const isFirst = idx === 0;
+                  const isLast = idx === buildMixDisplayStops.length - 1;
+                  return (
+                    <div
+                      key={stop.id}
+                      className={`${styles.pickRouteRow} ${styles.pickRouteRowBuildMix} ${active ? styles.pickRouteRowSelected : ""}`}
+                    >
+                      <div className={styles.pickRouteMain}>
+                        <div className={styles.buildMixTitleRow}>
+                          <div className={styles.buildMixReorderButtons}>
+                            <button
+                              type="button"
+                              className={styles.buildMixReorderButton}
+                              onClick={() => moveSelectedStop(stop, "up")}
+                              aria-label={`Move ${stop.title} up`}
+                              disabled={isFirst}
+                            >
+                              <Image
+                                src="/icons/chevron-right.svg"
+                                alt=""
+                                width={16}
+                                height={16}
+                                className={`${styles.buildMixReorderIcon} ${styles.buildMixReorderIconUp}`}
+                                aria-hidden="true"
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.buildMixReorderButton}
+                              onClick={() => moveSelectedStop(stop, "down")}
+                              aria-label={`Move ${stop.title} down`}
+                              disabled={isLast}
+                            >
+                              <Image
+                                src="/icons/chevron-right.svg"
+                                alt=""
+                                width={16}
+                                height={16}
+                                className={`${styles.buildMixReorderIcon} ${styles.buildMixReorderIconDown}`}
+                                aria-hidden="true"
+                              />
+                            </button>
+                          </div>
+                          <div className={`${styles.pickRouteTitle} ${styles.buildMixStopTitleWithIndex}`}>{`${idx + 1}. ${stop.title}`}</div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.pickRouteToggleButton}
+                        onClick={() => toggleBuilderStop(stop)}
+                        aria-label={active ? `Remove ${stop.title}` : `Add ${stop.title}`}
+                      >
+                        <div className={styles.pickRouteArrow}>
+                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                          {active ? (
+                            <Image
+                              src="/icons/x.svg"
+                              alt=""
+                              width={20}
+                              height={20}
+                              className={styles.pickRouteArrowIcon}
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <Image
+                              src="/icons/plus.svg"
+                              alt=""
+                              width={20}
+                              height={20}
+                              className={styles.pickRouteArrowIcon}
+                              aria-hidden="true"
+                            />
+                          )}
+                        </div>
+                        </div>
+                      </button>
+                    </div>
+                  );
+                })
               )}
             </div>
-            <div className={styles.pickRouteList}>
-              {buildMixDisplayStops.map((stop) => {
-                const stopCoordKey = getStopCoordKey(stop);
-                const active = builderSelectedStops.some(
-                  (s) => s.id === stop.id || getStopCoordKey(s) === stopCoordKey
-                );
-                return (
-                  <div
-                    key={stop.id}
-                    className={`${styles.pickRouteRow} ${styles.pickRouteRowBuildMix} ${active ? styles.pickRouteRowSelected : ""}`}
-                  >
-                    <div className={styles.pickRouteMain}>
-                      <div className={styles.pickRouteTitle}>{stop.title}</div>
-                       
-                    </div>
-                    <button
-                      type="button"
-                      className={styles.pickRouteToggleButton}
-                      onClick={() => toggleBuilderStop(stop)}
-                      aria-label={active ? `Remove ${stop.title}` : `Add ${stop.title}`}
-                    >
-                      <div className={styles.pickRouteArrow}>
-                      <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                        {active ? (
-                          <Image
-                            src="/icons/x.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className={styles.pickRouteArrowIcon}
-                            aria-hidden="true"
-                          />
-                        ) : (
-                          <Image
-                            src="/icons/plus.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className={styles.pickRouteArrowIcon}
-                            aria-hidden="true"
-                          />
-                        )}
-                      </div>
-                      </div>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
 
-              <div className={`${styles.pickDurationStartWrap} ${styles.buildMixStickyCtaWrap}`}>
-                <button
-                onClick={() => {
-                  if (isEditingStopsFromWalk) {
-                    void saveEditedStopsFromWalk();
-                    return;
-                  }
-                  if (!selectionValidation.ok) {
-                    setErr(selectionValidation.message);
-                    return;
-                  }
-                  setNarratorFlowSource("buildMix");
-                  setPickDurationPage("narrator");
-                  setStep("pickDuration");
-                }}
-                disabled={buildMixSubmitDisabled}
-                className={`${styles.landingCtaButton} ${styles.startTourButton}`}
-              >
-                {isEditingStopsFromWalk ? "Save Tour" : "Continue"}
-              </button>
-            </div>
+              {builderSelectedStops.length > 0 && (
+                <div className={`${styles.pickDurationStartWrap} ${styles.buildMixStickyCtaWrap} ${styles.buildMixStickyCtaEnter}`}>
+                  <button
+                  onClick={() => {
+                    if (isEditingStopsFromWalk) {
+                      void saveEditedStopsFromWalk();
+                      return;
+                    }
+                    if (!selectionValidation.ok) {
+                      setErr(selectionValidation.message);
+                      return;
+                    }
+                    setNarratorFlowSource("buildMix");
+                    setPickDurationPage("narrator");
+                    setStep("pickDuration");
+                  }}
+                  disabled={buildMixSubmitDisabled}
+                  className={`${styles.landingCtaButton} ${styles.startTourButton}`}
+                >
+                  {isEditingStopsFromWalk ? "Save Tour" : "Continue"}
+                </button>
+              </div>
+              )}
           </section>
           <section className={`${styles.pickImagePane} ${styles.buildMixImagePane}`}>
             <RouteMap
@@ -2222,6 +3259,7 @@ async function startStopNarration() {
               myPos={myPos}
               cityCenter={selectedCityCenter}
               followCurrentStop={false}
+              spreadOverlappingStops
             />
             <button
               onClick={closeRoutePicker}
@@ -2241,19 +3279,318 @@ async function startStopNarration() {
         </main>
       )}
 
+      {step === "followAlongSetup" && (
+        <main className={`${styles.pickLayout} ${styles.followAlongLayout}`}>
+          <section className={`${styles.pickInfo} ${styles.followAlongInfo}`}>
+            <button
+              onClick={goHome}
+              className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonLeft} ${styles.pickCloseButtonDesktop}`}
+              aria-label="Close"
+            >
+              <Image
+                src="/icons/x.svg"
+                alt=""
+                width={26}
+                height={26}
+                className={styles.mapBackIconDark}
+                aria-hidden="true"
+              />
+            </button>
+
+            <div className={styles.pickCopyBlock}>
+              <h2 className={styles.pickHeading}>Follow Along</h2>
+              <p className={styles.followAlongLead}>
+                Choose one destination. Wandrful will preload stories and surface them automatically as you drive.
+              </p>
+            </div>
+
+            <div className={styles.followAlongFieldBlock}>
+              <div className={styles.pickSectionLabel}>Starting point</div>
+              <div className={styles.followAlongSummaryCard}>
+                <div className={styles.pickRouteTitle}>
+                  {followAlongOrigin?.label || "Current location required"}
+                </div>
+                <div className={styles.pickRouteMeta}>
+                  {followAlongOrigin?.subtitle || "Allow location access to continue."}
+                </div>
+              </div>
+            </div>
+
+            <div className={styles.followAlongFieldBlock}>
+              <div className={styles.pickSectionLabel}>Destination</div>
+              <div className={styles.buildMixSearchRow}>
+                <div className={styles.buildMixSearchInputWrap}>
+                  <input
+                    type="text"
+                    value={followAlongDestinationQuery}
+                    onChange={(e) => setFollowAlongDestinationQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" || isSearchingFollowAlongDestinations) return;
+                      e.preventDefault();
+                      void searchFollowAlongDestinations();
+                    }}
+                    className={styles.buildMixSearchInput}
+                    placeholder="Search an address, landmark, or city"
+                    aria-label="Search destination"
+                  />
+                  <div className={styles.buildMixSearchActions}>
+                    {followAlongDestinationQuery.trim().length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFollowAlongDestinationQuery("");
+                          setFollowAlongDestinationResults([]);
+                          setFollowAlongDestination(null);
+                          setFollowAlongPreview(null);
+                        }}
+                        className={styles.buildMixSearchActionButton}
+                        aria-label="Clear destination search"
+                      >
+                        <svg viewBox="0 0 24 24" className={styles.buildMixSearchClearIcon} aria-hidden="true">
+                          <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void searchFollowAlongDestinations()}
+                      disabled={isSearchingFollowAlongDestinations}
+                      className={styles.buildMixSearchActionButton}
+                      aria-label="Search destinations"
+                    >
+                      <svg viewBox="0 0 24 24" className={styles.buildMixSearchIcon} aria-hidden="true">
+                        <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                        <line x1="16.2" y1="16.2" x2="21" y2="21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {followAlongDestinationResults.length > 0 && (
+                <div className={styles.buildMixSearchDropdown}>
+                  {followAlongDestinationResults.map((candidate) => (
+                    <button
+                      key={`${candidate.placeId || candidate.label}-${candidate.lat}-${candidate.lng}`}
+                      type="button"
+                      className={styles.followAlongSearchRow}
+                      onClick={() => {
+                        setFollowAlongDestination(candidate);
+                        setFollowAlongDestinationQuery(candidate.label);
+                        setFollowAlongDestinationResults([]);
+                        void previewFollowAlongRoute(candidate);
+                      }}
+                    >
+                      <div>
+                        <div className={styles.buildMixSearchDropdownTitle}>{candidate.label}</div>
+                        <div className={styles.pickRouteMeta}>{candidate.subtitle || "Destination"}</div>
+                      </div>
+                      <div className={styles.pickRouteMetaSecondary}>Preview</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {followAlongPreview && (
+              <div className={styles.followAlongSummaryCard}>
+                <div className={styles.followAlongSummaryRow}>
+                  <div>
+                    <div className={styles.pickRouteTitle}>{followAlongPreview.destination.label}</div>
+                    <div className={styles.pickRouteMeta}>
+                      {followAlongPreview.destination.subtitle || "Destination selected"}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void previewFollowAlongRoute()}
+                    className={styles.pillButton}
+                    disabled={isLoadingFollowAlongPreview}
+                  >
+                    Refresh
+                  </button>
+                </div>
+                <div className={styles.followAlongStatsRow}>
+                  <div className={styles.followAlongStat}>
+                    <span className={styles.followAlongStatLabel}>Drive</span>
+                    <span className={styles.followAlongStatValue}>
+                      {formatDistance(followAlongPreview.distanceMeters)}
+                    </span>
+                  </div>
+                  <div className={styles.followAlongStat}>
+                    <span className={styles.followAlongStatLabel}>ETA</span>
+                    <span className={styles.followAlongStatValue}>
+                      {Math.max(1, Math.round(followAlongPreview.durationSeconds / 60))} min
+                    </span>
+                  </div>
+                  <div className={styles.followAlongStat}>
+                    <span className={styles.followAlongStatLabel}>Stories</span>
+                    <span className={styles.followAlongStatValue}>
+                      Auto
+                    </span>
+                  </div>
+                </div>
+                <div className={styles.pickRouteMeta}>{followAlongStatusCopy}</div>
+              </div>
+            )}
+
+            <div className={styles.pickSectionLabel}>Storyteller</div>
+            <div className={styles.pickPersonaRow}>
+              {PERSONA_KEYS.map((personaKey) => {
+                const personaInfo = personaCatalog[personaKey];
+                return (
+                  <button
+                    key={personaKey}
+                    type="button"
+                    onClick={() => {
+                      setErr(null);
+                      setSelectedPersona(personaKey);
+                    }}
+                    className={`${styles.pickNarratorOption} ${selectedPersona === personaKey ? styles.pickNarratorOptionSelected : ""}`}
+                  >
+                    <div className={styles.pickNarratorOptionContent}>
+                      <div className={styles.pickNarratorWithAvatar}>
+                        <div className={styles.pickNarratorAvatarWrap}>
+                          {usesNarratorIcon(personaKey) ? (
+                            <Image
+                              src="/icons/stars.svg"
+                              alt=""
+                              width={24}
+                              height={24}
+                              className={styles.pickNarratorFutureIcon}
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <Image
+                              src={personaInfo.avatarSrc}
+                              alt={personaInfo.avatarAlt}
+                              fill
+                              className={styles.pickNarratorAvatar}
+                            />
+                          )}
+                        </div>
+                        <div>
+                          <div className={styles.pickRouteTitle}>{personaInfo.displayName}</div>
+                          <div className={styles.pickNarratorSub}>{personaInfo.description}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => {
+                  setErr(null);
+                  setSelectedPersona("custom");
+                }}
+                className={`${styles.pickNarratorOption} ${selectedPersona === "custom" ? styles.pickNarratorOptionSelected : ""}`}
+              >
+                <div className={styles.pickNarratorOptionContent}>
+                  <div className={styles.pickNarratorWithAvatar}>
+                    <div className={styles.pickNarratorAvatarWrap}>
+                      <Image
+                        src="/icons/stars.svg"
+                        alt=""
+                        width={24}
+                        height={24}
+                        className={styles.pickNarratorFutureIcon}
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <div>
+                      <div className={styles.pickRouteTitle}>Create your own storyteller</div>
+                      <div className={styles.pickNarratorSub}>Describe the voice, audience, and tone you want.</div>
+                    </div>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            {selectedPersona === "custom" && (
+              <div className={styles.customNarratorPanel}>
+                <label htmlFor="followAlongNarratorGuidance" className={styles.customNarratorLabel}>
+                  Describe your narrator
+                </label>
+                <p className={styles.customNarratorHelp}>
+                  Tell EchoJam who this drive is for and how the narration should sound.
+                </p>
+                <textarea
+                  id="followAlongNarratorGuidance"
+                  value={customNarratorGuidance}
+                  onChange={(e) => {
+                    setErr(null);
+                    setCustomNarratorGuidance(e.target.value.slice(0, CUSTOM_NARRATOR_MAX_CHARS));
+                  }}
+                  className={styles.customNarratorTextarea}
+                  rows={6}
+                  maxLength={CUSTOM_NARRATOR_MAX_CHARS}
+                  placeholder="Road-trip voice for two adults who love architecture, local lore, and concise stories."
+                />
+                <div className={styles.customNarratorCount}>
+                  {trimmedCustomNarratorGuidance.length}/{CUSTOM_NARRATOR_MAX_CHARS}
+                </div>
+              </div>
+            )}
+
+            <div className={styles.pickDurationStartWrap}>
+              <button
+                type="button"
+                onClick={() => {
+                  void startFollowAlongExperience();
+                }}
+                disabled={!followAlongPreview || !followAlongDestination || !followAlongOrigin || !selectedPersona || isCreatingFollowAlong}
+                className={`${styles.landingCtaButton} ${styles.startTourButton}`}
+              >
+                {isCreatingFollowAlong ? "Building route..." : "Start Follow Along"}
+              </button>
+            </div>
+          </section>
+
+          <section className={styles.pickImagePane}>
+            <RouteMap
+              stops={followAlongPreview ? [] : followAlongDestination ? [{ id: "follow-preview-destination", title: followAlongDestination.label, lat: followAlongDestination.lat, lng: followAlongDestination.lng, images: [DEFAULT_STOP_IMAGE], stopKind: "arrival" }] : []}
+              currentStopIndex={-1}
+              myPos={myPos}
+              cityCenter={followAlongOrigin ?? selectedCityCenter}
+              followCurrentStop={false}
+              showRoutePath={Boolean(followAlongPreview)}
+              routeCoords={followAlongPreview?.routeCoords ?? null}
+              routeTravelMode="drive"
+              endpoints={{
+                origin: followAlongPreview?.origin ?? followAlongOrigin,
+                destination: followAlongPreview?.destination ?? followAlongDestination,
+              }}
+            />
+            <button
+              onClick={goHome}
+              className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`}
+              aria-label="Close"
+            >
+              <Image
+                src="/icons/x.svg"
+                alt=""
+                width={26}
+                height={26}
+                className={styles.mapBackIconDark}
+                aria-hidden="true"
+              />
+            </button>
+          </section>
+        </main>
+      )}
+
       {step === "generating" && (
         <main className={styles.generatingLayout}>
-          <video
-            className={styles.generatingVideo}
-            autoPlay
-            loop
-            muted
-            playsInline
-            preload="auto"
+          <Image
+            src={generatingBackgroundImage}
+            alt=""
+            fill
+            unoptimized
+            className={styles.generatingImage}
             aria-hidden="true"
-          >
-            <source src="/images/marketing/ginger-walking-remix-v2.mp4" type="video/mp4" />
-          </video>
+          />
           <div className={styles.generatingOverlay} aria-hidden="true" />
           <section className={styles.generatingPanel}>
             <div className={styles.generatingCopyBlock}>
@@ -2280,9 +3617,13 @@ async function startStopNarration() {
                           void startTourFromSelection();
                           return;
                         }
+                        if (followAlongPreview && followAlongDestination && followAlongOrigin) {
+                          void startFollowAlongExperience();
+                          return;
+                        }
                         void startCustomMixGeneration();
                       }}
-                      disabled={isGeneratingMix}
+                      disabled={isGeneratingMix || isCreatingFollowAlong}
                       className={styles.landingCtaButton}
                     >
                       Retry generation
@@ -2292,20 +3633,279 @@ async function startStopNarration() {
                       onClick={() => {
                         if (generationJobKind === "preset") {
                           setNarratorFlowSource(null);
-                          setStep("presetRoutes");
+                          setStep("landing");
+                          return;
+                        }
+                        if (followAlongPreview || followAlongDestination) {
+                          setStep("followAlongSetup");
                           return;
                         }
                         setStep("buildMix");
                       }}
                       className={styles.pickBuildMixButton}
                     >
-                      {generationJobKind === "preset" ? "Back to routes" : "Back to editor"}
+                      {generationJobKind === "preset" ? "Back to routes" : followAlongPreview || followAlongDestination ? "Back to route setup" : "Back to editor"}
                     </button>
                   </div>
                 )}
               </div>
             </div>
           </section>
+        </main>
+      )}
+
+      {step === "followAlongDrive" && route && (
+        <main className={styles.walkLayout}>
+          <div className={styles.mapHero}>
+            <RouteMap
+              stops={route.stops}
+              currentStopIndex={currentStopIndex ?? -1}
+              myPos={myPos}
+              initialFitRoute
+              followCurrentStop={false}
+              showRoutePath
+              routeCoords={route.routePathCoords ?? null}
+              routeTravelMode="drive"
+              endpoints={{
+                origin: route.origin,
+                destination: route.destination,
+              }}
+            />
+            <button onClick={goHome} className={styles.mapBackButton} aria-label="Close">
+              <Image
+                src="/icons/x.svg"
+                alt=""
+                width={26}
+                height={26}
+                className={styles.mapBackIcon}
+                aria-hidden="true"
+              />
+            </button>
+            <a href={mapsUrl} target="_blank" rel="noreferrer" className={styles.mapViewButton}>
+              Open Drive Route
+            </a>
+          </div>
+
+          <div className={styles.rightRail}>
+            <div className={styles.walkCard}>
+              <div className={styles.walkMetaRow}>
+                <div className={styles.walkNarratorAvatarWrap}>
+                  {usesNarratorIcon(persona) ? (
+                    <Image
+                      src="/icons/stars.svg"
+                      alt=""
+                      width={22}
+                      height={22}
+                      className={styles.walkNarratorIcon}
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <Image
+                      src={personaCatalog[persona].avatarSrc}
+                      alt={personaCatalog[persona].avatarAlt}
+                      fill
+                      className={styles.walkNarratorAvatar}
+                    />
+                  )}
+                </div>
+                <div className={styles.walkNarrator}>
+                  Follow Along by <span className={styles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
+                </div>
+              </div>
+
+              <h1 className={styles.walkHeadline}>{route.title}</h1>
+              <div className={styles.walkSubline}>
+                <span>
+                  {route.transportMode === "drive" ? "Drive" : "Walk"} • {route.durationLabel} / {routeMilesLabel}
+                </span>
+              </div>
+
+              <div className={styles.followAlongSummaryCard}>
+                <div className={styles.followAlongSummaryRow}>
+                  <div>
+                    <div className={styles.pickRouteTitle}>
+                      {route.destination?.label || route.stops[route.stops.length - 1]?.title}
+                    </div>
+                    <div className={styles.pickRouteMeta}>
+                      {followAlongOffRoute
+                        ? "Off route. Rejoin the planned route to resume automatic stories."
+                        : followAlongStatusCopy}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className={styles.nowPlayingButton}
+                    onClick={toggleAudio}
+                    disabled={currentStopIndex === null || !hasCurrentAudio}
+                    aria-label={isPlaying ? "Pause current story" : "Play current story"}
+                  >
+                    <Image
+                      src={isPlaying ? "/icons/pause-fill.svg" : "/icons/play-fill.svg"}
+                      alt=""
+                      width={28}
+                      height={28}
+                      className={styles.nowPlayingIcon}
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
+                <div className={styles.followAlongStatsRow}>
+                  <div className={styles.followAlongStat}>
+                    <span className={styles.followAlongStatLabel}>Progress</span>
+                    <span className={styles.followAlongStatValue}>
+                      {followAlongRouteProgressM !== null ? formatDistance(followAlongRouteProgressM) : "Waiting"}
+                    </span>
+                  </div>
+                  <div className={styles.followAlongStat}>
+                    <span className={styles.followAlongStatLabel}>Next trigger</span>
+                    <span className={styles.followAlongStatValue}>
+                      {distanceToStopM !== null ? formatDistance(distanceToStopM) : "Auto"}
+                    </span>
+                  </div>
+                  <div className={styles.followAlongStat}>
+                    <span className={styles.followAlongStatLabel}>Background</span>
+                    <span className={styles.followAlongStatValue}>Keep screen active</span>
+                  </div>
+                </div>
+              </div>
+
+              {currentStop ? (
+                <div className={styles.followAlongStoryCard}>
+                  <div className={styles.followAlongStoryImageWrap}>
+                    <Image
+                      src={toSafeStopImage(currentStop.images[0])}
+                      alt={currentStop.title}
+                      fill
+                      className={styles.scriptModalImage}
+                      unoptimized
+                    />
+                  </div>
+                  <div className={styles.followAlongStoryBody}>
+                    <div className={styles.followAlongStoryEyebrow}>
+                      {currentStop.stopKind === "arrival" ? "Arrival story" : "Now playing"}
+                    </div>
+                    <button
+                      type="button"
+                      className={styles.nowPlayingTitleLink}
+                      onClick={openScriptModal}
+                    >
+                      {currentStop.title}
+                      <Image
+                        src="/icons/file-earmark-text.svg"
+                        alt=""
+                        width={14}
+                        height={14}
+                        className={styles.nowPlayingTitleLinkIcon}
+                        aria-hidden="true"
+                      />
+                    </button>
+                    <div className={styles.pickRouteMeta}>
+                      {hasCurrentAudio
+                        ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
+                        : "Audio is loading for this story."}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className={styles.followAlongSummaryCard}>
+                  <div className={styles.pickRouteTitle}>Stories will appear automatically</div>
+                  <div className={styles.pickRouteMeta}>
+                    Keep the page visible while driving. When you near a route story, the card and audio will open automatically.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {currentStop && (
+              <div className={styles.nowPlayingBar}>
+                <audio ref={audioRef} preload="none" src={hasCurrentAudio ? currentStopAudio : undefined} hidden />
+                <input
+                  type="range"
+                  min={0}
+                  max={audioDuration || 0}
+                  step={0.1}
+                  value={Math.min(audioTime, audioDuration || audioTime)}
+                  onChange={(e) => seekAudio(Number(e.target.value))}
+                  disabled={!hasCurrentAudio}
+                  className={`${styles.audioSeek} ${styles.nowPlayingSeek}`}
+                />
+                <div className={`${styles.nowPlayingContent} ${styles.nowPlayingContentEnter}`}>
+                  <div className={styles.nowPlayingMeta}>
+                    <button
+                      type="button"
+                      className={styles.nowPlayingTitleLink}
+                      onClick={openScriptModal}
+                    >
+                      {currentStop.title}
+                      <Image
+                        src="/icons/file-earmark-text.svg"
+                        alt=""
+                        width={14}
+                        height={14}
+                        className={styles.nowPlayingTitleLinkIcon}
+                        aria-hidden="true"
+                      />
+                    </button>
+                    <div className={styles.nowPlayingLinksRow}>
+                      <div className={styles.nowPlayingSubtitle}>
+                        {hasCurrentAudio
+                          ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
+                          : "Audio not generated yet"}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    className={`${styles.nowPlayingButton} ${styles.nowPlayingBarButton}`}
+                    onClick={toggleAudio}
+                    disabled={!hasCurrentAudio}
+                    aria-label={isPlaying ? "Pause current story" : "Play current story"}
+                  >
+                    <Image
+                      src={isPlaying ? "/icons/pause-fill.svg" : "/icons/play-fill.svg"}
+                      alt=""
+                      width={28}
+                      height={28}
+                      className={`${styles.nowPlayingIcon} ${styles.nowPlayingBarIcon}`}
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
+              </div>
+            )}
+            {isScriptModalOpen && currentStop && (
+              <div className={styles.scriptModalOverlay} role="dialog" aria-modal="true" aria-label="Narration script">
+                <div className={styles.scriptModal}>
+                  <button
+                    type="button"
+                    className={styles.scriptModalClose}
+                    onClick={() => setIsScriptModalOpen(false)}
+                    aria-label="Close script"
+                  >
+                    <Image
+                      src="/icons/x.svg"
+                      alt=""
+                      width={16}
+                      height={16}
+                      className={styles.scriptModalCloseIcon}
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <div className={styles.scriptModalImageWrap}>
+                    <Image
+                      src={toSafeStopImage(currentStop.images[0])}
+                      alt={currentStop.title}
+                      fill
+                      className={styles.scriptModalImage}
+                      unoptimized
+                    />
+                  </div>
+                  <div className={styles.scriptModalBody}>
+                    {currentStopScript || (isGeneratingScriptForModal ? "Generating script..." : "No generated script for this stop yet.")}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </main>
       )}
 
@@ -2339,15 +3939,26 @@ async function startStopNarration() {
                 {isPresetWalkRoute ? (
                   <>
                     <div className={styles.walkNarratorAvatarWrap}>
-                      <Image
-                        src={personaCatalog[persona].avatarSrc}
-                        alt={personaCatalog[persona].avatarAlt}
-                        fill
-                        className={styles.walkNarratorAvatar}
-                      />
+                      {usesNarratorIcon(persona) ? (
+                        <Image
+                          src="/icons/stars.svg"
+                          alt=""
+                          width={22}
+                          height={22}
+                          className={styles.walkNarratorIcon}
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Image
+                          src={personaCatalog[persona].avatarSrc}
+                          alt={personaCatalog[persona].avatarAlt}
+                          fill
+                          className={styles.walkNarratorAvatar}
+                        />
+                      )}
                     </div>
                     <div className={styles.walkNarrator}>
-                      Narrated by <span className={styles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
+                      Story by <span className={styles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
                     </div>
                   </>
                 ) : (
@@ -2363,12 +3974,23 @@ async function startStopNarration() {
                       }}
                       aria-label="Edit narrator"
                     >
-                      <Image
-                        src={personaCatalog[persona].avatarSrc}
-                        alt={personaCatalog[persona].avatarAlt}
-                        fill
-                        className={styles.walkNarratorAvatar}
-                      />
+                      {usesNarratorIcon(persona) ? (
+                        <Image
+                          src="/icons/stars.svg"
+                          alt=""
+                          width={22}
+                          height={22}
+                          className={styles.walkNarratorIcon}
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Image
+                          src={personaCatalog[persona].avatarSrc}
+                          alt={personaCatalog[persona].avatarAlt}
+                          fill
+                          className={styles.walkNarratorAvatar}
+                        />
+                      )}
                     </button>
                     <button
                       className={`${styles.walkNarrator} ${styles.walkNarratorButton}`}
@@ -2387,7 +4009,7 @@ async function startStopNarration() {
               </div>
             <h1 className={styles.walkHeadline}>{route.title}</h1>
             <div className={styles.walkSubline}>
-              <span>{connectedCount} {connectedCount === 1 ? "person" : "people"} listening  •  {route.durationLabel} / {routeMilesLabel}</span>
+              <span>{displayListenerCount} {displayListenerCount === 1 ? "listener" : "listeners"}  •  {route.durationLabel} / {routeMilesLabel}</span>
             </div>
 
               <div className={styles.walkActionRow}>
@@ -2400,22 +4022,6 @@ async function startStopNarration() {
               >
                 Edit
               </button>
-                {NEARBY_STORY_ENABLED && (
-                  <button
-                    className={styles.pillButton}
-                    type="button"
-                    onClick={() => {
-                      void handleNearbyStory();
-                    }}
-                    disabled={isNearbyStoryButtonDisabled}
-                  >
-                    {isResolvingNearbyGeo
-                      ? "Locating..."
-                      : isGeneratingNearbyStory
-                        ? "Generating..."
-                        : "Instant*"}
-                  </button>
-                )}
                 <button
                   className={styles.nowPlayingButton}
                   type="button"
@@ -2436,9 +4042,7 @@ async function startStopNarration() {
 
               <div className={styles.stopList}>
                 {stopList.map((stop, idx) => {
-                  const landmarkNumber = stop.isOverview
-                    ? null
-                    : stopList.slice(0, idx + 1).filter((s) => !s.isOverview).length;
+                  const displayNumber = idx + 1;
                   return (
                   <button
                     key={stop.id}
@@ -2457,13 +4061,42 @@ async function startStopNarration() {
                     </div>
                     <div className={styles.stopText}>
                       <div className={`${styles.stopTitle} ${stop.isActive ? styles.stopTitleActive : ""}`}>
-                        {stop.isOverview ? stop.title : `${landmarkNumber}. ${stop.title}`}
+                        {`${displayNumber}. ${stop.title}`}
                       </div>
                       <div className={styles.stopSubtitle}>{stop.subtitle}</div>
                     </div>
                   </button>
                   );
                 })}
+              </div>
+
+              <div className={styles.pickDurationStartWrap}>
+                <button
+                  type="button"
+                  className={styles.walkFindMoreButton}
+                  onClick={() => void handleFindMoreAroundLocation()}
+                  disabled={isSurpriseMixDisabled}
+                >
+                  <span className={styles.walkFindMoreIconCircle} aria-hidden="true">
+                    <Image
+                      src="/icons/plus.svg"
+                      alt=""
+                      width={20}
+                      height={20}
+                      className={styles.walkFindMoreIcon}
+                      aria-hidden="true"
+                    />
+                  </span>
+                  <span className={styles.walkFindMoreLabel}>
+                    {isResolvingNearbyGeo
+                      ? "Locating you..."
+                      : isGeneratingNearbyStory
+                        ? "Finding nearby stops..."
+                        : isSurpriseMixUnavailable
+                          ? "Add more stops near you (coming soon)"
+                          : "Add more stops near you"}
+                  </span>
+                </button>
               </div>
               
             </div>
@@ -2508,9 +4141,6 @@ async function startStopNarration() {
                               ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
                               : "Audio not generated yet"}
                       </div>
-                      {isBackfillingNarratorAudio ? (
-                        <div className={styles.nowPlayingSubtitle}>Generating narrator audio for missing stops...</div>
-                      ) : null}
                       {hasCurrentAudio ? (
                         <a
                           className={styles.nowPlayingInlineLink}
@@ -2541,7 +4171,7 @@ async function startStopNarration() {
                 </div>
               </div>
             )}
-            {isScriptModalOpen && (
+            {isScriptModalOpen && currentStop && (
               <div className={styles.scriptModalOverlay} role="dialog" aria-modal="true" aria-label="Narration script">
                 <div className={styles.scriptModal}>
                   <button
@@ -2559,6 +4189,15 @@ async function startStopNarration() {
                       aria-hidden="true"
                     />
                   </button>
+                  <div className={styles.scriptModalImageWrap}>
+                    <Image
+                      src={toSafeStopImage(currentStop.images[0])}
+                      alt={currentStop.title}
+                      fill
+                      className={styles.scriptModalImage}
+                      unoptimized
+                    />
+                  </div>
                   <div className={styles.scriptModalBody}>
                     {currentStopScript || (isGeneratingScriptForModal ? "Generating script..." : "No generated script for this stop yet.")}
                   </div>

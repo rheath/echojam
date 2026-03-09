@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "NODE_ENV=production /opt/alt/alt-nodejs22/root/bin/node server.js",
-    "lint": "eslint"
+    "lint": "eslint",
+    "presets:build": "node --experimental-strip-types scripts/buildPresetRoutes.ts --allow-unresolved",
+    "presets:check": "node --experimental-strip-types scripts/buildPresetRoutes.ts --check"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",

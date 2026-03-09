@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getRouteById } from "@/app/content/salemRoutes";
 import { toNullableAudioUrl, toNullableTrimmed } from "@/lib/mixGeneration";
 import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
+import { buildGooglePlaceIdPhotoUrl, isValidGooglePlaceId, proxyGoogleImageUrl } from "@/lib/placesImages";
 
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -32,32 +33,18 @@ type AssetRow = {
 function isNonPlaceholderImage(value: string | null | undefined) {
   const normalized = toNullableTrimmed(value);
   if (!normalized) return false;
-  return !normalized.toLowerCase().includes("/placeholder-");
-}
-
-function normalizedImageKey(value: string | null | undefined) {
-  const normalized = toNullableTrimmed(value);
-  if (!normalized) return null;
-  return normalized.toLowerCase();
+  return !normalized.toLowerCase().includes("/placeholder");
 }
 
 function pickStopImage(
   canonicalImage: string | null | undefined,
+  placeIdPhoto: string | null | undefined,
   routeImage: string | null | undefined,
-  placeholder: string,
-  usedStrongImages: Set<string>
+  placeholder: string
 ) {
-  const strongCandidates = [canonicalImage, routeImage]
+  const strongCandidates = [canonicalImage, placeIdPhoto, routeImage]
     .map((value) => toNullableTrimmed(value))
     .filter((value): value is string => Boolean(value) && isNonPlaceholderImage(value));
-
-  for (const candidate of strongCandidates) {
-    const key = normalizedImageKey(candidate);
-    if (!key || !usedStrongImages.has(key)) {
-      if (key) usedStrongImages.add(key);
-      return candidate;
-    }
-  }
 
   if (strongCandidates[0]) return strongCandidates[0];
   return toNullableTrimmed(routeImage) || placeholder;
@@ -68,7 +55,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
     const { routeId } = await ctx.params;
     const route = getRouteById(routeId);
     if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
-    const city = normalizePresetCity(new URL(req.url).searchParams.get("city"));
+    const city = route.city ?? normalizePresetCity(new URL(req.url).searchParams.get("city"));
     const presetStops = buildPresetStopsWithOverview(route.stops, city);
 
     let admin: ReturnType<typeof getAdmin> | null = null;
@@ -84,7 +71,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
         title: stop.title,
         lat: stop.lat,
         lng: stop.lng,
-        image_url: toNullableTrimmed(stop.image) || "/images/salem/placeholder-01.png",
+        image_url: proxyGoogleImageUrl(toNullableTrimmed(stop.image)) || "/images/salem/placeholder.png",
         script_adult: null,
         script_preteen: null,
         script_ghost: null,
@@ -98,7 +85,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
         route: {
           id: route.id,
           title: route.title,
-          length_minutes: parseInt(route.durationLabel, 10) || 30,
+          length_minutes: route.durationMinutes || 30,
           transport_mode: "walk",
           status: "ready",
         },
@@ -196,12 +183,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
       .limit(1)
       .maybeSingle();
 
-    const usedStrongImages = new Set<string>();
     const stops = presetStops.map((stop, index) => {
       const mapping = mappingByStop.get(stop.id);
       const assetsForStop = mapping ? assetsByCanonical.get(mapping.canonical_stop_id) : null;
       const imageForStop = mapping ? imageByCanonical.get(mapping.canonical_stop_id) : null;
       const canonicalImage = toNullableTrimmed(imageForStop?.image_url);
+      const placeIdPhoto = isValidGooglePlaceId(stop.googlePlaceId)
+        ? buildGooglePlaceIdPhotoUrl(stop.googlePlaceId!.trim())
+        : null;
       const routeImage = toNullableTrimmed(stop.image);
 
       return {
@@ -209,7 +198,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
         title: stop.title,
         lat: stop.lat,
         lng: stop.lng,
-        image_url: pickStopImage(canonicalImage, routeImage, "/images/salem/placeholder-01.png", usedStrongImages),
+        image_url:
+          proxyGoogleImageUrl(
+            pickStopImage(canonicalImage, placeIdPhoto, routeImage, "/images/salem/placeholder.png")
+          ) ||
+          "/images/salem/placeholder.png",
         script_adult: assetsForStop?.script_adult ?? null,
         script_preteen: assetsForStop?.script_preteen ?? null,
         script_ghost: assetsForStop?.script_ghost ?? null,
@@ -225,7 +218,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
       route: {
         id: route.id,
         title: route.title,
-        length_minutes: parseInt(route.durationLabel, 10) || 30,
+        length_minutes: route.durationMinutes || 30,
         transport_mode: "walk",
         status: latestJob?.status ?? "ready",
       },

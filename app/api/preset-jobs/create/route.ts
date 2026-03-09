@@ -21,7 +21,7 @@ type CreateBody = {
   jamId?: string | null;
   routeId: string;
   persona: Persona;
-  city?: "salem" | "boston" | "concord";
+  city?: "salem" | "boston" | "concord" | "nyc";
 };
 
 const CREATE_JOB_REQUEST_TIMEOUT_MS = 12000;
@@ -217,9 +217,12 @@ export async function POST(req: Request) {
     const createResponse = await Promise.race([
       (async () => {
         const body = (await req.json()) as CreateBody;
+        if (body.persona === "custom") {
+          return NextResponse.json({ error: "Custom narrator is only available for custom tours." }, { status: 400 });
+        }
         const route = getRouteById(body.routeId);
         if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
-        const city = normalizePresetCity(body.city);
+        const city = route.city ?? normalizePresetCity(body.city);
 
         const admin = getAdmin();
         let jamId = body.jamId ?? null;
@@ -288,7 +291,7 @@ export async function POST(req: Request) {
               job.id,
               route.id,
               city,
-              parseInt(route.durationLabel, 10) || 30,
+              route.durationMinutes || 30,
               body.persona,
               stops
             );

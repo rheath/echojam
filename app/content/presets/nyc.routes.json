@@ -1,0 +1,23 @@
+{
+  "city": "nyc",
+  "routes": [
+    {
+      "id": "nyc-architecture-walk",
+      "title": "New York City Architecture Walk",
+      "durationMinutes": 45,
+      "description": "A walk through centuries of design.",
+      "defaultPersona": "adult",
+      "stopPlaceIds": [
+        "ChIJZx8c96NZwokRJklw7SVhKt4",
+        "ChIJaXQRs6lZwokRY6EFpJnhNNE",
+        "ChIJhRwB-yFawokRi0AhGH87UTc",
+        "ChIJeWPFRwJZwokRGD60OOo74RU",
+        "ChIJzx9RX_tYwokRPF3szQ9WNyE",
+        "ChIJUW4vEPxYwokRW6o24DU0YIg",
+        "ChIJI6lzvP5YwokRf36nzqqs4_0",
+        "ChIJ4f4VwT5bwokRwQ6hjfC-eTM",
+        "ChIJy7cGfBlawokR5l2e93hsoEA"
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { resolvePlaceImage } from "@/lib/placesImages";
+import { isValidGooglePlaceId, resolvePlaceImage } from "@/lib/placesImages";
 
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -87,15 +87,24 @@ export async function POST(req: Request) {
           continue;
         }
 
-        const { error: updateErr } = await admin
-          .from("canonical_stops")
-          .update({
-            image_url: resolved.imageUrl,
-            google_place_id: resolved.placeId,
-            image_source: "places",
-            image_last_checked_at: new Date().toISOString(),
-          })
-          .eq("id", row.id);
+        const updatePayload: Record<string, string> = {
+          image_url: resolved.imageUrl,
+          image_source: "places",
+          image_last_checked_at: new Date().toISOString(),
+        };
+        if (isValidGooglePlaceId(resolved.googlePlaceId)) {
+          updatePayload.google_place_id = resolved.googlePlaceId;
+        } else {
+          console.warn(
+            JSON.stringify({
+              event: "canonical_image_sync.invalid_google_place_id",
+              stopId: row.id,
+              googlePlaceId: resolved.googlePlaceId,
+            })
+          );
+        }
+
+        const { error: updateErr } = await admin.from("canonical_stops").update(updatePayload).eq("id", row.id);
         if (updateErr) throw new Error(updateErr.message);
         updated += 1;
       } catch (e) {

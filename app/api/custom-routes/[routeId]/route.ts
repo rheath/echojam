@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { toNullableAudioUrl, toNullableTrimmed } from "@/lib/mixGeneration";
-import { cityPlaceholderImage } from "@/lib/placesImages";
+import { cityPlaceholderImage, proxyGoogleImageUrl } from "@/lib/placesImages";
 
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -36,25 +36,24 @@ type StopRow = {
   lat: number;
   lng: number;
   image_url: string | null;
+  stop_kind?: "story" | "arrival" | null;
+  distance_along_route_meters?: number | null;
+  trigger_radius_meters?: number | null;
   script_adult: string | null;
   script_preteen: string | null;
   script_ghost?: string | null;
+  script_custom?: string | null;
   audio_url_adult: string | null;
   audio_url_preteen: string | null;
   audio_url_ghost?: string | null;
+  audio_url_custom?: string | null;
   position: number;
 };
 
 function isNonPlaceholderImage(value: string | null | undefined) {
   const normalized = toNullableTrimmed(value);
   if (!normalized) return false;
-  return !normalized.toLowerCase().includes("/placeholder-");
-}
-
-function normalizedImageKey(value: string | null | undefined) {
-  const normalized = toNullableTrimmed(value);
-  if (!normalized) return null;
-  return normalized.toLowerCase();
+  return !normalized.toLowerCase().includes("/placeholder");
 }
 
 function isMissingGhostColumnError(message: string | null | undefined) {
@@ -62,6 +61,8 @@ function isMissingGhostColumnError(message: string | null | undefined) {
   if (!normalized) return false;
   if (normalized.includes("script_ghost")) return true;
   if (normalized.includes("audio_url_ghost")) return true;
+  if (normalized.includes("script_custom")) return true;
+  if (normalized.includes("audio_url_custom")) return true;
   return normalized.includes("column") && normalized.includes("does not exist") && normalized.includes("custom_route_stops");
 }
 
@@ -70,8 +71,7 @@ function pickStopImage(
   curatedFallback: string | null | undefined,
   stopImage: string | null | undefined,
   canonicalSource: CanonicalImageRow["image_source"],
-  placeholder: string,
-  usedStrongImages: Set<string>
+  placeholder: string
 ) {
   const preferStopSpecific =
     canonicalSource === "places" &&
@@ -85,14 +85,6 @@ function pickStopImage(
     .map((value) => toNullableTrimmed(value))
     .filter((value): value is string => Boolean(value) && isNonPlaceholderImage(value));
 
-  for (const candidate of strongCandidates) {
-    const key = normalizedImageKey(candidate);
-    if (!key || !usedStrongImages.has(key)) {
-      if (key) usedStrongImages.add(key);
-      return candidate;
-    }
-  }
-
   if (strongCandidates[0]) return strongCandidates[0];
   return toNullableTrimmed(stopImage) || placeholder;
 }
@@ -104,15 +96,17 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
 
     const { data: route, error: routeErr } = await admin
       .from("custom_routes")
-      .select("id,title,length_minutes,transport_mode,status,city")
+      .select(
+        "id,title,length_minutes,transport_mode,status,city,narrator_default,narrator_guidance,narrator_voice,experience_kind,origin_label,origin_lat,origin_lng,destination_label,destination_lat,destination_lng,route_distance_meters,route_duration_seconds,route_polyline"
+      )
       .eq("id", routeId)
       .single();
     if (routeErr) return NextResponse.json({ error: routeErr.message }, { status: 404 });
 
     const stopsSelectWithGhost =
-      "stop_id,title,lat,lng,image_url,script_adult,script_preteen,script_ghost,audio_url_adult,audio_url_preteen,audio_url_ghost,position";
+      "stop_id,title,lat,lng,image_url,stop_kind,distance_along_route_meters,trigger_radius_meters,script_adult,script_preteen,script_ghost,script_custom,audio_url_adult,audio_url_preteen,audio_url_ghost,audio_url_custom,position";
     const stopsSelectLegacy =
-      "stop_id,title,lat,lng,image_url,script_adult,script_preteen,audio_url_adult,audio_url_preteen,position";
+      "stop_id,title,lat,lng,image_url,stop_kind,distance_along_route_meters,trigger_radius_meters,script_adult,script_preteen,audio_url_adult,audio_url_preteen,position";
     let stops: StopRow[] = [];
 
     const { data: stopsWithGhost, error: stopsWithGhostErr } = await admin
@@ -172,9 +166,11 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
         script_adult: string | null;
         script_preteen: string | null;
         script_ghost: string | null;
+        script_custom: string | null;
         audio_url_adult: string | null;
         audio_url_preteen: string | null;
         audio_url_ghost: string | null;
+        audio_url_custom: string | null;
       }
     >();
 
@@ -183,9 +179,11 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
         script_adult: null,
         script_preteen: null,
         script_ghost: null,
+        script_custom: null,
         audio_url_adult: null,
         audio_url_preteen: null,
         audio_url_ghost: null,
+        audio_url_custom: null,
       };
 
       const script = toNullableTrimmed(row.script);
@@ -210,7 +208,6 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
 
     const placeholder = cityPlaceholderImage(route.city);
 
-    const usedStrongImages = new Set<string>();
     const normalizedStops = (stops ?? []).map((stop) => {
       const mapping = mappingByStop.get(stop.stop_id);
       const canonical = mapping ? assetsByCanonical.get(mapping.canonical_stop_id) : null;
@@ -219,9 +216,11 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       const scriptAdult = canonical?.script_adult ?? toNullableTrimmed(stop.script_adult);
       const scriptPreteen = canonical?.script_preteen ?? toNullableTrimmed(stop.script_preteen);
       const scriptGhost = canonical?.script_ghost ?? toNullableTrimmed(stop.script_ghost);
+      const scriptCustom = toNullableTrimmed(stop.script_custom);
       const audioAdult = canonical?.audio_url_adult ?? toNullableAudioUrl(stop.audio_url_adult);
       const audioPreteen = canonical?.audio_url_preteen ?? toNullableAudioUrl(stop.audio_url_preteen);
       const audioGhost = canonical?.audio_url_ghost ?? toNullableAudioUrl(stop.audio_url_ghost);
+      const audioCustom = toNullableAudioUrl(stop.audio_url_custom);
       const canonicalImageUrl = toNullableTrimmed(canonicalImage?.image_url);
       const curatedFallback = toNullableTrimmed(canonicalImage?.fallback_image_url);
       const stopImage = toNullableTrimmed(stop.image_url);
@@ -230,19 +229,20 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
         curatedFallback,
         stopImage,
         canonicalImage?.image_source ?? null,
-        placeholder,
-        usedStrongImages
+        placeholder
       );
 
       return {
         ...stop,
-        image_url: imageUrl,
+        image_url: proxyGoogleImageUrl(imageUrl) || imageUrl,
         script_adult: scriptAdult,
         script_preteen: scriptPreteen,
         script_ghost: scriptGhost,
+        script_custom: scriptCustom,
         audio_url_adult: audioAdult,
         audio_url_preteen: audioPreteen,
         audio_url_ghost: audioGhost,
+        audio_url_custom: audioCustom,
       };
     });
 

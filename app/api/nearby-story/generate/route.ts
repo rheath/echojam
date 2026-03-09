@@ -8,14 +8,17 @@ import {
   upsertRouteStopMapping,
 } from "@/lib/canonicalStops";
 import {
+  selectCustomNarratorVoice,
   generateScriptWithOpenAI,
   synthesizeSpeechWithOpenAI,
+  toCustomNarratorVoice,
   toNullableAudioUrl,
   toNullableTrimmed,
   uploadNarrationAudio,
 } from "@/lib/mixGeneration";
 import { resolveNearbyPlace } from "@/lib/nearbyPlaceResolver";
 import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
+import { proxyGoogleImageUrl } from "@/lib/placesImages";
 
 type Body = {
   jamId: string;
@@ -23,7 +26,7 @@ type Body = {
   lat: number;
   lng: number;
   currentStopIndex: number | null;
-  city?: "salem" | "boston" | "concord";
+  city?: "salem" | "boston" | "concord" | "nyc";
 };
 
 type JamRow = {
@@ -47,9 +50,11 @@ type RouteStop = {
   scriptAdult: string | null;
   scriptPreteen: string | null;
   scriptGhost: string | null;
+  scriptCustom: string | null;
   audioAdult: string | null;
   audioPreteen: string | null;
   audioGhost: string | null;
+  audioCustom: string | null;
   canonicalStopId: string | null;
 };
 
@@ -72,18 +77,6 @@ function getAdmin() {
 function parseMinutes(value: string) {
   const numeric = Number.parseInt(value, 10);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 30;
-}
-
-function personaScriptField(persona: Persona) {
-  if (persona === "adult") return "scriptAdult";
-  if (persona === "preteen") return "scriptPreteen";
-  return "scriptGhost";
-}
-
-function personaAudioField(persona: Persona) {
-  if (persona === "adult") return "audioAdult";
-  if (persona === "preteen") return "audioPreteen";
-  return "audioGhost";
 }
 
 function isFiniteCoord(value: number) {
@@ -142,7 +135,7 @@ async function loadCustomRouteStops(admin: ReturnType<typeof getAdmin>, routeId:
   const { data: stops, error: stopsErr } = await admin
     .from("custom_route_stops")
     .select(
-      "stop_id,title,lat,lng,image_url,position,script_adult,script_preteen,script_ghost,audio_url_adult,audio_url_preteen,audio_url_ghost"
+      "stop_id,title,lat,lng,image_url,position,script_adult,script_preteen,script_ghost,script_custom,audio_url_adult,audio_url_preteen,audio_url_ghost,audio_url_custom"
     )
     .eq("route_id", routeId)
     .order("position", { ascending: true });
@@ -167,13 +160,15 @@ async function loadCustomRouteStops(admin: ReturnType<typeof getAdmin>, routeId:
     title: stop.title,
     lat: stop.lat,
     lng: stop.lng,
-    imageUrl: stop.image_url || "/images/salem/placeholder-01.png",
+    imageUrl: proxyGoogleImageUrl(stop.image_url) || "/images/salem/placeholder.png",
     scriptAdult: toNullableTrimmed(stop.script_adult),
     scriptPreteen: toNullableTrimmed(stop.script_preteen),
     scriptGhost: toNullableTrimmed(stop.script_ghost),
+    scriptCustom: toNullableTrimmed(stop.script_custom),
     audioAdult: toNullableAudioUrl(stop.audio_url_adult),
     audioPreteen: toNullableAudioUrl(stop.audio_url_preteen),
     audioGhost: toNullableAudioUrl(stop.audio_url_ghost),
+    audioCustom: toNullableAudioUrl(stop.audio_url_custom),
     canonicalStopId: mappingByStopId.get(stop.stop_id) ?? null,
   }));
 }
@@ -181,7 +176,7 @@ async function loadCustomRouteStops(admin: ReturnType<typeof getAdmin>, routeId:
 async function loadPresetRouteStops(
   admin: ReturnType<typeof getAdmin>,
   routeId: string,
-  city: "salem" | "boston" | "concord"
+  city: "salem" | "boston" | "concord" | "nyc"
 ): Promise<{ stops: RouteStop[]; title: string; lengthMinutes: number }> {
   const route = getRouteById(routeId);
   if (!route) throw new Error("Unknown preset route");
@@ -240,13 +235,15 @@ async function loadPresetRouteStops(
       title: stop.title,
       lat: stop.lat,
       lng: stop.lng,
-      imageUrl: canonicalImage || stop.image || "/images/salem/placeholder-01.png",
+      imageUrl: proxyGoogleImageUrl(canonicalImage || stop.image) || "/images/salem/placeholder.png",
       scriptAdult: assets?.scriptAdult ?? null,
       scriptPreteen: assets?.scriptPreteen ?? null,
       scriptGhost: assets?.scriptGhost ?? null,
+      scriptCustom: null,
       audioAdult: assets?.audioAdult ?? null,
       audioPreteen: assets?.audioPreteen ?? null,
       audioGhost: assets?.audioGhost ?? null,
+      audioCustom: null,
       canonicalStopId: canonicalId,
     };
   });
@@ -284,36 +281,49 @@ export async function POST(req: Request) {
     }
 
     const jamRow = jam as JamRow;
-    if (!jamRow.route_id) {
-      return NextResponse.json({ error: "No active route found for jam." }, { status: 400 });
-    }
-
     let city = normalizePresetCity(body.city);
     let currentStops: RouteStop[] = [];
     let routeTitle = "Nearby Story Mix";
     let lengthMinutes = 30;
     let customRouteId: string | null = null;
+    let narratorGuidance: string | null = null;
+    let narratorVoice: ReturnType<typeof toCustomNarratorVoice> = null;
 
-    if (jamRow.route_id.startsWith("custom:")) {
+    if (!jamRow.route_id) {
+      // First-run instant flow starts with no route; use empty stops and defaults.
+    } else if (jamRow.route_id.startsWith("custom:")) {
       customRouteId = jamRow.route_id.slice("custom:".length) || null;
       if (!customRouteId) return NextResponse.json({ error: "Invalid custom route reference." }, { status: 400 });
       const { data: routeMeta, error: routeMetaErr } = await admin
         .from("custom_routes")
-        .select("id,title,length_minutes,city")
+        .select("id,title,length_minutes,city,narrator_guidance,narrator_default,narrator_voice")
         .eq("id", customRouteId)
         .single();
       if (routeMetaErr || !routeMeta) {
         return NextResponse.json({ error: routeMetaErr?.message || "Custom route not found." }, { status: 404 });
       }
-      city = normalizePresetCity(routeMeta.city as "salem" | "boston" | "concord" | null);
+      city = normalizePresetCity(routeMeta.city as "salem" | "boston" | "concord" | "nyc" | null);
       currentStops = await loadCustomRouteStops(admin, customRouteId);
       routeTitle = routeMeta.title || routeTitle;
       lengthMinutes = routeMeta.length_minutes || lengthMinutes;
+      narratorGuidance = toNullableTrimmed(routeMeta.narrator_guidance);
+      narratorVoice = toCustomNarratorVoice(routeMeta.narrator_voice);
     } else {
+      const presetRoute = getRouteById(jamRow.route_id);
+      if (presetRoute?.city) {
+        city = presetRoute.city;
+      }
       const preset = await loadPresetRouteStops(admin, jamRow.route_id, city);
       currentStops = preset.stops;
       routeTitle = preset.title;
       lengthMinutes = preset.lengthMinutes;
+    }
+
+    if (body.persona === "custom" && !narratorGuidance) {
+      return NextResponse.json({ error: "Narrator guidance is required for custom narrator tours." }, { status: 400 });
+    }
+    if (body.persona === "custom" && !narratorVoice && narratorGuidance) {
+      narratorVoice = selectCustomNarratorVoice(narratorGuidance);
     }
 
     const resolverStartedAt = Date.now();
@@ -322,7 +332,7 @@ export async function POST(req: Request) {
       city,
       lat: body.lat,
       lng: body.lng,
-      radiusMeters: 250,
+      radiusMeters: 500,
     });
     const resolverMs = Date.now() - resolverStartedAt;
 
@@ -336,7 +346,7 @@ export async function POST(req: Request) {
         );
       }
       return NextResponse.json(
-        { error: "No nearby notable place found within 250 meters." },
+        { error: "No nearby notable place found within 500 meters." },
         { status: 404 }
       );
     }
@@ -347,13 +357,15 @@ export async function POST(req: Request) {
       lat: resolved.candidate.lat,
       lng: resolved.candidate.lng,
       image: resolved.candidate.image,
-      googlePlaceId: resolved.candidate.googlePlaceId,
+      googlePlaceId: resolved.candidate.googlePlaceId ?? undefined,
     });
 
-    const { data: existingAssetsRows, error: existingAssetsErr } = await admin
-      .from("canonical_stop_assets")
-      .select("canonical_stop_id,persona,script,audio_url")
-      .eq("canonical_stop_id", canonical.id);
+    const { data: existingAssetsRows, error: existingAssetsErr } = body.persona !== "custom"
+      ? await admin
+          .from("canonical_stop_assets")
+          .select("canonical_stop_id,persona,script,audio_url")
+          .eq("canonical_stop_id", canonical.id)
+      : { data: [], error: null };
     if (existingAssetsErr) throw new Error(existingAssetsErr.message);
 
     const assetsByCanonical = mapAssetsByCanonical((existingAssetsRows ?? []) as CanonicalAssetRow[]);
@@ -366,10 +378,26 @@ export async function POST(req: Request) {
       audioGhost: null,
     };
 
-    const scriptField = personaScriptField(body.persona);
-    const audioField = personaAudioField(body.persona);
-    let selectedScript = canonicalAssets[scriptField];
-    let selectedAudio = canonicalAssets[audioField];
+    let selectedScript: string | null = null;
+    let selectedAudio: string | null = null;
+    let reusedScript = false;
+    let reusedAudio = false;
+    if (body.persona === "adult") {
+      selectedScript = canonicalAssets.scriptAdult;
+      selectedAudio = canonicalAssets.audioAdult;
+      reusedScript = Boolean(canonicalAssets.scriptAdult);
+      reusedAudio = Boolean(canonicalAssets.audioAdult);
+    } else if (body.persona === "preteen") {
+      selectedScript = canonicalAssets.scriptPreteen;
+      selectedAudio = canonicalAssets.audioPreteen;
+      reusedScript = Boolean(canonicalAssets.scriptPreteen);
+      reusedAudio = Boolean(canonicalAssets.audioPreteen);
+    } else if (body.persona === "ghost") {
+      selectedScript = canonicalAssets.scriptGhost;
+      selectedAudio = canonicalAssets.audioGhost;
+      reusedScript = Boolean(canonicalAssets.scriptGhost);
+      reusedAudio = Boolean(canonicalAssets.audioGhost);
+    }
     const apiKey = process.env.OPENAI_API_KEY?.trim();
 
     const currentStopIndex =
@@ -394,10 +422,11 @@ export async function POST(req: Request) {
             title: canonical.title,
             lat: canonical.lat,
             lng: canonical.lng,
-            image: canonical.image_url || resolved.candidate.image,
+            image: proxyGoogleImageUrl(canonical.image_url || resolved.candidate.image) || "/images/salem/placeholder.png",
           },
           insertedStopIndex,
-          Math.max(1, currentStops.length + 1)
+          Math.max(1, currentStops.length + 1),
+          narratorGuidance
         )
       );
       if (!selectedScript) {
@@ -409,7 +438,7 @@ export async function POST(req: Request) {
       if (!apiKey) {
         return NextResponse.json({ error: "OPENAI_API_KEY is required to generate narration audio." }, { status: 500 });
       }
-      const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, body.persona, selectedScript);
+      const audioBytes = await synthesizeSpeechWithOpenAI(apiKey, body.persona, selectedScript, narratorVoice);
       selectedAudio = toNullableAudioUrl(
         await uploadNarrationAudio(audioBytes, `nearby-${jamRow.id}`, body.persona, canonical.id)
       );
@@ -418,17 +447,19 @@ export async function POST(req: Request) {
       }
     }
 
-    await admin.from("canonical_stop_assets").upsert(
-      {
-        canonical_stop_id: canonical.id,
-        persona: body.persona,
-        script: selectedScript,
-        audio_url: selectedAudio,
-        status: "ready",
-        error: null,
-      },
-      { onConflict: "canonical_stop_id,persona" }
-    );
+    if (body.persona !== "custom") {
+      await admin.from("canonical_stop_assets").upsert(
+        {
+          canonical_stop_id: canonical.id,
+          persona: body.persona,
+          script: selectedScript,
+          audio_url: selectedAudio,
+          status: "ready",
+          error: null,
+        },
+        { onConflict: "canonical_stop_id,persona" }
+      );
+    }
 
     const existingIds = new Set(currentStops.map((stop) => stop.stopId));
     const nearbyStopId = buildUniqueStopId(existingIds, `nearby-${canonical.id}`);
@@ -438,13 +469,16 @@ export async function POST(req: Request) {
       title: canonical.title,
       lat: canonical.lat,
       lng: canonical.lng,
-      imageUrl: canonical.image_url || resolved.candidate.image || "/images/salem/placeholder-01.png",
+      imageUrl:
+        proxyGoogleImageUrl(canonical.image_url || resolved.candidate.image) || "/images/salem/placeholder.png",
       scriptAdult: body.persona === "adult" ? selectedScript : canonicalAssets.scriptAdult,
       scriptPreteen: body.persona === "preteen" ? selectedScript : canonicalAssets.scriptPreteen,
       scriptGhost: body.persona === "ghost" ? selectedScript : canonicalAssets.scriptGhost,
+      scriptCustom: body.persona === "custom" ? selectedScript : null,
       audioAdult: body.persona === "adult" ? selectedAudio : canonicalAssets.audioAdult,
       audioPreteen: body.persona === "preteen" ? selectedAudio : canonicalAssets.audioPreteen,
       audioGhost: body.persona === "ghost" ? selectedAudio : canonicalAssets.audioGhost,
+      audioCustom: body.persona === "custom" ? selectedAudio : null,
       canonicalStopId: canonical.id,
     };
 
@@ -470,6 +504,8 @@ export async function POST(req: Request) {
           length_minutes: lengthMinutes,
           title: routeTitle,
           narrator_default: body.persona,
+          narrator_guidance: narratorGuidance,
+          narrator_voice: body.persona === "custom" ? narratorVoice : null,
           status: "ready",
         })
         .eq("id", customRouteId);
@@ -484,6 +520,8 @@ export async function POST(req: Request) {
           length_minutes: lengthMinutes,
           title: routeTitle,
           narrator_default: body.persona,
+          narrator_guidance: narratorGuidance,
+          narrator_voice: body.persona === "custom" ? narratorVoice : null,
           status: "ready",
         })
         .select("id")
@@ -519,9 +557,11 @@ export async function POST(req: Request) {
       script_adult: stop.scriptAdult,
       script_preteen: stop.scriptPreteen,
       script_ghost: stop.scriptGhost,
+      script_custom: stop.scriptCustom,
       audio_url_adult: stop.audioAdult,
       audio_url_preteen: stop.audioPreteen,
       audio_url_ghost: stop.audioGhost,
+      audio_url_custom: stop.audioCustom,
     }));
     const { error: insertStopsErr } = await admin.from("custom_route_stops").insert(stopInserts);
     if (insertStopsErr) throw new Error(insertStopsErr.message);
@@ -563,8 +603,8 @@ export async function POST(req: Request) {
         insertedStopIndex,
         resolverMs,
         totalMs,
-        reusedScript: Boolean(canonicalAssets[scriptField]),
-        reusedAudio: Boolean(canonicalAssets[audioField]),
+        reusedScript,
+        reusedAudio,
       })
     );
 

@@ -1,0 +1,38 @@
+{
+  "city": "boston",
+  "routes": [
+    {
+      "id": "boston-revolutionary-secrets",
+      "title": "Boston Revolutionary Secrets",
+      "durationMinutes": 45,
+      "description": "Hidden stories from the American Revolution.",
+      "defaultPersona": "adult",
+      "stopPlaceIds": [
+        "ChIJKyNuvJ1w44kRBE-pe_yDhj8",
+        "ChIJDXUUlIRw44kRT_pEDqwG790",
+        "ChIJ-bYegINw44kRjnGwCC7k2Zc",
+        "ChIJDXg3NoRw44kRa3NzlIO4V5o",
+        "ChIJpyiwa4Zw44kRBQSGWKv4wgA",
+        "ChIJtT5ZHIlw44kRzCtDBAjPP3A",
+        "ChIJofQX5otw44kRqb2cIZLlfrw",
+        "ChIJ_5cHC_Jw44kRmALscjIXr6w"
+      ]
+    },
+    {
+      "id": "boston-old-taverns",
+      "title": "Boston Old Taverns",
+      "durationMinutes": 40,
+      "description": "Historic pubs and gathering places where politics and nightlife overlapped.",
+      "defaultPersona": "adult",
+      "stopPlaceIds": [
+        "ChIJHTF784Vw44kRgfkpGmXBtic",
+        "ChIJnZfW9YVw44kRp5FwX3GRHcg",
+        "ChIJb_ZIc-1w44kRnoyWEPSsTYg",
+        "ChIJMVYI84Vw44kRKNGrFHLCsVc",
+        "ChIJxa82RIZw44kRbG8SPzhYtZY",
+        "ChIJvS5hBIlw44kRUDAko5GtpTE",
+        "Ei1TdGF0ZSBTdCAmIENvbmdyZXNzIFN0LCBCb3N0b24sIE1BIDAyMTA5LCBVU0EiZiJkChQKEgm9PJM2hHDjiRFQqYRYm5QuFBIUChIJvTyTNoRw44kRUKmEWJuULhQaFAoSCZuZ5mCGcOOJEd8-9MDd1w9EGhQKEgkPqEt0fnDjiRGvQxh_i4lYwSIKDY5zPxkVJpSl1Q"
+      ]
+    }
+  ]
+}

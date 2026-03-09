@@ -3,9 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 import type { Persona } from "@/app/content/salemRoutes";
 import { ensureCanonicalStopForCustom, upsertRouteStopMapping } from "@/lib/canonicalStops";
 import {
+  selectCustomNarratorVoice,
   getSwitchConfig,
   shouldRegenerateAudio,
   synthesizeSpeechWithOpenAI,
+  toCustomNarratorVoice,
   toNullableAudioUrl,
   toNullableTrimmed,
   uploadNarrationAudio,
@@ -15,13 +17,14 @@ type Body = {
   routeId: string;
   stopId: string;
   persona: Persona;
-  city?: "salem" | "boston" | "concord";
+  city?: "salem" | "boston" | "concord" | "nyc";
 };
 
 const AUDIO_PATCH_BY_PERSONA = {
   adult: (audioUrl: string) => ({ audio_url_adult: audioUrl }),
   preteen: (audioUrl: string) => ({ audio_url_preteen: audioUrl }),
   ghost: (audioUrl: string) => ({ audio_url_ghost: audioUrl }),
+  custom: (audioUrl: string) => ({ audio_url_custom: audioUrl }),
 } as const;
 
 function getAdmin() {
@@ -38,7 +41,7 @@ export async function POST(req: Request) {
 
     const { data: route, error: routeErr } = await admin
       .from("custom_routes")
-      .select("id,city")
+      .select("id,city,narrator_guidance,narrator_voice")
       .eq("id", body.routeId)
       .single();
     if (routeErr || !route) return NextResponse.json({ error: routeErr?.message || "Unknown custom route" }, { status: 404 });
@@ -52,6 +55,56 @@ export async function POST(req: Request) {
     if (stopErr || !stop) return NextResponse.json({ error: stopErr?.message || "Unknown stop for route" }, { status: 404 });
 
     const city = body.city ?? route.city;
+    if (body.persona === "custom") {
+      const narratorGuidance = toNullableTrimmed(route.narrator_guidance);
+      if (!narratorGuidance) {
+        return NextResponse.json({ error: "Narrator guidance is missing for this route." }, { status: 400 });
+      }
+      let narratorVoice = toCustomNarratorVoice(route.narrator_voice);
+      if (!narratorVoice) {
+        narratorVoice = selectCustomNarratorVoice(narratorGuidance);
+        await admin.from("custom_routes").update({ narrator_voice: narratorVoice }).eq("id", body.routeId);
+      }
+
+      const switchConfig = await getSwitchConfig();
+      const forceAudio = shouldRegenerateAudio(switchConfig.mode);
+      const replayUrl = toNullableAudioUrl(switchConfig.replay_audio[stop.stop_id]?.[body.persona]);
+
+      const { data: currentStopRow } = await admin
+        .from("custom_route_stops")
+        .select("script_custom,audio_url_custom")
+        .eq("route_id", body.routeId)
+        .eq("stop_id", body.stopId)
+        .maybeSingle();
+
+      const script = toNullableTrimmed(currentStopRow?.script_custom);
+      if (!script) {
+        return NextResponse.json({ error: "Script not generated yet for this stop/persona." }, { status: 400 });
+      }
+
+      let audioUrl = !forceAudio ? toNullableAudioUrl(currentStopRow?.audio_url_custom) : null;
+      if (replayUrl) audioUrl = replayUrl;
+      if (audioUrl) return NextResponse.json({ audioUrl, reused: true });
+
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is required." }, { status: 500 });
+
+      audioUrl = toNullableAudioUrl(
+        await uploadNarrationAudio(
+          await synthesizeSpeechWithOpenAI(apiKey, body.persona, script, narratorVoice),
+          `custom-${body.routeId}`,
+          body.persona,
+          stop.stop_id
+        )
+      );
+      if (!audioUrl) return NextResponse.json({ error: "Generated audio URL was empty" }, { status: 500 });
+
+      const audioPatch = AUDIO_PATCH_BY_PERSONA[body.persona](audioUrl);
+      await admin.from("custom_route_stops").update(audioPatch).eq("route_id", body.routeId).eq("stop_id", body.stopId);
+
+      return NextResponse.json({ audioUrl, reused: false });
+    }
+
     const canonical = await ensureCanonicalStopForCustom(admin, city, {
       id: stop.stop_id,
       title: stop.title,
