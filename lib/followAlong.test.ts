@@ -13,7 +13,9 @@ import {
 } from "@/lib/followAlong";
 import {
   isValidFollowAlongLocation,
+  fetchDrivingRoutePreview,
   normalizeDestinationQuery,
+  reverseGeocodeFollowAlongOrigin,
 } from "@/lib/followAlongApi";
 import type { NearbyPlaceCandidate } from "@/lib/nearbyPlaceResolver";
 
@@ -39,6 +41,62 @@ test("isValidFollowAlongLocation accepts labeled coordinates", () => {
   };
   assert.equal(isValidFollowAlongLocation(location), true);
   assert.equal(isValidFollowAlongLocation({ label: "", lat: 0, lng: 0 }), false);
+});
+
+test("reverseGeocodeFollowAlongOrigin returns a formatted address", async (t) => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.GOOGLE_PLACES_API_KEY;
+
+  process.env.GOOGLE_PLACES_API_KEY = "test-key";
+  global.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        status: "OK",
+        results: [{ formatted_address: "1 Main St, Boston, MA 02108, USA" }],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    )) as typeof fetch;
+
+  t.after(() => {
+    global.fetch = originalFetch;
+    process.env.GOOGLE_PLACES_API_KEY = originalApiKey;
+  });
+
+  const origin = await reverseGeocodeFollowAlongOrigin({
+    lat: 42.3601,
+    lng: -71.0589,
+  });
+
+  assert.equal(origin.label, "1 Main St, Boston, MA 02108, USA");
+  assert.equal(origin.subtitle, "Current location");
+});
+
+test("reverseGeocodeFollowAlongOrigin returns a null subtitle for zero results", async (t) => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.GOOGLE_PLACES_API_KEY;
+
+  process.env.GOOGLE_PLACES_API_KEY = "test-key";
+  global.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        status: "ZERO_RESULTS",
+        results: [],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    )) as typeof fetch;
+
+  t.after(() => {
+    global.fetch = originalFetch;
+    process.env.GOOGLE_PLACES_API_KEY = originalApiKey;
+  });
+
+  const origin = await reverseGeocodeFollowAlongOrigin({
+    lat: 42.3601,
+    lng: -71.0589,
+  });
+
+  assert.equal(origin.label, "Current location");
+  assert.equal(origin.subtitle, null);
 });
 
 test("sampleRoutePoints returns ordered samples along the route", () => {
@@ -140,4 +198,55 @@ test("normalizeRouteProgress exposes off-route distance", () => {
   const offRoute = normalizeRouteProgress({ lat: 42.37, lng: -71.01 }, simpleRoute);
   assert.ok(onRoute.distanceToRouteMeters < 50);
   assert.ok(offRoute.distanceToRouteMeters > 1_000);
+});
+
+test("fetchDrivingRoutePreview fills origin subtitle from start_address when missing", async (t) => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.GOOGLE_PLACES_API_KEY;
+
+  process.env.GOOGLE_PLACES_API_KEY = "test-key";
+  global.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        status: "OK",
+        routes: [
+          {
+            overview_polyline: { points: "_p~iF~ps|U_ulLnnqC_mqNvxq`@" },
+            legs: [
+              {
+                distance: { value: 1600 },
+                duration: { value: 420 },
+                start_address: "10 Beacon St, Boston, MA 02108, USA",
+                end_address: "1 Charles St, Boston, MA 02114, USA",
+              },
+            ],
+          },
+        ],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    )) as typeof fetch;
+
+  t.after(() => {
+    global.fetch = originalFetch;
+    process.env.GOOGLE_PLACES_API_KEY = originalApiKey;
+  });
+
+  const preview = await fetchDrivingRoutePreview(
+    {
+      label: "Current location",
+      subtitle: null,
+      lat: 42.3601,
+      lng: -71.0589,
+    },
+    {
+      label: "Boston Common",
+      subtitle: null,
+      lat: 42.355,
+      lng: -71.065,
+    }
+  );
+
+  assert.equal(preview.origin.label, "10 Beacon St, Boston, MA 02108, USA");
+  assert.equal(preview.origin.subtitle, "Current location");
+  assert.equal(preview.destination.subtitle, "1 Charles St, Boston, MA 02114, USA");
 });

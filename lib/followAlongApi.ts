@@ -29,13 +29,28 @@ type GooglePlaceSearchResponse = {
   };
 };
 
+type GoogleGeocodeResponse = {
+  status?: string;
+  results?: Array<{
+    formatted_address?: string;
+  }>;
+  error_message?: string;
+};
+
 export type FollowAlongDestinationSearchResult = FollowAlongLocation & {
   title: string;
   types: string[];
 };
 
+const GOOGLE_GEOCODE_ENDPOINT = "https://maps.googleapis.com/maps/api/geocode/json";
+const CURRENT_LOCATION_LABEL = "Current location";
+
 function isFiniteCoord(lat: number, lng: number) {
   return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+}
+
+function normalizeOptionalText(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 export function normalizeDestinationQuery(value: unknown) {
@@ -51,6 +66,34 @@ export function isValidFollowAlongLocation(value: unknown): value is FollowAlong
     candidate.label.trim().length > 0 &&
     isFiniteCoord(Number(candidate.lat), Number(candidate.lng))
   );
+}
+
+export function buildFollowAlongOrigin(
+  coords: { lat: number; lng: number },
+  subtitle?: string | null
+): FollowAlongLocation {
+  return {
+    label: CURRENT_LOCATION_LABEL,
+    subtitle: normalizeOptionalText(subtitle),
+    lat: coords.lat,
+    lng: coords.lng,
+  };
+}
+
+function withDetectedOriginAddress(
+  coords: { lat: number; lng: number },
+  address?: string | null
+): FollowAlongLocation {
+  const normalizedAddress = normalizeOptionalText(address);
+  if (!normalizedAddress) {
+    return buildFollowAlongOrigin(coords);
+  }
+  return {
+    label: normalizedAddress,
+    subtitle: CURRENT_LOCATION_LABEL,
+    lat: coords.lat,
+    lng: coords.lng,
+  };
 }
 
 export async function searchFollowAlongDestinations(
@@ -117,6 +160,38 @@ function encodeLocation(value: FollowAlongLocation) {
   return `${value.lat},${value.lng}`;
 }
 
+export async function reverseGeocodeFollowAlongOrigin(
+  coords: { lat: number; lng: number }
+): Promise<FollowAlongLocation> {
+  if (!isFiniteCoord(coords.lat, coords.lng)) {
+    throw new Error("Valid origin coordinates are required.");
+  }
+
+  const apiKey = (process.env.GOOGLE_PLACES_API_KEY || "").trim();
+  if (!apiKey) {
+    throw new Error("Google origin lookup is not configured.");
+  }
+
+  const params = new URLSearchParams({
+    latlng: `${coords.lat},${coords.lng}`,
+    key: apiKey,
+  });
+  const res = await fetch(`${GOOGLE_GEOCODE_ENDPOINT}?${params.toString()}`, {
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    throw new Error("Origin lookup failed.");
+  }
+
+  const payload = (await res.json()) as GoogleGeocodeResponse;
+  if (payload.status && payload.status !== "OK" && payload.status !== "ZERO_RESULTS") {
+    throw new Error(payload.error_message || "Origin lookup failed.");
+  }
+
+  return withDetectedOriginAddress(coords, payload.results?.[0]?.formatted_address);
+}
+
 export async function fetchDrivingRoutePreview(
   origin: FollowAlongLocation,
   destination: FollowAlongLocation
@@ -160,13 +235,19 @@ export async function fetchDrivingRoutePreview(
   }
 
   return {
-    origin: {
-      ...origin,
-      subtitle: origin.subtitle || leg.start_address || null,
-    },
+    origin:
+      normalizeOptionalText(origin.label) === CURRENT_LOCATION_LABEL
+        ? withDetectedOriginAddress(
+            { lat: origin.lat, lng: origin.lng },
+            normalizeOptionalText(origin.subtitle) || normalizeOptionalText(leg.start_address)
+          )
+        : {
+            ...origin,
+            subtitle: normalizeOptionalText(origin.subtitle) || normalizeOptionalText(leg.start_address),
+          },
     destination: {
       ...destination,
-      subtitle: destination.subtitle || leg.end_address || null,
+      subtitle: normalizeOptionalText(destination.subtitle) || normalizeOptionalText(leg.end_address),
     },
     routeCoords,
     distanceMeters: Number(leg.distance?.value) || 0,

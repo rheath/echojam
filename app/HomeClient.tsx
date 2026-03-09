@@ -68,7 +68,7 @@ type FlowStep =
   | "followAlongDrive"
   | "end";
 type PickDurationPage = "narrator" | "routes";
-type NarratorFlowSource = "buildMix" | "walkEdit" | null;
+type NarratorFlowSource = "buildMix" | "followAlong" | "walkEdit" | null;
 type CityOption = PresetCity;
 type TransportMode = "walk" | "drive";
 type LandingTheme = "dark" | "light";
@@ -156,6 +156,10 @@ type FollowAlongSearchResponse = {
   >;
 };
 
+type FollowAlongOriginResponse = {
+  origin: FollowAlongLocation;
+};
+
 type FollowAlongPreviewResponse = {
   origin: FollowAlongLocation;
   destination: FollowAlongLocation;
@@ -191,6 +195,8 @@ const POLL_INTERVAL_MS = 1500;
 const POLL_REQUEST_TIMEOUT_MS = 8000;
 const POLL_FAILURE_THRESHOLD = 5;
 const START_JOB_TIMEOUT_MS = 15000;
+const FOLLOW_ALONG_ORIGIN_PENDING_SUBTITLE = "Finding address...";
+const FOLLOW_ALONG_ORIGIN_FALLBACK_SUBTITLE = "Location detected";
 const PERSONA_KEYS: Array<Exclude<Persona, "custom">> = ["adult", "preteen", "ghost"];
 const CUSTOM_NARRATOR_MAX_CHARS = 500;
 const DEFAULT_STOP_IMAGE = "/images/salem/placeholder.png";
@@ -522,6 +528,7 @@ const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
 const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null>(null);
 const previousStepRef = useRef<FlowStep>("landing");
 const scriptModalCloseTimeoutRef = useRef<number | null>(null);
+const followAlongSessionRef = useRef(0);
 const followAlongLastPositionRef = useRef<{
   lat: number;
   lng: number;
@@ -637,14 +644,28 @@ const followAlongLastPositionRef = useRef<{
   const isAiPersona = (personaKey: Persona) => personaCatalog[personaKey].displayName.startsWith("AI");
   const usesNarratorIcon = (personaKey: Persona) => personaKey === "custom" || isAiPersona(personaKey);
   const customNarratorEnabled =
-    step === "followAlongSetup" ||
+    narratorFlowSource === "followAlong" ||
     narratorFlowSource === "buildMix" ||
     (narratorFlowSource === "walkEdit" && !isPresetWalkRoute);
   const trimmedCustomNarratorGuidance = customNarratorGuidance.trim();
   const narratorSubmitDisabled =
     !selectedPersona ||
     isGeneratingMix ||
+    isCreatingFollowAlong ||
     (selectedPersona === "custom" && trimmedCustomNarratorGuidance.length === 0);
+  const narratorSubmitLabel = returnToWalkOnClose
+    ? "Update Narrator"
+    : narratorFlowSource === "followAlong"
+      ? (isCreatingFollowAlong ? "Building route..." : "Start Follow Along")
+      : "Create Tour";
+  const customNarratorHelpText =
+    narratorFlowSource === "followAlong"
+      ? "Tell EchoJam who this drive is for and how the narration should sound."
+      : "Tell EchoJam who this tour is for and how the narration should sound.";
+  const customNarratorPlaceholder =
+    narratorFlowSource === "followAlong"
+      ? "Road-trip voice for two adults who love architecture, local lore, and concise stories."
+      : "This tour is for my niece Kate who is 8 years old. She loves animals, so make it kid friendly, fun, and mention animals whenever relevant.";
   const maxStopsForSelection = useMemo(
     () => getMaxStops(),
     []
@@ -687,6 +708,43 @@ const followAlongLastPositionRef = useRef<{
 
     return DEFAULT_STOP_IMAGE;
   }, [buildMixOrderedStops, builderSelectedStops, generationJobKind, route, selectedRoute, selectedRouteId]);
+  const narratorPreviewStops = useMemo(() => {
+    if (narratorFlowSource === "buildMix") {
+      return buildMixDisplayStops;
+    }
+    if (narratorFlowSource === "followAlong" && followAlongDestination) {
+      return [
+        {
+          id: "follow-preview-destination",
+          title: followAlongDestination.label,
+          lat: followAlongDestination.lat,
+          lng: followAlongDestination.lng,
+          images: [DEFAULT_STOP_IMAGE],
+          stopKind: "arrival" as const,
+        },
+      ];
+    }
+    return [];
+  }, [buildMixDisplayStops, followAlongDestination, narratorFlowSource]);
+  const narratorPreviewCityCenter =
+    narratorFlowSource === "followAlong"
+      ? (followAlongOrigin ?? selectedCityCenter)
+      : selectedCityCenter;
+  const narratorPreviewShowRoutePath =
+    narratorFlowSource === "followAlong" && Boolean(followAlongPreview);
+  const narratorPreviewRouteCoords =
+    narratorFlowSource === "followAlong"
+      ? (followAlongPreview?.routeCoords ?? null)
+      : null;
+  const narratorPreviewRouteTravelMode =
+    narratorFlowSource === "followAlong" ? "drive" : null;
+  const narratorPreviewEndpoints =
+    narratorFlowSource === "followAlong"
+      ? {
+          origin: followAlongPreview?.origin ?? followAlongOrigin,
+          destination: followAlongPreview?.destination ?? followAlongDestination,
+        }
+      : null;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -888,6 +946,11 @@ const followAlongLastPositionRef = useRef<{
       return;
     }
 
+    if (narratorFlowSource === "followAlong") {
+      await startFollowAlongExperience(personaForSubmit);
+      return;
+    }
+
     if (returnToWalkOnClose && jam?.route_id && route) {
       const currentStops = route.stops.map((stop) => ({
         id: stop.id,
@@ -934,6 +997,7 @@ const followAlongLastPositionRef = useRef<{
     setSelectedPersona(null);
     setCustomNarratorGuidance("");
     setInstantDiscoveryCity(null);
+    followAlongSessionRef.current += 1;
     setFollowAlongOrigin(null);
     setFollowAlongDestinationQuery("");
     setFollowAlongDestinationResults([]);
@@ -957,20 +1021,64 @@ const followAlongLastPositionRef = useRef<{
     setStep("pickDuration");
   }
 
-  function toFollowAlongOrigin(coords: { lat: number; lng: number }): FollowAlongLocation {
+  function toFollowAlongOrigin(
+    coords: { lat: number; lng: number },
+    subtitle?: string | null
+  ): FollowAlongLocation {
     return {
       label: "Current location",
-      subtitle: "Live location",
+      subtitle: subtitle?.trim() ? subtitle.trim() : null,
       lat: coords.lat,
       lng: coords.lng,
     };
   }
 
+  async function resolveFollowAlongOrigin(
+    coords: { lat: number; lng: number },
+    sessionId: number
+  ) {
+    if (sessionId !== followAlongSessionRef.current) return;
+
+    setFollowAlongOrigin(
+      toFollowAlongOrigin(coords, FOLLOW_ALONG_ORIGIN_PENDING_SUBTITLE)
+    );
+
+    try {
+      const body = await fetchJsonWithTimeout<FollowAlongOriginResponse>(
+        "/api/follow-along/origin",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(coords),
+        },
+        POLL_REQUEST_TIMEOUT_MS
+      );
+
+      if (sessionId !== followAlongSessionRef.current) return;
+
+      setFollowAlongOrigin({
+        ...body.origin,
+        subtitle:
+          typeof body.origin.subtitle === "string" && body.origin.subtitle.trim().length > 0
+            ? body.origin.subtitle.trim()
+            : FOLLOW_ALONG_ORIGIN_FALLBACK_SUBTITLE,
+      });
+    } catch {
+      if (sessionId !== followAlongSessionRef.current) return;
+      setFollowAlongOrigin(
+        toFollowAlongOrigin(coords, FOLLOW_ALONG_ORIGIN_FALLBACK_SUBTITLE)
+      );
+    }
+  }
+
   async function openFollowAlongSetup() {
+    const sessionId = followAlongSessionRef.current + 1;
+    followAlongSessionRef.current = sessionId;
     setErr(null);
     setSelectedRouteId(null);
     setSelectedPersona((current) => current ?? "adult");
     setCustomNarratorGuidance((current) => current.trim());
+    setNarratorFlowSource(null);
     setFollowAlongDestinationQuery("");
     setFollowAlongDestinationResults([]);
     setFollowAlongDestination(null);
@@ -979,16 +1087,18 @@ const followAlongLastPositionRef = useRef<{
     setStep("followAlongSetup");
 
     if (myPos) {
-      setFollowAlongOrigin(toFollowAlongOrigin(myPos));
+      void resolveFollowAlongOrigin(myPos, sessionId);
       return;
     }
 
     try {
       const coords = await requestCurrentGeoPosition();
+      if (sessionId !== followAlongSessionRef.current) return;
       setMyPos(coords);
       setGeoAllowed(true);
-      setFollowAlongOrigin(toFollowAlongOrigin(coords));
+      void resolveFollowAlongOrigin(coords, sessionId);
     } catch (e) {
+      if (sessionId !== followAlongSessionRef.current) return;
       setGeoAllowed(false);
       setFollowAlongOrigin(null);
       setErr(e instanceof Error ? e.message : "Location permission is required.");
@@ -1046,6 +1156,7 @@ const followAlongLastPositionRef = useRef<{
         },
         START_JOB_TIMEOUT_MS
       );
+      setFollowAlongOrigin(preview.origin);
       setFollowAlongDestination(preview.destination);
       setFollowAlongPreview(preview);
       setFollowAlongStatusCopy("Route preview ready. Choose a storyteller and start driving.");
@@ -1057,12 +1168,13 @@ const followAlongLastPositionRef = useRef<{
     }
   }
 
-  async function startFollowAlongExperience() {
-    if (!followAlongOrigin || !followAlongDestination || !selectedPersona) {
+  async function startFollowAlongExperience(personaOverride?: Persona) {
+    const personaForSubmit = personaOverride ?? selectedPersona;
+    if (!followAlongOrigin || !followAlongDestination || !personaForSubmit) {
       setErr("Choose a destination and storyteller first.");
       return;
     }
-    if (selectedPersona === "custom" && trimmedCustomNarratorGuidance.length === 0) {
+    if (personaForSubmit === "custom" && trimmedCustomNarratorGuidance.length === 0) {
       setErr("Add narrator guidance to create a custom narrator.");
       return;
     }
@@ -1089,9 +1201,9 @@ const followAlongLastPositionRef = useRef<{
             jamId: jam?.id ?? null,
             origin: followAlongOrigin,
             destination: followAlongDestination,
-            persona: selectedPersona,
+            persona: personaForSubmit,
             narratorGuidance:
-              selectedPersona === "custom" ? trimmedCustomNarratorGuidance : null,
+              personaForSubmit === "custom" ? trimmedCustomNarratorGuidance : null,
           }),
         },
         START_JOB_TIMEOUT_MS
@@ -1103,7 +1215,8 @@ const followAlongLastPositionRef = useRef<{
       setGenerationJobKind("custom");
       router.replace(`/?jam=${body.jamId}`);
     } catch (e) {
-      setStep("followAlongSetup");
+      setPickDurationPage("narrator");
+      setStep("pickDuration");
       setGenerationJobId(null);
       setGenerationJobKind(null);
       setErr(e instanceof Error ? e.message : "Failed to create Follow Along.");
@@ -1132,6 +1245,10 @@ const followAlongLastPositionRef = useRef<{
     }
     if (narratorFlowSource === "buildMix") {
       setStep("buildMix");
+      return;
+    }
+    if (narratorFlowSource === "followAlong") {
+      setStep("followAlongSetup");
       return;
     }
     setNarratorFlowSource(null);
@@ -2926,7 +3043,7 @@ async function startStopNarration() {
                       Describe your narrator
                     </label>
                     <p className={styles.customNarratorHelp}>
-                      Tell EchoJam who this tour is for and how the narration should sound.
+                      {customNarratorHelpText}
                     </p>
                     <textarea
                       id="customNarratorGuidance"
@@ -2936,7 +3053,7 @@ async function startStopNarration() {
                         setCustomNarratorGuidance(e.target.value.slice(0, CUSTOM_NARRATOR_MAX_CHARS));
                       }}
                       className={styles.customNarratorTextarea}
-                      placeholder="This tour is for my niece Kate who is 8 years old. She loves animals, so make it kid friendly, fun, and mention animals whenever relevant."
+                      placeholder={customNarratorPlaceholder}
                       rows={6}
                       maxLength={CUSTOM_NARRATOR_MAX_CHARS}
                     />
@@ -2955,7 +3072,7 @@ async function startStopNarration() {
                       disabled={narratorSubmitDisabled}
                       className={`${styles.landingCtaButton} ${styles.startTourButton}`}
                     >
-                      {returnToWalkOnClose ? "Update Narrator" : "Create Tour"}
+                      {narratorSubmitLabel}
                     </button>
                   </div>
                 )}
@@ -2963,11 +3080,15 @@ async function startStopNarration() {
 
               <section className={styles.pickImagePane}>
                 <RouteMap
-                  stops={narratorFlowSource === "buildMix" ? buildMixDisplayStops : []}
+                  stops={narratorPreviewStops}
                   currentStopIndex={0}
                   myPos={myPos}
-                  cityCenter={selectedCityCenter}
+                  cityCenter={narratorPreviewCityCenter}
                   followCurrentStop={false}
+                  showRoutePath={narratorPreviewShowRoutePath}
+                  routeCoords={narratorPreviewRouteCoords}
+                  routeTravelMode={narratorPreviewRouteTravelMode}
+                  endpoints={narratorPreviewEndpoints}
                 />
                 <button onClick={closeNarratorPicker} className={`${styles.mapBackButton} ${styles.mapBackButtonInverted} ${styles.pickCloseButtonMapMobile}`} aria-label="Back">
                   <Image
@@ -3507,115 +3628,19 @@ async function startStopNarration() {
               </div>
             )}
 
-            <div className={styles.pickSectionLabel}>Storyteller</div>
-            <div className={styles.pickPersonaRow}>
-              {PERSONA_KEYS.map((personaKey) => {
-                const personaInfo = personaCatalog[personaKey];
-                return (
-                  <button
-                    key={personaKey}
-                    type="button"
-                    onClick={() => {
-                      setErr(null);
-                      setSelectedPersona(personaKey);
-                    }}
-                    className={`${styles.pickNarratorOption} ${selectedPersona === personaKey ? styles.pickNarratorOptionSelected : ""}`}
-                  >
-                    <div className={styles.pickNarratorOptionContent}>
-                      <div className={styles.pickNarratorWithAvatar}>
-                        <div className={styles.pickNarratorAvatarWrap}>
-                          {usesNarratorIcon(personaKey) ? (
-                            <Image
-                              src="/icons/stars.svg"
-                              alt=""
-                              width={24}
-                              height={24}
-                              className={styles.pickNarratorFutureIcon}
-                              aria-hidden="true"
-                            />
-                          ) : (
-                            <Image
-                              src={personaInfo.avatarSrc}
-                              alt={personaInfo.avatarAlt}
-                              fill
-                              className={styles.pickNarratorAvatar}
-                            />
-                          )}
-                        </div>
-                        <div>
-                          <div className={styles.pickRouteTitle}>{personaInfo.displayName}</div>
-                          <div className={styles.pickNarratorSub}>{personaInfo.description}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => {
-                  setErr(null);
-                  setSelectedPersona("custom");
-                }}
-                className={`${styles.pickNarratorOption} ${selectedPersona === "custom" ? styles.pickNarratorOptionSelected : ""}`}
-              >
-                <div className={styles.pickNarratorOptionContent}>
-                  <div className={styles.pickNarratorWithAvatar}>
-                    <div className={styles.pickNarratorAvatarWrap}>
-                      <Image
-                        src="/icons/stars.svg"
-                        alt=""
-                        width={24}
-                        height={24}
-                        className={styles.pickNarratorFutureIcon}
-                        aria-hidden="true"
-                      />
-                    </div>
-                    <div>
-                      <div className={styles.pickRouteTitle}>Create your own storyteller</div>
-                      <div className={styles.pickNarratorSub}>Describe the voice, audience, and tone you want.</div>
-                    </div>
-                  </div>
-                </div>
-              </button>
-            </div>
-
-            {selectedPersona === "custom" && (
-              <div className={styles.customNarratorPanel}>
-                <label htmlFor="followAlongNarratorGuidance" className={styles.customNarratorLabel}>
-                  Describe your narrator
-                </label>
-                <p className={styles.customNarratorHelp}>
-                  Tell EchoJam who this drive is for and how the narration should sound.
-                </p>
-                <textarea
-                  id="followAlongNarratorGuidance"
-                  value={customNarratorGuidance}
-                  onChange={(e) => {
-                    setErr(null);
-                    setCustomNarratorGuidance(e.target.value.slice(0, CUSTOM_NARRATOR_MAX_CHARS));
-                  }}
-                  className={styles.customNarratorTextarea}
-                  rows={6}
-                  maxLength={CUSTOM_NARRATOR_MAX_CHARS}
-                  placeholder="Road-trip voice for two adults who love architecture, local lore, and concise stories."
-                />
-                <div className={styles.customNarratorCount}>
-                  {trimmedCustomNarratorGuidance.length}/{CUSTOM_NARRATOR_MAX_CHARS}
-                </div>
-              </div>
-            )}
-
             <div className={styles.pickDurationStartWrap}>
               <button
                 type="button"
                 onClick={() => {
-                  void startFollowAlongExperience();
+                  setErr(null);
+                  setNarratorFlowSource("followAlong");
+                  setPickDurationPage("narrator");
+                  setStep("pickDuration");
                 }}
-                disabled={!followAlongPreview || !followAlongDestination || !followAlongOrigin || !selectedPersona || isCreatingFollowAlong}
+                disabled={!followAlongPreview || !followAlongDestination || !followAlongOrigin || isLoadingFollowAlongPreview}
                 className={`${styles.landingCtaButton} ${styles.startTourButton}`}
               >
-                {isCreatingFollowAlong ? "Building route..." : "Start Follow Along"}
+                Continue
               </button>
             </div>
           </section>
