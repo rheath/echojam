@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { getJamSharePayload } from "@/lib/server/jamShare";
 import { getSiteBaseUrl, toAbsoluteUrl } from "@/lib/server/siteUrl";
@@ -28,11 +26,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
   const backgroundUrl = payload.posterBackgroundImageUrl
     ? toAbsoluteUrl(payload.posterBackgroundImageUrl, baseUrl)
     : null;
-  const rawLogoSvg = await readFile(join(process.cwd(), "public/images/marketing/Wandrful-logo-v2.svg"), "utf8");
-  const whiteLogoSvg = rawLogoSvg
-    .replace(/fill="[^"]*"/gi, 'fill="#ffffff"')
-    .replace(/stroke="[^"]*"/gi, 'stroke="#ffffff"');
-  const logoDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(whiteLogoSvg)}`;
+  const logoUrl = toAbsoluteUrl("/images/marketing/Wandrful-logo-white-v2.svg", baseUrl);
 
   return new ImageResponse(
     (
@@ -104,7 +98,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
           }}
         >
           <img
-            src={logoDataUrl}
+            src={logoUrl}
             alt="Wandrful"
             style={{
               width: 183,
