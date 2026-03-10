@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { loadGoogleMapsLibraries } from "@/lib/googleMapsLoader";
+import {
+  loadGoogleLegacyRoutesLibrary,
+  loadGoogleMapsLibraries,
+} from "@/lib/googleMapsLoader";
 import styles from "./RouteMap.module.css";
 
 type Stop = {
@@ -58,6 +61,7 @@ const VISITED_COLOR = "#8e93a3";
 const UPCOMING_COLOR = "#2b1b3f";
 const USER_COLOR = "#2e78ff";
 const ORIGIN_COLOR = "#111111";
+const DEFAULT_MAP_ID = "DEMO_MAP_ID";
 const MINIMAL_TOURISM_MAP_STYLES: google.maps.MapTypeStyle[] = [
   {
     elementType: "geometry",
@@ -145,9 +149,9 @@ export default function RouteMap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
-  const stopMarkersRef = useRef<google.maps.Marker[]>([]);
-  const endpointMarkersRef = useRef<google.maps.Marker[]>([]);
-  const meMarkerRef = useRef<google.maps.Marker | null>(null);
+  const stopMarkersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+  const endpointMarkersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+  const meMarkerRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
   const routeLineRef = useRef<google.maps.Polyline | null>(null);
   const routeLineUnderlayRef = useRef<google.maps.Polyline | null>(null);
   const [isMapReady, setIsMapReady] = useState(false);
@@ -186,7 +190,7 @@ export default function RouteMap({
       }
 
       try {
-        const { DirectionsService } = await loadGoogleMapsLibraries();
+        const { DirectionsService } = await loadGoogleLegacyRoutesLibrary();
         const directions = new DirectionsService();
         const result = await directions.route({
           origin: { lat: stops[0].lat, lng: stops[0].lng },
@@ -243,6 +247,7 @@ export default function RouteMap({
         const map = new Map(containerRef.current, {
           center: { lat: initialView.lat, lng: initialView.lng },
           zoom: initialView.zoom,
+          mapId: (process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID || "").trim() || DEFAULT_MAP_ID,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
@@ -294,18 +299,13 @@ export default function RouteMap({
 
     clearMarkers(stopMarkersRef.current);
     stopMarkersRef.current = displayStops.map((stop, idx) => {
-      const marker = new google.maps.Marker({
+      const marker = createPinMarker({
         map,
         position: { lat: stop.lat, lng: stop.lng },
         title: stop.title,
-        icon: buildStopMarkerIcon(stop.status),
-        label: {
-          text: stop.label,
-          color: stop.status === "current" ? "#111111" : "#ffffff",
-          fontSize: "12px",
-          fontWeight: "700",
-        },
+        pin: buildStopMarkerPin(stop.status, stop.label),
         zIndex: stop.status === "current" ? 30 : 20 + idx,
+        clickable: true,
       });
 
       marker.addListener("click", () => {
@@ -323,19 +323,17 @@ export default function RouteMap({
 
     clearMarker(meMarkerRef.current);
     meMarkerRef.current = myPos
-      ? new google.maps.Marker({
+      ? createPinMarker({
           map,
           position: myPos,
-          clickable: false,
+          title: "Your location",
+          pin: new google.maps.marker.PinElement({
+            background: USER_COLOR,
+            borderColor: "#ffffff",
+            glyph: "",
+            scale: 0.72,
+          }),
           zIndex: 10,
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            fillColor: USER_COLOR,
-            fillOpacity: 0.9,
-            strokeColor: "#ffffff",
-            strokeWeight: 2,
-            scale: 6,
-          },
         })
       : null;
 
@@ -495,8 +493,8 @@ function buildDisplayStops(
   });
 }
 
-function buildStopMarkerIcon(status: StopVisualStatus): google.maps.Symbol {
-  const fillColor =
+function buildStopMarkerPin(status: StopVisualStatus, label: string) {
+  const background =
     status === "current"
       ? CURRENT_STOP_COLOR
       : status === "arrival"
@@ -505,39 +503,31 @@ function buildStopMarkerIcon(status: StopVisualStatus): google.maps.Symbol {
           ? VISITED_COLOR
           : UPCOMING_COLOR;
 
-  return {
-    path: google.maps.SymbolPath.CIRCLE,
-    fillColor,
-    fillOpacity: 0.95,
-    strokeColor: "#ffffff",
-    strokeWeight: 2,
-    scale: status === "current" ? 12 : 9,
-  };
+  return new google.maps.marker.PinElement({
+    background,
+    borderColor: "#ffffff",
+    glyphColor: status === "current" ? "#111111" : "#ffffff",
+    glyph: label,
+    scale: status === "current" ? 1.15 : 0.96,
+  });
 }
 
 function buildEndpointMarkers(map: google.maps.Map, endpoints: Props["endpoints"]) {
-  const markers: google.maps.Marker[] = [];
+  const markers: google.maps.marker.AdvancedMarkerElement[] = [];
 
   if (endpoints?.origin) {
     markers.push(
-      new google.maps.Marker({
+      createPinMarker({
         map,
         position: endpoints.origin,
         title: endpoints.origin.label || "Start",
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          fillColor: ORIGIN_COLOR,
-          fillOpacity: 0.95,
-          strokeColor: "#ffffff",
-          strokeWeight: 2,
-          scale: 8,
-        },
-        label: {
-          text: "Start",
-          color: "#111111",
-          fontSize: "11px",
-          fontWeight: "700",
-        },
+        pin: new google.maps.marker.PinElement({
+          background: ORIGIN_COLOR,
+          borderColor: "#ffffff",
+          glyphColor: "#ffffff",
+          glyph: "S",
+          scale: 0.9,
+        }),
         zIndex: 15,
       })
     );
@@ -545,24 +535,17 @@ function buildEndpointMarkers(map: google.maps.Map, endpoints: Props["endpoints"
 
   if (endpoints?.destination) {
     markers.push(
-      new google.maps.Marker({
+      createPinMarker({
         map,
         position: endpoints.destination,
         title: endpoints.destination.label || "Finish",
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          fillColor: ARRIVAL_COLOR,
-          fillOpacity: 0.95,
-          strokeColor: "#ffffff",
-          strokeWeight: 2,
-          scale: 10,
-        },
-        label: {
-          text: "Finish",
-          color: "#111111",
-          fontSize: "11px",
-          fontWeight: "700",
-        },
+        pin: new google.maps.marker.PinElement({
+          background: ARRIVAL_COLOR,
+          borderColor: "#ffffff",
+          glyphColor: "#ffffff",
+          glyph: "F",
+          scale: 1,
+        }),
         zIndex: 16,
       })
     );
@@ -614,14 +597,16 @@ function fitMapToRoute(
   map.fitBounds(bounds, 56);
 }
 
-function clearMarkers(markers: google.maps.Marker[]) {
+function clearMarkers(markers: google.maps.marker.AdvancedMarkerElement[]) {
   for (const marker of markers) {
-    marker.setMap(null);
+    marker.map = null;
   }
 }
 
-function clearMarker(marker: google.maps.Marker | null) {
-  marker?.setMap(null);
+function clearMarker(marker: google.maps.marker.AdvancedMarkerElement | null) {
+  if (marker) {
+    marker.map = null;
+  }
 }
 
 function clearPolyline(polyline: google.maps.Polyline | null) {
@@ -653,4 +638,23 @@ function buildStopPopupContent(title: string, subtitle: string, image: string) {
   }
 
   return root;
+}
+
+function createPinMarker(params: {
+  map: google.maps.Map;
+  position: google.maps.LatLngLiteral;
+  title: string;
+  pin: google.maps.marker.PinElement;
+  zIndex?: number;
+  clickable?: boolean;
+}) {
+  const marker = new google.maps.marker.AdvancedMarkerElement({
+    map: params.map,
+    position: params.position,
+    title: params.title,
+    zIndex: params.zIndex,
+    content: params.pin.element,
+    gmpClickable: Boolean(params.clickable),
+  });
+  return marker;
 }
