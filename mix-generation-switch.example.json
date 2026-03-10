@@ -9,11 +9,6 @@
     "replay_audio lets you force a specific URL per stop_id and persona.",
     "If you want a different file name/path, set MIX_GENERATION_SWITCH_FILE in env."
   ],
-  "mode": "reuse_existing",
-  "replay_audio": {
-    "salem-common": {
-      "adult": "https://YOUR_AUDIO_HOST/mixes/custom-audio/adult-salem-common.mp3",
-      "preteen": "https://YOUR_AUDIO_HOST/mixes/custom-audio/preteen-salem-common.mp3"
-    }
-  }
+  "mode": "force_regenerate_all",
+  "replay_audio": {}
 }

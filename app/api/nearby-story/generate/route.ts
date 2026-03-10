@@ -180,7 +180,7 @@ async function loadPresetRouteStops(
 ): Promise<{ stops: RouteStop[]; title: string; lengthMinutes: number }> {
   const route = getRouteById(routeId);
   if (!route) throw new Error("Unknown preset route");
-  const presetStops = buildPresetStopsWithOverview(route.stops, city);
+  const presetStops = buildPresetStopsWithOverview(route.stops, city, route.contentPriority);
 
   const { data: mapRows, error: mapErr } = await admin
     .from("route_stop_mappings")

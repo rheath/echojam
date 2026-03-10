@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  buildInstagramProfileUrl,
+  deriveInstagramRouteAttribution,
+  parseInstagramProfileImageUrlFromHtml,
+} from "@/lib/instagramImport";
 import { toNullableAudioUrl, toNullableTrimmed } from "@/lib/mixGeneration";
 import { cityPlaceholderImage, proxyGoogleImageUrl } from "@/lib/placesImages";
 
@@ -50,6 +55,43 @@ type StopRow = {
   position: number;
 };
 
+type RouteRow = {
+  id: string;
+  title: string;
+  length_minutes: number;
+  transport_mode: "walk" | "drive";
+  status: "queued" | "generating" | "generating_script" | "generating_audio" | "ready" | "ready_with_warnings" | "failed";
+  city: string | null;
+  narrator_default: "adult" | "preteen" | "ghost" | "custom" | null;
+  narrator_guidance: string | null;
+  narrator_voice: string | null;
+  experience_kind: "mix" | "follow_along" | null;
+  origin_label: string | null;
+  origin_lat: number | null;
+  origin_lng: number | null;
+  destination_label: string | null;
+  destination_lat: number | null;
+  destination_lng: number | null;
+  route_distance_meters: number | null;
+  route_duration_seconds: number | null;
+  route_polyline: [number, number][] | null;
+  story_by: string | null;
+  story_by_url: string | null;
+  story_by_avatar_url: string | null;
+  story_by_source: "instagram" | null;
+};
+
+type InstagramDraftAttributionRow = {
+  source_owner_title: string | null;
+};
+
+const INSTAGRAM_FETCH_TIMEOUT_MS = 4_000;
+const INSTAGRAM_FETCH_USER_AGENTS = [
+  "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+  "Twitterbot/1.0",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+];
+
 function isNonPlaceholderImage(value: string | null | undefined) {
   const normalized = toNullableTrimmed(value);
   if (!normalized) return false;
@@ -64,6 +106,21 @@ function isMissingGhostColumnError(message: string | null | undefined) {
   if (normalized.includes("script_custom")) return true;
   if (normalized.includes("audio_url_custom")) return true;
   return normalized.includes("column") && normalized.includes("does not exist") && normalized.includes("custom_route_stops");
+}
+
+function isMissingStoryByColumnError(message: string | null | undefined) {
+  const normalized = (message ?? "").toLowerCase();
+  if (!normalized) return false;
+  const isStoryByLookup =
+    normalized.includes("story_by") ||
+    normalized.includes("story_by_url") ||
+    normalized.includes("story_by_avatar_url") ||
+    normalized.includes("story_by_source");
+  return (
+    isStoryByLookup &&
+    ((normalized.includes("column") && normalized.includes("does not exist")) ||
+      (normalized.includes("could not find") && normalized.includes("schema cache")))
+  );
 }
 
 function pickStopImage(
@@ -89,19 +146,114 @@ function pickStopImage(
   return toNullableTrimmed(stopImage) || placeholder;
 }
 
+async function fetchInstagramProfileImageUrl(profileUrl: string) {
+  for (const userAgent of INSTAGRAM_FETCH_USER_AGENTS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), INSTAGRAM_FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(profileUrl, {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": userAgent,
+          Accept: "text/html,application/xhtml+xml",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        cache: "no-store",
+      });
+      if (!response.ok) continue;
+      const html = await response.text();
+      const imageUrl = parseInstagramProfileImageUrlFromHtml(html);
+      if (imageUrl) return imageUrl;
+    } catch {
+      continue;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  return null;
+}
+
+async function hydrateInstagramRouteAttribution(
+  admin: ReturnType<typeof getAdmin>,
+  route: RouteRow
+) {
+  if (route.story_by_source === "instagram" && toNullableTrimmed(route.story_by)) {
+    return route;
+  }
+
+  const { data: instagramDrafts, error: instagramDraftsErr } = await admin
+    .from("instagram_import_drafts")
+    .select("source_owner_title")
+    .eq("published_route_id", route.id);
+  if (instagramDraftsErr) {
+    return route;
+  }
+
+  const attribution = deriveInstagramRouteAttribution(
+    ((instagramDrafts ?? []) as InstagramDraftAttributionRow[]).map((draft) => ({
+      ownerTitle: draft.source_owner_title,
+    }))
+  );
+  if (!attribution.storyBy || attribution.storyBySource !== "instagram") {
+    return route;
+  }
+  const storyByUrl = attribution.storyByUrl || buildInstagramProfileUrl(attribution.storyBy);
+  const storyByAvatarUrl =
+    route.story_by_avatar_url ||
+    attribution.storyByAvatarUrl ||
+    (storyByUrl ? await fetchInstagramProfileImageUrl(storyByUrl).catch(() => null) : null);
+
+  return {
+    ...route,
+    story_by: attribution.storyBy,
+    story_by_url: storyByUrl,
+    story_by_avatar_url: storyByAvatarUrl,
+    story_by_source: attribution.storyBySource,
+  };
+}
+
 export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }> }) {
   try {
     const { routeId } = await ctx.params;
     const admin = getAdmin();
+    const routeSelectWithStoryBy =
+      "id,title,length_minutes,transport_mode,status,city,narrator_default,narrator_guidance,narrator_voice,experience_kind,origin_label,origin_lat,origin_lng,destination_label,destination_lat,destination_lng,route_distance_meters,route_duration_seconds,route_polyline,story_by,story_by_url,story_by_avatar_url,story_by_source";
+    const routeSelectLegacy =
+      "id,title,length_minutes,transport_mode,status,city,narrator_default,narrator_guidance,narrator_voice,experience_kind,origin_label,origin_lat,origin_lng,destination_label,destination_lat,destination_lng,route_distance_meters,route_duration_seconds,route_polyline";
+    let route: RouteRow;
 
-    const { data: route, error: routeErr } = await admin
+    const routeWithStoryByResult = await admin
       .from("custom_routes")
-      .select(
-        "id,title,length_minutes,transport_mode,status,city,narrator_default,narrator_guidance,narrator_voice,experience_kind,origin_label,origin_lat,origin_lng,destination_label,destination_lat,destination_lng,route_distance_meters,route_duration_seconds,route_polyline"
-      )
+      .select(routeSelectWithStoryBy)
       .eq("id", routeId)
       .single();
-    if (routeErr) return NextResponse.json({ error: routeErr.message }, { status: 404 });
+
+    if (routeWithStoryByResult.error && isMissingStoryByColumnError(routeWithStoryByResult.error.message)) {
+      const legacyRouteResult = await admin
+        .from("custom_routes")
+        .select(routeSelectLegacy)
+        .eq("id", routeId)
+        .single();
+      if (legacyRouteResult.error || !legacyRouteResult.data) {
+        return NextResponse.json({ error: legacyRouteResult.error?.message || "Route not found" }, { status: 404 });
+      }
+      route = {
+        ...(legacyRouteResult.data as Omit<RouteRow, "story_by" | "story_by_url" | "story_by_avatar_url" | "story_by_source">),
+        story_by: null,
+        story_by_url: null,
+        story_by_avatar_url: null,
+        story_by_source: null,
+      };
+    } else {
+      if (routeWithStoryByResult.error || !routeWithStoryByResult.data) {
+        return NextResponse.json({ error: routeWithStoryByResult.error?.message || "Route not found" }, { status: 404 });
+      }
+      route = routeWithStoryByResult.data as RouteRow;
+    }
+    route = await hydrateInstagramRouteAttribution(admin, route);
 
     const stopsSelectWithGhost =
       "stop_id,title,lat,lng,image_url,stop_kind,distance_along_route_meters,trigger_radius_meters,script_adult,script_preteen,script_ghost,script_custom,audio_url_adult,audio_url_preteen,audio_url_ghost,audio_url_custom,position";

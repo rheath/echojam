@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { Persona } from "@/app/content/salemRoutes";
+import type { Persona, PresetContentPriority } from "@/app/content/salemRoutes";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { customNarratorPersonaPrompt } from "@/lib/personas/customNarrator";
 
@@ -27,6 +27,10 @@ export type StopInput = {
   lng: number;
   image: string;
   googlePlaceId?: string;
+  narratorGuidance?: string | null;
+  mustMention?: string[] | null;
+  factBullets?: string[] | null;
+  contentPriority?: PresetContentPriority | null;
 };
 
 const DEFAULT_SWITCH: Required<GenerationSwitch> = {
@@ -139,6 +143,171 @@ function getNarrationVoice(persona: Persona, customVoice?: CustomNarratorVoice |
   return VOICE_BY_PERSONA[persona];
 }
 
+const GUIDANCE_REFERENCE_STOPWORDS = new Set([
+  "A",
+  "An",
+  "And",
+  "As",
+  "At",
+  "But",
+  "By",
+  "Do",
+  "For",
+  "From",
+  "How",
+  "If",
+  "Imagine",
+  "In",
+  "Into",
+  "It",
+  "Its",
+  "Like",
+  "Make",
+  "Now",
+  "Of",
+  "Or",
+  "So",
+  "Talk",
+  "The",
+  "This",
+  "To",
+  "Turn",
+  "With",
+]);
+
+export function extractGuidanceReferenceTargets(
+  narratorGuidance: string | null | undefined,
+  stopTitle?: string | null
+) {
+  const normalizedNarratorGuidance = toNullableTrimmed(narratorGuidance);
+  if (!normalizedNarratorGuidance) return [] as string[];
+
+  const stopTitleParts = new Set(
+    (stopTitle || "")
+      .split(/[^A-Za-z0-9]+/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => part.toLowerCase())
+  );
+
+  const seen = new Set<string>();
+  const targets: string[] = [];
+  const pushTarget = (value: string) => {
+    const normalized = value.trim().replace(/\s+/g, " ");
+    if (!normalized) return;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push(normalized);
+  };
+
+  const phraseMatches = normalizedNarratorGuidance.match(/\b(?:[A-Z][a-z]+(?:['’]s)?(?:\s+[A-Z][a-z]+(?:['’]s)?)*)\b/g) ?? [];
+  for (const phrase of phraseMatches) {
+    const parts = phrase.split(/\s+/).filter(Boolean);
+    const meaningfulParts = parts.filter((part) => {
+      const stripped = part.replace(/['’]s$/i, "");
+      if (!stripped) return false;
+      if (GUIDANCE_REFERENCE_STOPWORDS.has(stripped)) return false;
+      if (stopTitleParts.has(stripped.toLowerCase())) return false;
+      return true;
+    });
+    if (meaningfulParts.length === 0) continue;
+    if (meaningfulParts.length === 1) {
+      pushTarget(meaningfulParts[0]!.replace(/['’]s$/i, ""));
+      continue;
+    }
+    pushTarget(meaningfulParts.join(" ").replace(/['’]s\b/gi, ""));
+    for (const part of meaningfulParts) {
+      pushTarget(part.replace(/['’]s$/i, ""));
+    }
+  }
+
+  return targets.slice(0, 6);
+}
+
+function normalizePromptStringArray(value: string[] | readonly string[] | null | undefined) {
+  if (!Array.isArray(value)) return [] as string[];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(trimmed);
+  }
+  return normalized;
+}
+
+export function buildStructuredStopPromptConfig(
+  stop: Pick<StopInput, "title" | "mustMention" | "factBullets" | "contentPriority">,
+  narratorGuidance?: string | null
+) {
+  const contentPriority: PresetContentPriority = stop.contentPriority === "history_first" ? "history_first" : "default";
+  const factBullets = normalizePromptStringArray(stop.factBullets);
+  const explicitMustMention = normalizePromptStringArray(stop.mustMention);
+  const fallbackReferenceTargets =
+    explicitMustMention.length === 0 ? extractGuidanceReferenceTargets(narratorGuidance, stop.title) : [];
+  const mustMention = normalizePromptStringArray([...explicitMustMention, ...fallbackReferenceTargets]);
+
+  const extraStyleGuidelines =
+    contentPriority === "history_first"
+      ? [
+          "Move into the landmark's real NYC-to-comics connection within the first two sentences.",
+          "Let concrete comic-book history and exact named references carry the stop more than generic adventure atmosphere.",
+          "Keep imaginative framing light and anchored to the factual material.",
+        ]
+      : [];
+
+  const promptSections: string[] = [];
+  if (contentPriority === "history_first") {
+    promptSections.push(
+      "Content priority: history-first. Real comic-book history and NYC influence come before cinematic scene-setting."
+    );
+  }
+  if (factBullets.length > 0) {
+    promptSections.push("Required fact beats:");
+    promptSections.push(...factBullets.map((fact) => `- ${fact}`));
+  }
+  if (mustMention.length > 0) {
+    promptSections.push("Exact names to preserve verbatim when relevant:");
+    promptSections.push(...mustMention.map((name) => `- ${name}`));
+  }
+
+  const extraRequirements: string[] = [];
+  if (contentPriority === "history_first") {
+    extraRequirements.push("- Move from setup into concrete comic-book history within the first two sentences.");
+    extraRequirements.push("- Keep sensory/setup language brief; spend most of the script on real NYC comic-book history and influence.");
+    extraRequirements.push("- Include at least one concrete present-day detail from the scene.");
+    if (factBullets.length > 0) {
+      extraRequirements.push(
+        `- Include at least ${Math.min(2, factBullets.length)} of the required fact beats below in clear, concrete language.`
+      );
+    }
+    if (mustMention.length > 0) {
+      extraRequirements.push(`- Mention at least one of these exact names verbatim: ${mustMention.join(", ")}.`);
+      if (mustMention.length > 1) {
+        extraRequirements.push("- Prefer mentioning two exact names if it stays natural.");
+      }
+      extraRequirements.push("- Do not replace exact names with generic phrases or broad superhero language.");
+    }
+    extraRequirements.push("- Treat narrator guidance as tone and framing only; the structured facts and exact names are the primary content.");
+  } else {
+    extraRequirements.push("- Include at least two specific sensory details.");
+  }
+
+  return {
+    contentPriority,
+    factBullets,
+    mustMention,
+    extraStyleGuidelines,
+    promptSections,
+    extraRequirements,
+  };
+}
+
 export function toNullableTrimmed(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
@@ -194,12 +363,32 @@ export async function generateScriptWithOpenAI(
 ) {
   const personaPrompt = getPersonaPrompt(persona);
   const normalizedNarratorGuidance = toNullableTrimmed(narratorGuidance);
+  const structuredPromptConfig = buildStructuredStopPromptConfig(stop, normalizedNarratorGuidance);
   if (persona === "custom" && !normalizedNarratorGuidance) {
     throw new Error("Narrator guidance is required for custom narrator generation.");
   }
+
+  const effectiveStyleGuidelines =
+    structuredPromptConfig.contentPriority === "history_first"
+      ? [
+          ...structuredPromptConfig.extraStyleGuidelines,
+          ...personaPrompt.styleGuidelines.filter(
+            (line) =>
+              line !== "Open with a vivid sensory detail that makes the listener feel like the adventure has already started." &&
+              line !== "Speak directly to the listener in short, natural sentences with strong rhythm." &&
+              line !== "Structure each stop as a mini adventure: Hook → Clue → Real-world fact → Why it matters → Forward momentum." &&
+              line !== "Include exactly one safe and simple 'Explorer Move' per stop (look up, count something, spot a symbol, notice a sound)." &&
+              line !== "Blend one grounded historical or cultural fact into the story naturally. Facts should feel like discoveries."
+          ),
+        ]
+      : personaPrompt.styleGuidelines;
+
   const systemPrompt = [
     ...personaPrompt.system,
     "Write natural spoken narration for one tour stop.",
+    ...(structuredPromptConfig.contentPriority === "history_first"
+      ? ["For this stop, factual comic-book history and exact named references outrank cinematic scene-setting."]
+      : []),
   ].join(" ");
 
   const userPrompt = [
@@ -210,17 +399,30 @@ export async function generateScriptWithOpenAI(
     ...(normalizedNarratorGuidance ? [`Narrator guidance: ${normalizedNarratorGuidance}`] : []),
     `Target spoken duration for this stop: ${personaPrompt.lengthTarget.durationSeconds} seconds`,
     `Stop ${stopIndex + 1} of ${totalStops}: ${stop.title}`,
+    ...structuredPromptConfig.promptSections,
     "Style guidelines:",
-    ...personaPrompt.styleGuidelines.map((line) => `- ${line}`),
+    ...effectiveStyleGuidelines.map((line) => `- ${line}`),
     "Disallowed patterns:",
     ...personaPrompt.bannedPatterns.map((line) => `- ${line}`),
     "Requirements:",
     `- ${personaPrompt.lengthTarget.sentenceRange} sentences.`,
     `- ${personaPrompt.lengthTarget.wordRange} words total.`,
     "- Mention the stop name once naturally.",
-    "- Include at least two specific sensory details.",
     "- Include one memorable hook line.",
     "- End with a transition to keep moving.",
+    ...structuredPromptConfig.extraRequirements,
+    ...(normalizedNarratorGuidance
+      ? [
+          "- Preserve specific names from narrator guidance rather than generalizing them.",
+          "- If narrator guidance names characters, places, worlds, or franchises, mention at least one exact name verbatim when it fits naturally.",
+          "- Do not replace named references with vague substitutes like 'superheroes' or 'comic-book cities'.",
+        ]
+      : []),
+    ...(structuredPromptConfig.mustMention.length > 0 && structuredPromptConfig.contentPriority !== "history_first"
+      ? [
+          `- Include at least one of these exact references verbatim if it fits naturally: ${structuredPromptConfig.mustMention.join(", ")}.`,
+        ]
+      : []),
     "- Do not use placeholders, brackets, or stage directions.",
     "- Output plain text only.",
   ].join("\n");

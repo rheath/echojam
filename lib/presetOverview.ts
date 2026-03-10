@@ -1,4 +1,4 @@
-import type { PresetCity, Stop } from "@/app/content/salemRoutes";
+import type { PresetCity, PresetContentPriority, Stop } from "@/app/content/salemRoutes";
 import type { StopInput } from "@/lib/mixGeneration";
 import { presetRouteData } from "@/app/content/generated/presetRoutes.generated";
 
@@ -46,7 +46,10 @@ export function isPresetOverviewStopId(stopId: string) {
   return stopId.startsWith("preset-overview-");
 }
 
-export function buildPresetOverviewStop(city: PresetCity): StopInput & { isOverview: true } {
+export function buildPresetOverviewStop(
+  city: PresetCity,
+  contentPriority?: PresetContentPriority | null
+): StopInput & { isOverview: true } {
   const meta = getPresetCityMeta(city);
   return {
     id: getPresetOverviewStopId(city),
@@ -54,12 +57,17 @@ export function buildPresetOverviewStop(city: PresetCity): StopInput & { isOverv
     lat: meta.lat,
     lng: meta.lng,
     image: meta.fallbackImage,
+    contentPriority: contentPriority ?? null,
     isOverview: true,
   };
 }
 
-export function buildPresetStopsWithOverview(routeStops: Stop[], city: PresetCity): Array<StopInput & { isOverview?: boolean }> {
-  const overview = buildPresetOverviewStop(city);
+export function buildPresetStopsWithOverview(
+  routeStops: Stop[],
+  city: PresetCity,
+  routeContentPriority?: PresetContentPriority | null
+): Array<StopInput & { isOverview?: boolean }> {
+  const overview = buildPresetOverviewStop(city, routeContentPriority);
   const mappedStops = routeStops.map((stop) => ({
     id: stop.id,
     title: stop.title,
@@ -67,6 +75,10 @@ export function buildPresetStopsWithOverview(routeStops: Stop[], city: PresetCit
     lng: stop.lng,
     image: "/images/salem/placeholder.png",
     googlePlaceId: stop.googlePlaceId,
+    narratorGuidance: stop.narratorGuidance ?? null,
+    mustMention: stop.mustMention ?? null,
+    factBullets: stop.factBullets ?? null,
+    contentPriority: stop.contentPriority ?? routeContentPriority ?? null,
     isOverview: false,
   }));
   return [overview, ...mappedStops];

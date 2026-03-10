@@ -2,7 +2,28 @@ import assert from "node:assert/strict";
 import test from "node:test";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore Node test runner resolves the local TypeScript module by explicit extension here.
-import { composeInstagramImportSourceText, estimateTextTokenCount, isInstagramDraftPublishable, nextInstagramDraftStatus, normalizeInstagramUrl, parseInstagramPublicMetadataFromHtml, resolveInstagramDraftScript, resolveInstagramDraftTitle, successJobStatusForPhase } from "../lib/instagramImport.ts";
+import {
+  addInstagramCollectionDraftId,
+  buildInstagramProfileUrl,
+  buildInstagramScriptGenerationSourceText,
+  canMasterPublishInstagramDrafts,
+  composeInstagramImportSourceText,
+  deriveInstagramRouteAttribution,
+  deriveInstagramCollectionRouteTitle,
+  estimateTextTokenCount,
+  getInstagramCollectionDraftStatus,
+  INSTAGRAM_COLLECTION_MAX_STOPS,
+  isInstagramDraftPublishable,
+  nextInstagramDraftStatus,
+  normalizeInstagramUrl,
+  normalizeInstagramCollectionDraftIds,
+  parseInstagramPublicMetadataFromHtml,
+  parseInstagramProfileImageUrlFromHtml,
+  removeInstagramCollectionDraftId,
+  resolveInstagramDraftScript,
+  resolveInstagramDraftTitle,
+  successJobStatusForPhase,
+} from "../lib/instagramImport.ts";
 
 const SAMPLE_HTML = `
 <!DOCTYPE html>
@@ -26,6 +47,15 @@ const SAMPLE_POST_HTML = `
     <meta property="instapp:owner_user_id" content="52042280147" />
     <meta name="description" content="161K likes, 684 comments - letsfamilystyle on February 18, 2026: &quot;Noah is a rice FREAK LOL.&quot;." />
     <meta property="og:url" content="https://www.instagram.com/letsfamilystyle/reel/DU6Bzb2EeMm/" />
+  </head>
+</html>
+`;
+
+const SAMPLE_PROFILE_HTML = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta property="og:image" content="https://example.com/avatar.jpg" />
   </head>
 </html>
 `;
@@ -71,6 +101,42 @@ test("parseInstagramPublicMetadataFromHtml handles public post owner fallbacks",
   assert.equal(metadata.thumbnailUrl, "https://example.com/post-thumb.jpg");
 });
 
+test("instagram attribution helpers derive profile links and collective labels", () => {
+  assert.equal(
+    buildInstagramProfileUrl("@letsfamilystyle"),
+    "https://www.instagram.com/letsfamilystyle/"
+  );
+  assert.equal(
+    parseInstagramProfileImageUrlFromHtml(SAMPLE_PROFILE_HTML),
+    "https://example.com/avatar.jpg"
+  );
+  assert.deepEqual(
+    deriveInstagramRouteAttribution([
+      { ownerTitle: "@letsfamilystyle", profileImageUrl: "https://example.com/avatar.jpg" },
+    ]),
+    {
+      storyBy: "@letsfamilystyle",
+      storyByUrl: "https://www.instagram.com/letsfamilystyle/",
+      storyByAvatarUrl: "https://example.com/avatar.jpg",
+      storyBySource: "instagram",
+      isCollective: false,
+    }
+  );
+  assert.deepEqual(
+    deriveInstagramRouteAttribution([
+      { ownerTitle: "@letsfamilystyle" },
+      { ownerTitle: "@nieves_cortes87" },
+    ]),
+    {
+      storyBy: "Instagram creators",
+      storyByUrl: null,
+      storyByAvatarUrl: null,
+      storyBySource: "instagram",
+      isCollective: true,
+    }
+  );
+});
+
 test("composeInstagramImportSourceText falls back to caption and combines sources", () => {
   assert.equal(
     composeInstagramImportSourceText("Caption only", null),
@@ -82,11 +148,101 @@ test("composeInstagramImportSourceText falls back to caption and combines source
   );
 });
 
+test("buildInstagramScriptGenerationSourceText keeps transcript and caption as separate labeled inputs", () => {
+  assert.equal(
+    buildInstagramScriptGenerationSourceText({
+      caption: "Caption only",
+      transcript: null,
+    }),
+    "Caption:\nCaption only"
+  );
+  assert.equal(
+    buildInstagramScriptGenerationSourceText({
+      caption: null,
+      transcript: "Transcript only",
+    }),
+    "Transcript:\nTranscript only"
+  );
+  assert.equal(
+    buildInstagramScriptGenerationSourceText({
+      caption: "Caption detail",
+      transcript: "Transcript detail",
+      cleanedText: "Cleaned detail",
+    }),
+    "Transcript:\nTranscript detail\n\nCaption:\nCaption detail\n\nCleaned notes:\nCleaned detail"
+  );
+});
+
 test("estimateTextTokenCount returns an approximate token count", () => {
   assert.equal(estimateTextTokenCount(null), null);
   assert.equal(estimateTextTokenCount(""), null);
   assert.equal(estimateTextTokenCount("One two three four"), 5);
   assert.equal(estimateTextTokenCount("A".repeat(40)), 10);
+});
+
+test("collection draft helpers dedupe, remove, and respect the max stop count", () => {
+  assert.deepEqual(
+    normalizeInstagramCollectionDraftIds(["draft-1", "draft-2", "draft-1", "", null]),
+    ["draft-1", "draft-2"]
+  );
+  assert.deepEqual(
+    addInstagramCollectionDraftId(["draft-1", "draft-2"], "draft-3"),
+    ["draft-1", "draft-2", "draft-3"]
+  );
+  assert.deepEqual(
+    removeInstagramCollectionDraftId(["draft-1", "draft-2", "draft-3"], "draft-2"),
+    ["draft-1", "draft-3"]
+  );
+  assert.deepEqual(
+    addInstagramCollectionDraftId(
+      Array.from({ length: INSTAGRAM_COLLECTION_MAX_STOPS }, (_, index) => `draft-${index + 1}`),
+      "draft-overflow"
+    ),
+    Array.from({ length: INSTAGRAM_COLLECTION_MAX_STOPS }, (_, index) => `draft-${index + 1}`)
+  );
+});
+
+test("collection publish helpers derive titles and ready states", () => {
+  assert.equal(
+    deriveInstagramCollectionRouteTitle(null, 1, "Single stop"),
+    "Single stop"
+  );
+  assert.equal(
+    deriveInstagramCollectionRouteTitle(null, 3, "Ignored"),
+    "Instagram Route (3 stops)"
+  );
+  assert.equal(
+    deriveInstagramCollectionRouteTitle("  Custom route  ", 3, "Ignored"),
+    "Custom route"
+  );
+  assert.equal(
+    getInstagramCollectionDraftStatus({
+      status: "draft_ready",
+      location: { publishReady: true },
+    }),
+    "ready"
+  );
+  assert.equal(
+    getInstagramCollectionDraftStatus({
+      status: "draft_ready",
+      location: { publishReady: false },
+    }),
+    "needs_location"
+  );
+  assert.equal(
+    canMasterPublishInstagramDrafts([
+      { status: "draft_ready", location: { publishReady: true } },
+      { status: "draft_ready", location: { publishReady: true } },
+    ]),
+    true
+  );
+  assert.equal(
+    canMasterPublishInstagramDrafts([
+      { status: "draft_ready", location: { publishReady: true } },
+      { status: "published", location: { publishReady: true } },
+    ]),
+    false
+  );
 });
 
 test("draft status transitions follow import and publish lifecycle", () => {
@@ -98,12 +254,17 @@ test("draft status transitions follow import and publish lifecycle", () => {
   assert.equal(nextInstagramDraftStatus("published", "job_failed"), "published");
   assert.equal(successJobStatusForPhase("import"), "draft_ready");
   assert.equal(successJobStatusForPhase("publish"), "published");
+  assert.equal(successJobStatusForPhase("publish_collection"), "published");
 });
 
 test("publish readiness requires final content and confirmed place", () => {
   assert.equal(
     resolveInstagramDraftTitle({ generatedTitle: "Generated", editedTitle: "Edited" }),
     "Edited"
+  );
+  assert.equal(
+    resolveInstagramDraftScript({ generatedScript: "Generated script", editedScript: "Edited script" }),
+    "Edited script"
   );
   assert.equal(
     resolveInstagramDraftScript({ generatedScript: "Generated script", editedScript: null }),

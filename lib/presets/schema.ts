@@ -2,10 +2,14 @@ import { z } from "zod";
 type Persona = "adult" | "preteen" | "ghost";
 type PresetCity = "salem" | "boston" | "concord" | "nyc";
 type PresetRoutePricingStatus = "free" | "paid" | "tbd";
+type PresetContentPriority = "default" | "history_first";
 
 const PERSONAS = ["adult", "preteen", "ghost"] as const satisfies readonly Persona[];
 const CITIES = ["salem", "boston", "concord", "nyc"] as const satisfies readonly PresetCity[];
 const PRICING_STATUSES = ["free", "paid", "tbd"] as const satisfies readonly PresetRoutePricingStatus[];
+const CONTENT_PRIORITIES = ["default", "history_first"] as const satisfies readonly PresetContentPriority[];
+
+const NonEmptyTrimmedStringArraySchema = z.array(z.string().trim().min(1)).min(1);
 
 const PresetRoutePricingSchema = z
   .object({
@@ -34,6 +38,9 @@ const PresetRoutePricingSchema = z
 const PresetStopSeedSchema = z.object({
   placeId: z.string().trim().min(1),
   title: z.string().trim().min(1).optional(),
+  narratorGuidance: z.string().trim().min(1).optional(),
+  mustMention: NonEmptyTrimmedStringArraySchema.optional(),
+  factBullets: NonEmptyTrimmedStringArraySchema.optional(),
 });
 
 const PresetRouteSeedSchema = z
@@ -45,6 +52,7 @@ const PresetRouteSeedSchema = z
     defaultPersona: z.enum(PERSONAS),
     storyBy: z.string().trim().min(1).optional(),
     narratorGuidance: z.string().trim().min(1).optional(),
+    contentPriority: z.enum(CONTENT_PRIORITIES).optional(),
     pricing: PresetRoutePricingSchema.optional(),
     stopPlaceIds: z.array(z.string().trim().min(1)).min(1).optional(),
     stops: z.array(PresetStopSeedSchema).min(1).optional(),

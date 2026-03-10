@@ -6,10 +6,14 @@ import {
   generateScriptWithOpenAI,
   getSwitchConfig,
   shouldRegenerateScript,
-  toNullableAudioUrl,
   toNullableTrimmed,
 } from "@/lib/mixGeneration";
 import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
+import {
+  getPresetRouteStopAsset,
+  mergePresetNarratorGuidance,
+  upsertPresetRouteStopAsset,
+} from "@/lib/presetRouteAssets";
 
 type Body = {
   routeId: string;
@@ -34,7 +38,7 @@ export async function POST(req: Request) {
     const route = getRouteById(body.routeId);
     if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
     const city = route.city ?? normalizePresetCity(body.city);
-    const stops = buildPresetStopsWithOverview(route.stops, city);
+    const stops = buildPresetStopsWithOverview(route.stops, city, route.contentPriority);
     const stopIndex = stops.findIndex((s) => s.id === body.stopId);
     if (stopIndex < 0) return NextResponse.json({ error: "Unknown stop for preset route" }, { status: 404 });
 
@@ -56,12 +60,7 @@ export async function POST(req: Request) {
     const switchConfig = await getSwitchConfig();
     const forceScript = shouldRegenerateScript(switchConfig.mode);
 
-    const { data: current } = await admin
-      .from("canonical_stop_assets")
-      .select("script,audio_url,status,error")
-      .eq("canonical_stop_id", canonical.id)
-      .eq("persona", body.persona)
-      .maybeSingle();
+    const current = await getPresetRouteStopAsset(admin, route.id, stop.id, body.persona);
 
     const existingScript = toNullableTrimmed(current?.script);
     if (existingScript && !forceScript) {
@@ -80,26 +79,27 @@ export async function POST(req: Request) {
         lat: stop.lat,
         lng: stop.lng,
         image: stop.image,
+        mustMention: stop.mustMention ?? null,
+        factBullets: stop.factBullets ?? null,
+        contentPriority: stop.contentPriority ?? route.contentPriority ?? null,
       },
       stopIndex,
       stops.length,
-      route.narratorGuidance
+      mergePresetNarratorGuidance(route.narratorGuidance, stop.narratorGuidance)
     );
 
     const script = toNullableTrimmed(generated);
     if (!script) return NextResponse.json({ error: "Generated script was empty" }, { status: 500 });
 
-    await admin.from("canonical_stop_assets").upsert(
-      {
-        canonical_stop_id: canonical.id,
-        persona: body.persona,
-        script,
-        audio_url: toNullableAudioUrl(current?.audio_url),
-        status: "ready",
-        error: null,
-      },
-      { onConflict: "canonical_stop_id,persona" }
-    );
+    await upsertPresetRouteStopAsset(admin, {
+      preset_route_id: route.id,
+      stop_id: stop.id,
+      persona: body.persona,
+      script,
+      audio_url: current?.audio_url ?? null,
+      status: "ready",
+      error: null,
+    });
 
     return NextResponse.json({ script, reused: false });
   } catch (e) {

@@ -244,6 +244,10 @@
   gap: 18px;
 }
 
+.landingFeaturedCardShell {
+  position: relative;
+}
+
 .landingFeaturedCard {
   position: relative;
   min-height: 258px;
@@ -302,7 +306,7 @@
   z-index: 2;
   display: inline-flex;
   align-items: center;
-  max-width: calc(100% - 32px); 
+  max-width: calc(100% - 164px); 
   border-radius: 999px; 
   background: var(--landing-price-pill-bg);
   color: var(--landing-price-pill-fg); 
@@ -366,6 +370,27 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 0.92;
+}
+
+.landingFeaturedCardTitleAnimals {
+  font-size: 34px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 0.96;
+}
+
+.landingFeaturedCardTitleSuperhero {
+  font-size: 38px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  line-height: 0.9;
+}
+
+.landingFeaturedCardTitleWeirdHistory {
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 1.02;
 }
 
 .landingFeaturedCardMeta {
@@ -892,6 +917,26 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+.pickRoutePrimaryButton {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pickRoutePrimaryButton:disabled {
+  cursor: progress;
 }
 
 .buildMixTitleRow {
@@ -1522,8 +1567,14 @@
 
 .walkNarratorAvatarWrap {
   position: relative;
-  
-  border-radius: 0px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 999px;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -1541,8 +1592,12 @@
 }
 
 .walkNarrator {
-  font-size: 20px;
+  font-size: 16px;
   opacity: 0.86;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .walkNarratorButton {
@@ -1559,6 +1614,23 @@
 .walkNarratorActiveName {
   color: #ff5f92;
   font-weight: bold;
+  text-decoration: none;
+}
+
+.walkNarratorRemixPill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #333;
+  color: var(--landing-price-pill-fg);
+  backdrop-filter: blur(10px);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  padding: 6px 10px;
+  opacity: 1;
 }
 
 .walkHeadline {

@@ -4,6 +4,7 @@ import { personaCatalog } from "@/lib/personas/catalog";
 export type FixedPersona = "adult" | "preteen" | "ghost";
 export type Persona = FixedPersona | "custom";
 export type PresetCity = "salem" | "boston" | "concord" | "nyc";
+export type PresetContentPriority = "default" | "history_first";
 export type RoutePricing = {
   status: "free" | "paid" | "tbd";
   displayLabel?: string;
@@ -16,6 +17,10 @@ export type Stop = {
   lat: number;
   lng: number;
   googlePlaceId?: string;
+  narratorGuidance?: string | null;
+  mustMention?: string[] | null;
+  factBullets?: string[] | null;
+  contentPriority?: PresetContentPriority | null;
   isOverview?: boolean;
   stopKind?: "story" | "arrival";
   distanceAlongRouteMeters?: number | null;
@@ -33,7 +38,11 @@ export type RouteDef = {
   description: string;
   defaultPersona: Persona;
   storyBy?: string;
+  storyByUrl?: string | null;
+  storyByAvatarUrl?: string | null;
+  storyBySource?: "instagram" | null;
   narratorGuidance?: string | null;
+  contentPriority?: PresetContentPriority | null;
   pricing?: RoutePricing;
   city?: PresetCity;
   transportMode?: "walk" | "drive";
@@ -48,7 +57,13 @@ export type RouteDef = {
 
 const DEFAULT_PLACEHOLDER = "/images/salem/placeholder.png";
 
+function toPresetContentPriority(value: unknown): PresetContentPriority | null {
+  return value === "default" || value === "history_first" ? value : null;
+}
+
 function mapRoute(route: (typeof presetRouteData.routes)[number]): RouteDef {
+  const routeContentPriority = "contentPriority" in route ? toPresetContentPriority(route.contentPriority) : null;
+
   return {
     id: route.id,
     title: route.title,
@@ -57,7 +72,11 @@ function mapRoute(route: (typeof presetRouteData.routes)[number]): RouteDef {
     description: route.description,
     defaultPersona: route.defaultPersona,
     storyBy: "storyBy" in route ? route.storyBy : undefined,
+    storyByUrl: null,
+    storyByAvatarUrl: null,
+    storyBySource: null,
     narratorGuidance: "narratorGuidance" in route ? route.narratorGuidance ?? null : null,
+    contentPriority: routeContentPriority,
     pricing: route.pricing,
     city: route.city,
     transportMode: "walk",
@@ -73,6 +92,17 @@ function mapRoute(route: (typeof presetRouteData.routes)[number]): RouteDef {
       lat: stop.lat,
       lng: stop.lng,
       googlePlaceId: stop.googlePlaceId,
+      narratorGuidance:
+        "narratorGuidance" in stop && typeof stop.narratorGuidance === "string" ? stop.narratorGuidance : null,
+      mustMention:
+        "mustMention" in stop && Array.isArray(stop.mustMention)
+          ? stop.mustMention.filter((value): value is string => typeof value === "string")
+          : null,
+      factBullets:
+        "factBullets" in stop && Array.isArray(stop.factBullets)
+          ? stop.factBullets.filter((value): value is string => typeof value === "string")
+          : null,
+      contentPriority: "contentPriority" in stop ? toPresetContentPriority(stop.contentPriority) : routeContentPriority,
       audio: { adult: "", preteen: "", ghost: "", custom: "" },
       images: [DEFAULT_PLACEHOLDER],
       stopKind: "story",

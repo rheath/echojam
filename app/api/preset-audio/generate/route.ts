@@ -7,10 +7,10 @@ import {
   shouldRegenerateAudio,
   synthesizeSpeechWithOpenAI,
   toNullableAudioUrl,
-  toNullableTrimmed,
   uploadNarrationAudio,
 } from "@/lib/mixGeneration";
 import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
+import { getPresetRouteStopAsset, upsertPresetRouteStopAsset } from "@/lib/presetRouteAssets";
 
 type Body = {
   routeId: string;
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     const route = getRouteById(body.routeId);
     if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
     const city = route.city ?? normalizePresetCity(body.city);
-    const stops = buildPresetStopsWithOverview(route.stops, city);
+    const stops = buildPresetStopsWithOverview(route.stops, city, route.contentPriority);
     const stopIndex = stops.findIndex((s) => s.id === body.stopId);
     if (stopIndex < 0) return NextResponse.json({ error: "Unknown stop for preset route" }, { status: 404 });
 
@@ -57,14 +57,9 @@ export async function POST(req: Request) {
     const forceAudio = shouldRegenerateAudio(switchConfig.mode);
     const replayUrl = toNullableAudioUrl(switchConfig.replay_audio[stop.id]?.[body.persona]);
 
-    const { data: current } = await admin
-      .from("canonical_stop_assets")
-      .select("script,audio_url,status,error")
-      .eq("canonical_stop_id", canonical.id)
-      .eq("persona", body.persona)
-      .maybeSingle();
+    const current = await getPresetRouteStopAsset(admin, route.id, stop.id, body.persona);
 
-    const script = toNullableTrimmed(current?.script);
+    const script = current?.script?.trim() || null;
     if (!script) {
       return NextResponse.json({ error: "Script not generated yet for this stop/persona." }, { status: 400 });
     }
@@ -81,17 +76,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Generated audio URL was empty" }, { status: 500 });
     }
 
-    await admin.from("canonical_stop_assets").upsert(
-      {
-        canonical_stop_id: canonical.id,
-        persona: body.persona,
-        script,
-        audio_url: audioUrl,
-        status: "ready",
-        error: null,
-      },
-      { onConflict: "canonical_stop_id,persona" }
-    );
+    await upsertPresetRouteStopAsset(admin, {
+      preset_route_id: route.id,
+      stop_id: stop.id,
+      persona: body.persona,
+      script,
+      audio_url: audioUrl,
+      status: "ready",
+      error: null,
+    });
 
     return NextResponse.json({ audioUrl, reused: false });
   } catch (e) {

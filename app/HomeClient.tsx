@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
-import { Bree_Serif, Cinzel, Forum, Grenze } from "next/font/google";
+import { Bangers, Bree_Serif, Cinzel, Forum, Grenze, Schoolbell, Special_Elite } from "next/font/google";
 import { supabase } from "@/lib/supabaseClient";
 import {
   getPresetRoutesByCity,
@@ -47,6 +47,21 @@ const landingArchitectureFont = Forum({
 const landingSalemFont = Grenze({
   subsets: ["latin"],
   weight: ["500", "600"],
+});
+
+const landingAnimalsFont = Schoolbell({
+  subsets: ["latin"],
+  weight: "400",
+});
+
+const landingSuperheroFont = Bangers({
+  subsets: ["latin"],
+  weight: "400",
+});
+
+const landingWeirdHistoryFont = Special_Elite({
+  subsets: ["latin"],
+  weight: "400",
 });
 
 
@@ -111,6 +126,10 @@ type CustomRouteResponse = {
     route_distance_meters?: number | null;
     route_duration_seconds?: number | null;
     route_polyline?: [number, number][] | null;
+    story_by?: string | null;
+    story_by_url?: string | null;
+    story_by_avatar_url?: string | null;
+    story_by_source?: "instagram" | null;
   };
   stops: Array<{
     stop_id: string;
@@ -188,6 +207,10 @@ type StartCustomMixOptions = {
   errorStep?: FlowStep;
   cityOverride?: string;
   narratorGuidance?: string | null;
+};
+
+type StartPresetTourOptions = {
+  forceRegenerateAll?: boolean;
 };
 
 const GENERATION_STATUS_LABELS: Record<MixJobResponse["status"], string> = {
@@ -346,6 +369,9 @@ function getLandingTitleFontClass(routeId: string) {
   if (routeId === "boston-old-taverns") return landingTavernsFont.className;
   if (routeId === "nyc-architecture-walk") return landingArchitectureFont.className;
   if (routeId === "salem-after-dark") return landingSalemFont.className;
+  if (routeId === "nyc-city-animals-adventure") return landingAnimalsFont.className;
+  if (routeId === "nyc-superhero-city") return landingSuperheroFont.className;
+  if (routeId === "nyc-weird-wacky-history") return landingWeirdHistoryFont.className;
   return "";
 }
 
@@ -354,6 +380,9 @@ function getLandingTitleStyleClass(routeId: string) {
   if (routeId === "boston-old-taverns") return styles.landingFeaturedCardTitleTaverns;
   if (routeId === "nyc-architecture-walk") return styles.landingFeaturedCardTitleArchitecture;
   if (routeId === "salem-after-dark") return styles.landingFeaturedCardTitleSalem;
+  if (routeId === "nyc-city-animals-adventure") return styles.landingFeaturedCardTitleAnimals;
+  if (routeId === "nyc-superhero-city") return styles.landingFeaturedCardTitleSuperhero;
+  if (routeId === "nyc-weird-wacky-history") return styles.landingFeaturedCardTitleWeirdHistory;
   return "";
 }
 
@@ -536,7 +565,11 @@ const [searchInput, setSearchInput] = useState("");
 const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
 const [searchCandidates, setSearchCandidates] = useState<CustomMixStop[]>([]);
 const [searchError, setSearchError] = useState<string | null>(null);
-const [isGeneratingMix, setIsGeneratingMix] = useState(false);
+  const [isGeneratingMix, setIsGeneratingMix] = useState(false);
+  const [pendingPresetRouteAction, setPendingPresetRouteAction] = useState<{
+    routeId: string;
+    mode: "start" | "regenerate";
+  } | null>(null);
 const [generationJobId, setGenerationJobId] = useState<string | null>(null);
 const [generationJobKind, setGenerationJobKind] = useState<GenerationJobKind | null>(null);
 const [generationProgress, setGenerationProgress] = useState(0);
@@ -686,6 +719,17 @@ const followAlongLastPositionRef = useRef<{
     return [...orderedSelected, ...missingSelected];
   }, [buildMixOrderedStops, builderSelectedStops]);
   const activePersonaDisplayName = getRouteNarratorLabel(route, persona);
+  const isInstagramAttributedCustomRoute =
+    !isPresetWalkRoute && route?.storyBySource === "instagram" && Boolean(route?.storyBy?.trim());
+  const instagramStoryByLabel = isInstagramAttributedCustomRoute ? route?.storyBy?.trim() || null : null;
+  const instagramStoryByUrl = isInstagramAttributedCustomRoute ? route?.storyByUrl?.trim() || null : null;
+  const instagramStoryByAvatarUrl = isInstagramAttributedCustomRoute ? route?.storyByAvatarUrl?.trim() || null : null;
+  const activePresetWalkRouteId =
+    step === "walk" && isPresetWalkRoute && jam?.route_id ? (jam.route_id as RouteDef["id"]) : null;
+  const isActivePresetWalkRegenerating =
+    activePresetWalkRouteId !== null &&
+    pendingPresetRouteAction?.routeId === activePresetWalkRouteId &&
+    pendingPresetRouteAction.mode === "regenerate";
   const isAiPersona = (personaKey: Persona) => personaCatalog[personaKey].displayName.startsWith("AI");
   const usesNarratorIcon = (personaKey: Persona) => personaKey === "custom" || isAiPersona(personaKey);
   const customNarratorEnabled =
@@ -1374,7 +1418,12 @@ const followAlongLastPositionRef = useRef<{
       durationMinutes: payload.route.length_minutes,
       description: `${payload.route.transport_mode === "drive" ? "Drive" : "Walk"} • ${formatStopCount(mappedStops.length)}`,
       defaultPersona: isCustom ? ((payload.route.narrator_default ?? jam?.persona ?? "adult") as RouteDef["defaultPersona"]) : (presetRoute?.defaultPersona ?? "adult"),
-      storyBy: isCustom ? undefined : presetRoute?.storyBy,
+      storyBy: isCustom ? (payload.route.story_by || undefined) : presetRoute?.storyBy,
+      storyByUrl: isCustom ? (payload.route.story_by_url ?? null) : (presetRoute?.storyByUrl ?? null),
+      storyByAvatarUrl: isCustom
+        ? (payload.route.story_by_avatar_url ?? null)
+        : (presetRoute?.storyByAvatarUrl ?? null),
+      storyBySource: isCustom ? (payload.route.story_by_source ?? null) : (presetRoute?.storyBySource ?? null),
       narratorGuidance: isCustom ? (payload.route.narrator_guidance || "").trim() || null : (presetRoute?.narratorGuidance ?? null),
       pricing: isCustom ? undefined : presetRoute?.pricing,
       city: isCustom ? toKnownCityOption(resolvedCity) : presetRoute?.city,
@@ -1699,9 +1748,15 @@ async function startStopNarration() {
 
   // ---------- Step transitions ----------
 
-  async function startPresetTour(routeId: RouteDef["id"], personaSelection: Persona) {
+  async function startPresetTour(
+    routeId: RouteDef["id"],
+    personaSelection: Persona,
+    options?: StartPresetTourOptions
+  ) {
     const routeCity = (getRouteById(routeId)?.city ?? selectedCity) as CityOption;
+    const isForceRegenerate = Boolean(options?.forceRegenerateAll);
     if (
+      !isForceRegenerate &&
       returnToWalkOnClose &&
       jam?.id &&
       jam.route_id === routeId &&
@@ -1713,28 +1768,32 @@ async function startStopNarration() {
     }
     setReturnToWalkOnClose(false);
     setErr(null);
+    setPendingPresetRouteAction({
+      routeId,
+      mode: isForceRegenerate ? "regenerate" : "start",
+    });
     setStep("generating");
     setGenerationProgress(0);
     setGenerationStatusLabel(GENERATION_STATUS_LABELS.queued);
-    setGenerationMessage("Queued");
-
-    let jamId = jam?.id ?? null;
-    if (!jamId) {
-      jamId = await createJam(routeId, personaSelection, { skipStep: true });
-      if (!jamId) {
-        setStep("landing");
-        return;
-      }
-    } else {
-      await updateJam({
-        route_id: routeId,
-        persona: personaSelection,
-        current_stop: 0,
-        completed_at: null,
-      });
-    }
-
+    setGenerationMessage(isForceRegenerate ? "Regenerating with latest guidance..." : "Queued");
     try {
+      let jamId = jam?.id ?? null;
+      if (!jamId) {
+        jamId = await createJam(routeId, personaSelection, { skipStep: true });
+        if (!jamId) {
+          setPendingPresetRouteAction(null);
+          setStep("landing");
+          return;
+        }
+      } else {
+        await updateJam({
+          route_id: routeId,
+          persona: personaSelection,
+          current_stop: 0,
+          completed_at: null,
+        });
+      }
+
       const controller = new AbortController();
       const timeoutId = window.setTimeout(() => controller.abort(), START_JOB_TIMEOUT_MS);
       const res = await fetch("/api/preset-jobs/create", {
@@ -1745,6 +1804,7 @@ async function startStopNarration() {
           routeId,
           persona: personaSelection,
           city: routeCity,
+          forceRegenerateAll: isForceRegenerate,
         }),
         signal: controller.signal,
       });
@@ -1754,12 +1814,14 @@ async function startStopNarration() {
         setGenerationJobId(body.jobId);
         setGenerationJobKind("preset");
         router.replace(`/?jam=${jamId}`);
+        setPendingPresetRouteAction(null);
         return;
       }
       if (!res.ok || !body.jobId) throw new Error(body.error || "Failed to create preset generation job");
       setGenerationJobId(body.jobId);
       setGenerationJobKind("preset");
       router.replace(`/?jam=${jamId}`);
+      setPendingPresetRouteAction(null);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         setErr("Timed out while starting generation. Please try again.");
@@ -1767,6 +1829,7 @@ async function startStopNarration() {
         setErr(e instanceof Error ? e.message : "Failed to generate preset tour");
       }
       setGenerationJobKind(null);
+      setPendingPresetRouteAction(null);
       setStep("landing");
     }
   }
@@ -1820,6 +1883,12 @@ async function startStopNarration() {
     const selectedRoute = selectPresetRoute(routeId);
     if (!selectedRoute) return;
     await startPresetTour(routeId, selectedRoute.defaultPersona);
+  }
+
+  async function regeneratePresetRoute(routeId: RouteDef["id"]) {
+    const selectedRoute = selectPresetRoute(routeId);
+    if (!selectedRoute) return;
+    await startPresetTour(routeId, selectedRoute.defaultPersona, { forceRegenerateAll: true });
   }
 
   function toggleBuilderStop(stop: CustomMixStop) {
@@ -2781,50 +2850,53 @@ async function startStopNarration() {
                     const pricingLabel = getRoutePricingLabel(r.pricing);
                     const stopCountLabel = formatStopCount(getPresetRouteStopCount(r));
                     const narratorLabel = getPresetRouteNarratorLabel(r);
+                    const isRoutePending = pendingPresetRouteAction?.routeId === r.id;
 
                     return (
-                      <button
-                        key={r.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedCity(r.city ?? "salem");
-                          void startPresetTourFromRoute(r.id);
-                        }}
-                        aria-label={`${r.title}, ${pricingLabel}, ${stopCountLabel}, story by ${narratorLabel}`}
-                        className={`${styles.landingFeaturedCard} ${selectedRouteId === r.id ? styles.landingFeaturedCardSelected : ""}`}
-                        style={{ backgroundImage: `url("${getLandingRouteImage(r)}")` }}
-                      >
-                        <div className={styles.landingFeaturedCardOverlay} aria-hidden="true" />
-                        <div className={styles.landingFeaturedCardPricePill} aria-hidden="true">
-                          {pricingLabel}
-                        </div>
-                        <div className={styles.landingFeaturedCardContent}>
-                          <div className={styles.landingFeaturedCardSpacer} aria-hidden="true" />
-                          <div className={styles.landingFeaturedCardTitleWrap}>
-                            <div className={`${styles.landingFeaturedCardTitle} ${getLandingTitleStyleClass(r.id)} ${getLandingTitleFontClass(r.id)}`}>
-                              {r.title}
-                            </div>
+                      <div key={r.id} className={styles.landingFeaturedCardShell}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedCity(r.city ?? "salem");
+                            void startPresetTourFromRoute(r.id);
+                          }}
+                          disabled={isRoutePending}
+                          aria-label={`${r.title}, ${pricingLabel}, ${stopCountLabel}, story by ${narratorLabel}`}
+                          className={`${styles.landingFeaturedCard} ${selectedRouteId === r.id ? styles.landingFeaturedCardSelected : ""}`}
+                          style={{ backgroundImage: `url("${getLandingRouteImage(r)}")` }}
+                        >
+                          <div className={styles.landingFeaturedCardOverlay} aria-hidden="true" />
+                          <div className={styles.landingFeaturedCardPricePill} aria-hidden="true">
+                            {pricingLabel}
                           </div>
-                          <div className={styles.landingFeaturedCardMeta}>
-                            <div className={styles.landingFeaturedCardBadge} aria-hidden="true">
-                              <Image
-                                src={getPresetRouteIcon()}
-                                alt=""
-                                width={20}
-                                height={20}
-                                className={styles.landingFeaturedCardBadgeIcon}
-                                aria-hidden="true"
-                              />
+                          <div className={styles.landingFeaturedCardContent}>
+                            <div className={styles.landingFeaturedCardSpacer} aria-hidden="true" />
+                            <div className={styles.landingFeaturedCardTitleWrap}>
+                              <div className={`${styles.landingFeaturedCardTitle} ${getLandingTitleStyleClass(r.id)} ${getLandingTitleFontClass(r.id)}`}>
+                                {r.title}
+                              </div>
                             </div>
-                            <div className={styles.landingFeaturedCardMetaText}>
-                              <div className={styles.landingFeaturedCardMetaPrimary}>{stopCountLabel}</div>
-                              <div className={styles.landingFeaturedCardMetaSecondary}>
-                                Story by {narratorLabel}
+                            <div className={styles.landingFeaturedCardMeta}>
+                              <div className={styles.landingFeaturedCardBadge} aria-hidden="true">
+                                <Image
+                                  src={getPresetRouteIcon()}
+                                  alt=""
+                                  width={20}
+                                  height={20}
+                                  className={styles.landingFeaturedCardBadgeIcon}
+                                  aria-hidden="true"
+                                />
+                              </div>
+                              <div className={styles.landingFeaturedCardMetaText}>
+                                <div className={styles.landingFeaturedCardMetaPrimary}>{stopCountLabel}</div>
+                                <div className={styles.landingFeaturedCardMetaSecondary}>
+                                  Story by {narratorLabel}
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      </button>
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -3238,47 +3310,57 @@ async function startStopNarration() {
                 </div>
 
                 <div className={styles.pickRouteList}>
-                  {routesForSelectedCity.map((r) => (
-                    <button
+                  {routesForSelectedCity.map((r) => {
+                    const isRoutePending = pendingPresetRouteAction?.routeId === r.id;
+
+                    return (
+                    <div
                       key={r.id}
-                      onClick={() => {
-                        startTourFromRoute(r.id);
-                      }}
                       className={`${styles.pickRouteRow} ${selectedRouteId === r.id ? styles.pickRouteRowSelected : ""}`}
                     >
-                      <div className={styles.pickRouteMainWithIcon}>
-                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          startTourFromRoute(r.id);
+                        }}
+                        disabled={isRoutePending}
+                        className={styles.pickRoutePrimaryButton}
+                      >
+                        <div className={styles.pickRouteMainWithIcon}>
+                          <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                            <Image
+                              src={getPresetRouteIcon()}
+                              alt=""
+                              width={24}
+                              height={24}
+                              className={styles.pickRouteWalkIcon}
+                              aria-hidden="true"
+                            />
+                          </div>
+                          <div className={styles.pickRouteMain}>
+                            <div className={styles.pickRouteTitle}>{r.title}</div>
+                            <div className={styles.pickRouteMeta}>
+                              Story by {getPresetRouteNarratorLabel(r)}
+                            </div>
+                            <div className={`${styles.pickRouteMeta} ${styles.pickRouteMetaSecondary}`}>
+                              {r.durationLabel} • {formatStopCount(getPresetRouteStopCount(r))}
+                            </div>
+                          </div>
+                        </div>
+                        <div className={styles.pickRowArrow} aria-hidden="true">
                           <Image
-                            src={getPresetRouteIcon()}
+                            src="/icons/chevron-right.svg"
                             alt=""
-                            width={24}
-                            height={24}
-                            className={styles.pickRouteWalkIcon}
+                            width={28}
+                            height={28}
+                            className={styles.landingArrowIcon}
                             aria-hidden="true"
                           />
                         </div>
-                        <div className={styles.pickRouteMain}>
-                          <div className={styles.pickRouteTitle}>{r.title}</div>
-                          <div className={styles.pickRouteMeta}>
-                            Story by {getPresetRouteNarratorLabel(r)}
-                          </div>
-                          <div className={`${styles.pickRouteMeta} ${styles.pickRouteMetaSecondary}`}>
-                            {r.durationLabel} • {formatStopCount(getPresetRouteStopCount(r))}
-                          </div>
-                        </div>
-                      </div>
-                      <div className={styles.pickRowArrow} aria-hidden="true">
-                        <Image
-                          src="/icons/chevron-right.svg"
-                          alt=""
-                          width={28}
-                          height={28}
-                          className={styles.landingArrowIcon}
-                          aria-hidden="true"
-                        />
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    </div>
+                    );
+                  })}
                   <button
                     type="button"
                     onClick={() => {
@@ -4180,47 +4262,117 @@ async function startStopNarration() {
                   </>
                 ) : (
                   <>
-                    <button
-                      type="button"
-                      className={`${styles.walkNarratorAvatarWrap} ${styles.walkNarratorAvatarButton}`}
-                      onClick={() => {
-                        setReturnToWalkOnClose(true);
-                        setNarratorFlowSource("walkEdit");
-                        setPickDurationPage("narrator");
-                        setStep("pickDuration");
-                      }}
-                      aria-label="Edit narrator"
-                    >
-                      {usesNarratorIcon(persona) ? (
-                        <Image
-                          src="/icons/stars.svg"
-                          alt=""
-                          width={22}
-                          height={22}
-                          className={styles.walkNarratorIcon}
-                          aria-hidden="true"
-                        />
-                      ) : (
-                        <Image
-                          src={personaCatalog[persona].avatarSrc}
-                          alt={personaCatalog[persona].avatarAlt}
-                          fill
-                          className={styles.walkNarratorAvatar}
-                        />
-                      )}
-                    </button>
-                    <button
-                      className={`${styles.walkNarrator} ${styles.walkNarratorButton}`}
-                      type="button"
-                      onClick={() => {
-                        setReturnToWalkOnClose(true);
-                        setNarratorFlowSource("walkEdit");
-                        setPickDurationPage("narrator");
-                        setStep("pickDuration");
-                      }}
-                    >
-                      Narrated by <span className={styles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
-                    </button>
+                    {isInstagramAttributedCustomRoute ? (
+                      <>
+                        {instagramStoryByUrl ? (
+                          <a
+                            href={instagramStoryByUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={styles.walkNarratorAvatarWrap}
+                            aria-label={`Open ${instagramStoryByLabel} on Instagram`}
+                          >
+                            {instagramStoryByAvatarUrl ? (
+                              <Image
+                                src={instagramStoryByAvatarUrl}
+                                alt={`${instagramStoryByLabel} avatar`}
+                                fill
+                                className={styles.walkNarratorAvatar}
+                              />
+                            ) : (
+                              <Image
+                                src="/icons/stars.svg"
+                                alt=""
+                                width={22}
+                                height={22}
+                                className={styles.walkNarratorIcon}
+                                aria-hidden="true"
+                              />
+                            )}
+                          </a>
+                        ) : (
+                          <div className={styles.walkNarratorAvatarWrap}>
+                            {instagramStoryByAvatarUrl ? (
+                              <Image
+                                src={instagramStoryByAvatarUrl}
+                                alt={`${instagramStoryByLabel} avatar`}
+                                fill
+                                className={styles.walkNarratorAvatar}
+                              />
+                            ) : (
+                              <Image
+                                src="/icons/stars.svg"
+                                alt=""
+                                width={22}
+                                height={22}
+                                className={styles.walkNarratorIcon}
+                                aria-hidden="true"
+                              />
+                            )}
+                          </div>
+                        )}
+                        <div className={styles.walkNarrator}>
+                          Story by{" "}
+                          {instagramStoryByUrl ? (
+                            <a
+                              href={instagramStoryByUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className={styles.walkNarratorActiveName}
+                            >
+                              {instagramStoryByLabel}
+                            </a>
+                          ) : (
+                            <span className={styles.walkNarratorActiveName}>{instagramStoryByLabel}</span>
+                          )}
+                          <span className={styles.walkNarratorRemixPill}>AI Remix</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className={`${styles.walkNarratorAvatarWrap} ${styles.walkNarratorAvatarButton}`}
+                          onClick={() => {
+                            setReturnToWalkOnClose(true);
+                            setNarratorFlowSource("walkEdit");
+                            setPickDurationPage("narrator");
+                            setStep("pickDuration");
+                          }}
+                          aria-label="Edit narrator"
+                        >
+                          {usesNarratorIcon(persona) ? (
+                            <Image
+                              src="/icons/stars.svg"
+                              alt=""
+                              width={22}
+                              height={22}
+                              className={styles.walkNarratorIcon}
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <Image
+                              src={personaCatalog[persona].avatarSrc}
+                              alt={personaCatalog[persona].avatarAlt}
+                              fill
+                              className={styles.walkNarratorAvatar}
+                            />
+                          )}
+                        </button>
+                        <button
+                          className={`${styles.walkNarrator} ${styles.walkNarratorButton}`}
+                          type="button"
+                          onClick={() => {
+                            setReturnToWalkOnClose(true);
+                            setNarratorFlowSource("walkEdit");
+                            setPickDurationPage("narrator");
+                            setStep("pickDuration");
+                          }}
+                        >
+                          Narrated by <span className={styles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
+                        </button>
+                      </>
+                    )}
                   </>
                 )}
               </div>
@@ -4231,14 +4383,28 @@ async function startStopNarration() {
 
               <div className={styles.walkActionRow}>
                 <button className={styles.pillButton} type="button" onClick={copyShareLink}>Share</button>
-                 
+
+                {activePresetWalkRouteId && (
+                  <button
+                    className={styles.pillButton}
+                    type="button"
+                    onClick={() => {
+                      void regeneratePresetRoute(activePresetWalkRouteId);
+                    }}
+                    disabled={isActivePresetWalkRegenerating}
+                    aria-label={`Regenerate ${route.title} with latest guidance`}
+                  >
+                    {isActivePresetWalkRegenerating ? "Regenerating..." : "Regenerate"}
+                  </button>
+                )}
+
                 <button
-                className={styles.pillButton}
-                type="button"
-                onClick={openEditStopsFromWalk} 
-              >
-                Edit
-              </button>
+                  className={styles.pillButton}
+                  type="button"
+                  onClick={openEditStopsFromWalk}
+                >
+                  Edit
+                </button>
                 <button
                   className={styles.nowPlayingButton}
                   type="button"

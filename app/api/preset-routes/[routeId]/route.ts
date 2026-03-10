@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getRouteById } from "@/app/content/salemRoutes";
 import { toNullableAudioUrl, toNullableTrimmed } from "@/lib/mixGeneration";
 import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
+import { listPresetRouteStopAssets, mapPresetAssetsByStop } from "@/lib/presetRouteAssets";
 import { buildGooglePlaceIdPhotoUrl, isValidGooglePlaceId, proxyGoogleImageUrl } from "@/lib/placesImages";
 
 function getAdmin() {
@@ -21,13 +22,6 @@ type MappingRow = {
 type CanonicalImageRow = {
   id: string;
   image_url: string | null;
-};
-
-type AssetRow = {
-  canonical_stop_id: string;
-  persona: "adult" | "preteen" | "ghost";
-  script: string | null;
-  audio_url: string | null;
 };
 
 function isNonPlaceholderImage(value: string | null | undefined) {
@@ -56,7 +50,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
     const route = getRouteById(routeId);
     if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
     const city = route.city ?? normalizePresetCity(new URL(req.url).searchParams.get("city"));
-    const presetStops = buildPresetStopsWithOverview(route.stops, city);
+    const presetStops = buildPresetStopsWithOverview(route.stops, city, route.contentPriority);
 
     let admin: ReturnType<typeof getAdmin> | null = null;
     try {
@@ -110,19 +104,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
       canonicalIds.add(row.canonical_stop_id);
     }
 
-    let assets: AssetRow[] = [];
     let canonicalImages: CanonicalImageRow[] = [];
     if (canonicalIds.size > 0) {
-      const { data: assetRows, error: assetsErr } = await admin
-        .from("canonical_stop_assets")
-        .select("canonical_stop_id,persona,script,audio_url")
-        .in("canonical_stop_id", Array.from(canonicalIds));
-      if (assetsErr) {
-        console.error("preset-routes: assets query failed", assetsErr);
-      } else {
-        assets = (assetRows ?? []) as AssetRow[];
-      }
-
       const { data: imageRows, error: imagesErr } = await admin
         .from("canonical_stops")
         .select("id,image_url")
@@ -133,8 +116,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
         canonicalImages = (imageRows ?? []) as CanonicalImageRow[];
       }
     }
-
-    const assetsByCanonical = new Map<
+    let assetsByStop = new Map<
       string,
       {
         script_adult: string | null;
@@ -145,30 +127,15 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
         audio_url_ghost: string | null;
       }
     >();
-
-    for (const row of assets) {
-      const entry = assetsByCanonical.get(row.canonical_stop_id) ?? {
-        script_adult: null,
-        script_preteen: null,
-        script_ghost: null,
-        audio_url_adult: null,
-        audio_url_preteen: null,
-        audio_url_ghost: null,
-      };
-
-      const script = toNullableTrimmed(row.script);
-      const audioUrl = toNullableAudioUrl(row.audio_url);
-      if (row.persona === "adult") {
-        entry.script_adult = script;
-        entry.audio_url_adult = audioUrl;
-      } else if (row.persona === "preteen") {
-        entry.script_preteen = script;
-        entry.audio_url_preteen = audioUrl;
-      } else {
-        entry.script_ghost = script;
-        entry.audio_url_ghost = audioUrl;
-      }
-      assetsByCanonical.set(row.canonical_stop_id, entry);
+    try {
+      const assetRows = await listPresetRouteStopAssets(
+        admin,
+        routeId,
+        presetStops.map((stop) => stop.id)
+      );
+      assetsByStop = mapPresetAssetsByStop(assetRows);
+    } catch (assetsErr) {
+      console.error("preset-routes: assets query failed", assetsErr);
     }
 
     const imageByCanonical = new Map<string, CanonicalImageRow>();
@@ -185,7 +152,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
 
     const stops = presetStops.map((stop, index) => {
       const mapping = mappingByStop.get(stop.id);
-      const assetsForStop = mapping ? assetsByCanonical.get(mapping.canonical_stop_id) : null;
+      const assetsForStop = assetsByStop.get(stop.id) ?? null;
       const imageForStop = mapping ? imageByCanonical.get(mapping.canonical_stop_id) : null;
       const canonicalImage = toNullableTrimmed(imageForStop?.image_url);
       const placeIdPhoto = isValidGooglePlaceId(stop.googlePlaceId)

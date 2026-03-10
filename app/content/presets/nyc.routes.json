@@ -25,11 +25,11 @@
     },
     {
       "id": "nyc-city-animals-adventure",
-      "title": "City Animals Adventure",
+      "title": "NYC Animals Adventure",
       "durationMinutes": 35,
       "description": "A playful walk through the wild side of Central Park.",
       "defaultPersona": "preteen",
-      "storyBy": "Animal Explorer",
+      "storyBy": "AI Explorer",
       "narratorGuidance": "You are the Animal Explorer, a friendly guide for curious kids discovering the wildlife hidden inside big cities. Focus on birds, squirrels, ducks, turtles, and other animals living alongside people in parks, ponds, trees, and buildings. Keep the tone playful and observant, ask occasional questions, encourage listeners to imagine what animals are doing when humans are not around, and explain how nature survives in a busy city.",
       "pricing": {
         "status": "free",
@@ -64,12 +64,13 @@
     },
     {
       "id": "nyc-superhero-city",
-      "title": "Superhero City",
+      "title": "Superheroes of NYC",
       "durationMinutes": 35,
-      "description": "A comic-book walk through Midtown and out to the Brooklyn Bridge.",
+      "description": "A comic-book adventure through Midtown ending at the Brooklyn Bridge, where real New York history meets the world of superheroes.",
       "defaultPersona": "preteen",
-      "storyBy": "Superhero Guide",
-      "narratorGuidance": "You are the Superhero Guide, turning the city into a living comic book for kids. Treat buildings like secret headquarters, bridges like rescue scenes, and busy streets like places where heroes might swing or fly past. Invite the listener to imagine powers, villains, missions, and dramatic city action while grounding each stop in a real landmark with big-screen superhero energy.",
+      "storyBy": "AI Explorer",
+      "narratorGuidance": "You are the Superhero Guide for curious kids and preteens. Keep the delivery cinematic and exciting, but let real New York comic-book history lead each stop. When the route mentions creators like Stan Lee, Jack Kirby, Steve Ditko, or Bob Kane, treat those names as real people connected to the city's creative history rather than as background flavor.",
+      "contentPriority": "history_first",
       "pricing": {
         "status": "free",
         "displayLabel": "FREE"
@@ -77,37 +78,79 @@
       "stops": [
         {
           "placeId": "ChIJmQJIxlVYwokRLgeuocVOGVU",
-          "title": "Times Square"
+          "title": "Times Square",
+          "narratorGuidance": "Frame this as the public-facing spectacle of superhero New York, but keep the focus on why Midtown's energy became part of comic-book city language.",
+          "mustMention": ["Times Square", "Marvel", "DC", "Stan Lee", "Jack Kirby"],
+          "factBullets": [
+            "Times Square's giant signs, bright lights, and nonstop crowds made Midtown feel larger than life long before superhero movies used that energy on screen.",
+            "Marvel and DC stories often turn streets like this into public stages for battles, rescues, and dramatic entrances because real New York already feels theatrical.",
+            "Creators such as Stan Lee and Jack Kirby worked in a city whose spectacle made ordinary streets feel ready for extraordinary events."
+          ]
         },
         {
           "placeId": "ChIJZx8c96NZwokRJklw7SVhKt4",
-          "title": "Flatiron Building"
+          "title": "Flatiron Building",
+          "narratorGuidance": "Use the building's triangle shape as the visual bridge into comic-book city design, but make the real skyline influence the main point.",
+          "mustMention": ["Flatiron Building", "Batman", "Gotham", "Superman", "Metropolis", "Bob Kane"],
+          "factBullets": [
+            "The Flatiron Building's triangle shape made it one of New York's most distinctive early skyscrapers.",
+            "Dramatic skyline shapes like this helped artists imagine fictional comic-book city skylines such as Batman's Gotham and Superman's Metropolis.",
+            "Bob Kane drew on the mood of dark, dramatic New York architecture when shaping the atmosphere that readers associate with Gotham."
+          ]
         },
         {
           "placeId": "ChIJhRwB-yFawokRi0AhGH87UTc",
-          "title": "Grand Central Terminal"
+          "title": "Grand Central Terminal",
+          "narratorGuidance": "Keep the wonder of secret passageways, but center the real station infrastructure that made underground comic-book worlds believable.",
+          "mustMention": ["Grand Central Terminal", "Daredevil", "subway tunnels"],
+          "factBullets": [
+            "Grand Central Terminal includes tracks, tunnels, and hidden spaces that helped make the idea of a second city under New York feel believable.",
+            "Comic-book stories use real New York infrastructure like this to imagine secret bases, escape routes, and underground worlds beneath busy streets.",
+            "A place like Grand Central makes heroes such as Daredevil feel grounded in a city with real layers above and below the sidewalk."
+          ]
         },
         {
           "placeId": "ChIJeWPFRwJZwokRGD60OOo74RU",
-          "title": "Chrysler Building"
+          "title": "Chrysler Building",
+          "narratorGuidance": "Treat this as a real skyscraper that helped define the visual language of superhero Manhattan, not just a generic tower.",
+          "mustMention": ["Chrysler Building", "Art Deco", "Spider-Man", "Fantastic Four"],
+          "factBullets": [
+            "The Chrysler Building's Art Deco crown became one of the most recognizable shapes in the Manhattan skyline.",
+            "Art Deco skyscrapers helped define the vertical, gleaming New York that comic artists used for rooftop chases and high-altitude action.",
+            "When readers imagine heroes such as Spider-Man or the Fantastic Four above Manhattan, buildings like the Chrysler help sell that feeling of height and scale."
+          ]
         },
         {
           "placeId": "ChIJe7vKMf9YwokRIMYfDz7iF9o",
-          "title": "Midtown Skyline"
+          "title": "Midtown Skyline",
+          "narratorGuidance": "Use the skyline as the proof that Manhattan itself became part of superhero storytelling.",
+          "mustMention": ["Midtown Manhattan", "Spider-Man", "Avengers", "Stan Lee", "Steve Ditko"],
+          "factBullets": [
+            "Midtown Manhattan's stacked towers and narrow avenues created the vertical obstacle course that made Spider-Man feel inseparable from New York.",
+            "Stan Lee and Steve Ditko helped turn Manhattan itself into a superhero setting rather than a generic background city.",
+            "Teams like the Avengers feel natural in New York because the real skyline already suggests scale, danger, motion, and spectacle."
+          ]
         },
         {
           "placeId": "ChIJK3vOQyNawokRXEa9errdJiU",
-          "title": "Brooklyn Bridge"
+          "title": "Brooklyn Bridge",
+          "narratorGuidance": "End with a big finish, but ground it in why this real bridge became such a strong comic-book image.",
+          "mustMention": ["Brooklyn Bridge", "East River", "Spider-Man", "Superman"],
+          "factBullets": [
+            "The Brooklyn Bridge was already one of New York's great engineering symbols before superheroes existed.",
+            "Because it stretches high above the East River and connects boroughs, it became a perfect visual for comic-book rescue scenes, chases, and final battles.",
+            "A landmark like the Brooklyn Bridge turns real infrastructure into mythic scale, which is exactly what superhero storytelling loves."
+          ]
         }
       ]
     },
     {
       "id": "nyc-weird-wacky-history",
-      "title": "Weird & Wacky History",
+      "title": "Weird & Wacky NYC History",
       "durationMinutes": 35,
       "description": "Odd landmarks, secret corners, and the strangest stories in the city.",
       "defaultPersona": "preteen",
-      "storyBy": "Curious Explorer",
+      "storyBy": "AI Explorer",
       "narratorGuidance": "You are the Curious Explorer, obsessed with the strangest stories hidden in cities. Focus on funny accidents, unusual buildings, secret spaces, tiny details, and surprising moments from the past rather than formal history. Keep the tone playful, curious, and full of discovery so each stop feels like a hidden weird detail most people walk right past.",
       "pricing": {
         "status": "free",

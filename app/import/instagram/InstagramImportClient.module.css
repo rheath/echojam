@@ -61,6 +61,7 @@
   gap: 18px;
 }
 
+.collectionCard,
 .locationCard {
   grid-column: 1 / -1;
 }
@@ -112,6 +113,12 @@
 .captionBlock,
 .fieldLabel {
   margin-top: 16px;
+}
+
+.collectionJobCard,
+.collectionList,
+.collectionFooter {
+  margin-top: 18px;
 }
 
 .textInput,
@@ -255,6 +262,129 @@
   background: rgba(43, 120, 84, 0.1);
 }
 
+.collectionJobCard {
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(31, 23, 20, 0.05);
+}
+
+.collectionJobTitle {
+  margin: 0;
+  font-size: 20px;
+}
+
+.collectionList {
+  display: grid;
+  gap: 10px;
+}
+
+.collectionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(31, 23, 20, 0.05);
+  border: 1px solid transparent;
+}
+
+.collectionRowActive {
+  border-color: rgba(236, 101, 81, 0.4);
+  background: rgba(236, 101, 81, 0.08);
+}
+
+.collectionSelect {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+
+.collectionIndex {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(31, 23, 20, 0.08);
+  font-size: 14px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.collectionCopy {
+  min-width: 0;
+}
+
+.collectionTitle {
+  font-weight: 700;
+}
+
+.collectionMeta {
+  margin-top: 4px;
+  color: #715f56;
+  font-size: 14px;
+}
+
+.collectionActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.collectionStatus {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.statusimporting {
+  background: rgba(80, 112, 171, 0.12);
+  color: #34548c;
+}
+
+.statusready {
+  background: rgba(43, 120, 84, 0.12);
+  color: #1f6b48;
+}
+
+.statusneeds_location {
+  background: rgba(233, 181, 39, 0.18);
+  color: #876114;
+}
+
+.statuspublished {
+  background: rgba(99, 85, 202, 0.14);
+  color: #4d3fc2;
+}
+
+.statusfailed {
+  background: rgba(186, 54, 54, 0.12);
+  color: #8b2e2e;
+}
+
+.collectionFooter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+
 .placeList {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -301,12 +431,18 @@
   .formRow,
   .sectionHeader,
   .statusHeader,
-  .actionRow {
+  .actionRow,
+  .collectionFooter {
     display: grid;
   }
 
   .badge {
     justify-self: start;
+  }
+
+  .collectionRow,
+  .collectionActions {
+    display: grid;
   }
 
   .placeList {

@@ -16,12 +16,19 @@ import {
   type StopInput,
   uploadNarrationAudio,
 } from "@/lib/mixGeneration";
+import {
+  getPresetRouteStopAsset,
+  mergePresetNarratorGuidance,
+  type PresetAssetPersona,
+  upsertPresetRouteStopAsset,
+} from "@/lib/presetRouteAssets";
 
 type CreateBody = {
   jamId?: string | null;
   routeId: string;
   persona: Persona;
   city?: "salem" | "boston" | "concord" | "nyc";
+  forceRegenerateAll?: boolean;
 };
 
 const CREATE_JOB_REQUEST_TIMEOUT_MS = 12000;
@@ -38,17 +45,19 @@ async function runPresetGeneration(
   routeId: string,
   city: string,
   lengthMinutes: number,
-  persona: Persona,
+  persona: PresetAssetPersona,
   stops: StopInput[],
-  narratorGuidance?: string | null
+  narratorGuidance?: string | null,
+  forceRegenerateAll = false
 ) {
   const admin = getAdmin();
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is required.");
 
   const switchConfig = await getSwitchConfig();
-  const forceScript = shouldRegenerateScript(switchConfig.mode);
-  const forceAudio = shouldRegenerateAudio(switchConfig.mode);
+  const forceScript = forceRegenerateAll || shouldRegenerateScript(switchConfig.mode);
+  const forceAudio = forceRegenerateAll || shouldRegenerateAudio(switchConfig.mode);
+  const replayAudio = forceRegenerateAll ? {} : switchConfig.replay_audio;
 
   const totalUnits = Math.max(1, stops.length * 2);
   let doneUnits = 0;
@@ -73,7 +82,6 @@ async function runPresetGeneration(
 
   type RowState = {
     stop: StopInput;
-    canonicalStopId: string;
     script: string | null;
   };
   const states: RowState[] = [];
@@ -84,12 +92,7 @@ async function runPresetGeneration(
     const originalPosition = stopPositionById.get(stop.id) ?? 0;
     await upsertRouteStopMapping(admin, "preset", routeId, stop.id, canonical.id, originalPosition);
 
-    const { data: current } = await admin
-      .from("canonical_stop_assets")
-      .select("script,audio_url")
-      .eq("canonical_stop_id", canonical.id)
-      .eq("persona", persona)
-      .maybeSingle();
+    const current = await getPresetRouteStopAsset(admin, routeId, stop.id, persona);
 
     let script = !forceScript ? toNullableTrimmed(current?.script) : null;
     if (!script) {
@@ -104,7 +107,7 @@ async function runPresetGeneration(
             stop,
             originalPosition,
             stops.length,
-            narratorGuidance
+            mergePresetNarratorGuidance(narratorGuidance, stop.narratorGuidance)
           )
         );
       } catch (e) {
@@ -113,19 +116,17 @@ async function runPresetGeneration(
       }
     }
 
-    await admin.from("canonical_stop_assets").upsert(
-      {
-        canonical_stop_id: canonical.id,
-        persona,
-        script,
-        audio_url: toNullableAudioUrl(current?.audio_url),
-        status: script ? "ready" : "failed",
-        error: script ? null : lastWarning || "Script generation failed",
-      },
-      { onConflict: "canonical_stop_id,persona" }
-    );
+    await upsertPresetRouteStopAsset(admin, {
+      preset_route_id: routeId,
+      stop_id: stop.id,
+      persona,
+      script,
+      audio_url: toNullableAudioUrl(current?.audio_url),
+      status: script ? "ready" : "failed",
+      error: script ? null : lastWarning || "Script generation failed",
+    });
 
-    states.push({ stop, canonicalStopId: canonical.id, script });
+    states.push({ stop, script });
     doneUnits += 1;
     await updateProgress("generating_script", `Generating scripts (${doneUnits}/${totalUnits})`);
   }
@@ -133,14 +134,9 @@ async function runPresetGeneration(
   await updateProgress("generating_audio", "Generating audio (Overview first)");
   let overviewAudioReady = overviewStops.length === 0;
   for (const state of states) {
-    const replayUrl = toNullableAudioUrl(switchConfig.replay_audio[state.stop.id]?.[persona]);
+    const replayUrl = toNullableAudioUrl(replayAudio[state.stop.id]?.[persona]);
 
-    const { data: current } = await admin
-      .from("canonical_stop_assets")
-      .select("script,audio_url")
-      .eq("canonical_stop_id", state.canonicalStopId)
-      .eq("persona", persona)
-      .maybeSingle();
+    const current = await getPresetRouteStopAsset(admin, routeId, state.stop.id, persona);
 
     const currentScript = toNullableTrimmed(current?.script) || state.script;
     let audioUrl = !forceAudio ? toNullableAudioUrl(current?.audio_url) : null;
@@ -164,17 +160,15 @@ async function runPresetGeneration(
       overviewAudioReady = true;
     }
 
-    await admin.from("canonical_stop_assets").upsert(
-      {
-        canonical_stop_id: state.canonicalStopId,
-        persona,
-        script: currentScript,
-        audio_url: audioUrl,
-        status: audioUrl ? "ready" : "failed",
-        error: audioUrl ? null : lastWarning || "Audio generation failed",
-      },
-      { onConflict: "canonical_stop_id,persona" }
-    );
+    await upsertPresetRouteStopAsset(admin, {
+      preset_route_id: routeId,
+      stop_id: state.stop.id,
+      persona,
+      script: currentScript,
+      audio_url: audioUrl,
+      status: audioUrl ? "ready" : "failed",
+      error: audioUrl ? null : lastWarning || "Audio generation failed",
+    });
 
     doneUnits += 1;
     await updateProgress("generating_audio", `Generating audio (${doneUnits}/${totalUnits})`);
@@ -219,12 +213,13 @@ export async function POST(req: Request) {
     const createResponse = await Promise.race([
       (async () => {
         const body = (await req.json()) as CreateBody;
-        if (body.persona === "custom") {
-          return NextResponse.json({ error: "Custom narrator is only available for custom tours." }, { status: 400 });
-        }
         const route = getRouteById(body.routeId);
         if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
         const city = route.city ?? normalizePresetCity(body.city);
+        const persona = body.persona;
+        if (persona === "custom") {
+          return NextResponse.json({ error: "Custom narrator is only available for custom tours." }, { status: 400 });
+        }
 
         const admin = getAdmin();
         let jamId = body.jamId ?? null;
@@ -285,7 +280,7 @@ export async function POST(req: Request) {
           .single();
         if (jobErr || !job?.id) throw new Error(jobErr?.message || "Failed to create preset generation job");
 
-        const stops: StopInput[] = buildPresetStopsWithOverview(route.stops, city);
+        const stops: StopInput[] = buildPresetStopsWithOverview(route.stops, city, route.contentPriority);
 
         after(async () => {
           try {
@@ -294,9 +289,10 @@ export async function POST(req: Request) {
               route.id,
               city,
               route.durationMinutes || 30,
-              body.persona,
+              persona,
               stops,
-              route.narratorGuidance
+              route.narratorGuidance,
+              Boolean(body.forceRegenerateAll)
             );
           } catch (e) {
             console.error("preset job generation failed", { jobId: job.id, routeId: route.id, error: e });

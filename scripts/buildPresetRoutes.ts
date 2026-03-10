@@ -30,6 +30,9 @@ type StopResolved = {
   lat: number;
   lng: number;
   googlePlaceId: string;
+  narratorGuidance?: string;
+  mustMention?: string[];
+  factBullets?: string[];
 };
 
 type GeneratedRoutePricing = {
@@ -47,6 +50,7 @@ type GeneratedRoute = {
   defaultPersona: Persona;
   storyBy?: string;
   narratorGuidance?: string;
+  contentPriority?: "default" | "history_first";
   pricing: GeneratedRoutePricing;
   city: string;
   stops: StopResolved[];
@@ -292,6 +296,9 @@ function buildResolvedStop(city: string, stopSeed: PresetStopSeed, resolvedPlace
     lat: resolvedPlace.lat,
     lng: resolvedPlace.lng,
     googlePlaceId: stopSeed.placeId,
+    ...(stopSeed.narratorGuidance ? { narratorGuidance: stopSeed.narratorGuidance } : {}),
+    ...(stopSeed.mustMention?.length ? { mustMention: stopSeed.mustMention } : {}),
+    ...(stopSeed.factBullets?.length ? { factBullets: stopSeed.factBullets } : {}),
   };
 }
 
@@ -409,6 +416,7 @@ async function main() {
         defaultPersona: route.defaultPersona,
         ...(route.storyBy ? { storyBy: route.storyBy } : {}),
         ...(route.narratorGuidance ? { narratorGuidance: route.narratorGuidance } : {}),
+        ...(route.contentPriority ? { contentPriority: route.contentPriority } : {}),
         pricing: normalizeRoutePricing(route.pricing),
         city: seed.city,
         stops: resolvedStops,

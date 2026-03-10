@@ -8,7 +8,7 @@ export type InstagramImportDraftStatus =
   | "published"
   | "failed";
 
-export type InstagramImportJobPhase = "import" | "publish";
+export type InstagramImportJobPhase = "import" | "publish" | "publish_collection";
 
 export type InstagramImportJobStatus =
   | "queued"
@@ -35,6 +35,14 @@ export type InstagramPublicMetadata = {
   ownerUserId: string | null;
   caption: string | null;
   thumbnailUrl: string | null;
+};
+
+export type InstagramRouteAttribution = {
+  storyBy: string | null;
+  storyByUrl: string | null;
+  storyByAvatarUrl: string | null;
+  storyBySource: "instagram" | null;
+  isCollective: boolean;
 };
 
 export type InstagramPlaceCandidate = {
@@ -113,6 +121,28 @@ export type InstagramDraftContent = {
   confirmedPlaceLng?: number | null;
 };
 
+export type InstagramScriptGenerationSources = {
+  caption?: string | null;
+  transcript?: string | null;
+  cleanedText?: string | null;
+};
+
+export type InstagramCollectionDraftStatus =
+  | "importing"
+  | "ready"
+  | "needs_location"
+  | "published"
+  | "failed";
+
+export type InstagramCollectionDraftSnapshot = {
+  status: InstagramImportDraftStatus;
+  location: {
+    publishReady: boolean;
+  };
+};
+
+export const INSTAGRAM_COLLECTION_MAX_STOPS = 10;
+
 function normalizeWhitespace(value: string | null | undefined) {
   return (value || "").replace(/\r\n/g, "\n").trim();
 }
@@ -176,7 +206,7 @@ function extractMetaContent(
   return toNullableTrimmed(metaByAttr.get(`${attr}:${key}`));
 }
 
-function formatInstagramHandle(handle: string | null | undefined) {
+export function formatInstagramHandle(handle: string | null | undefined) {
   const normalized = toNullableTrimmed(handle)?.replace(/^@+/, "");
   if (!normalized) return null;
   return `@${normalized}`;
@@ -209,6 +239,13 @@ function extractOwnerTitleFromOgUrl(ogUrl: string | null) {
     return null;
   }
   return null;
+}
+
+export function buildInstagramProfileUrl(ownerTitle: string | null | undefined) {
+  const normalizedHandle =
+    extractOwnerHandle(ownerTitle ?? null) || formatInstagramHandle(ownerTitle);
+  if (!normalizedHandle) return null;
+  return `https://www.instagram.com/${encodeURIComponent(normalizedHandle.slice(1))}/`;
 }
 
 function extractCaptionFromMeta(description: string | null, ogTitle: string | null) {
@@ -253,6 +290,76 @@ export function parseInstagramPublicMetadataFromHtml(html: string): InstagramPub
     thumbnailUrl:
       extractMetaContent(metaByAttr, "name", "twitter:image") ||
       extractMetaContent(metaByAttr, "property", "og:image"),
+  };
+}
+
+export function parseInstagramProfileImageUrlFromHtml(html: string) {
+  const metaByAttr = parseMetaTags(html);
+  return (
+    extractMetaContent(metaByAttr, "name", "twitter:image") ||
+    extractMetaContent(metaByAttr, "property", "og:image")
+  );
+}
+
+export function deriveInstagramRouteAttribution(
+  creators: Array<{
+    ownerTitle?: string | null;
+    profileImageUrl?: string | null;
+  }>
+): InstagramRouteAttribution {
+  const uniqueCreators = new Map<
+    string,
+    {
+      label: string;
+      url: string | null;
+      avatarUrl: string | null;
+    }
+  >();
+
+  for (const creator of creators) {
+    const label =
+      extractOwnerHandle(creator.ownerTitle ?? null) ||
+      formatInstagramHandle(creator.ownerTitle) ||
+      toNullableTrimmed(creator.ownerTitle);
+    if (!label) continue;
+    const url = buildInstagramProfileUrl(label);
+    const key = url || label.toLowerCase();
+    if (uniqueCreators.has(key)) continue;
+    uniqueCreators.set(key, {
+      label,
+      url,
+      avatarUrl: toNullableTrimmed(creator.profileImageUrl),
+    });
+  }
+
+  const resolvedCreators = Array.from(uniqueCreators.values());
+  if (resolvedCreators.length === 0) {
+    return {
+      storyBy: null,
+      storyByUrl: null,
+      storyByAvatarUrl: null,
+      storyBySource: null,
+      isCollective: false,
+    };
+  }
+
+  if (resolvedCreators.length > 1) {
+    return {
+      storyBy: "Instagram creators",
+      storyByUrl: null,
+      storyByAvatarUrl: null,
+      storyBySource: "instagram",
+      isCollective: true,
+    };
+  }
+
+  const [creator] = resolvedCreators;
+  return {
+    storyBy: creator.label,
+    storyByUrl: creator.url,
+    storyByAvatarUrl: creator.avatarUrl,
+    storyBySource: "instagram",
+    isCollective: false,
   };
 }
 
@@ -307,6 +414,99 @@ export function composeInstagramImportSourceText(
   return normalizedTranscript || normalizedCaption || "";
 }
 
+export function buildInstagramScriptGenerationSourceText(
+  sources: InstagramScriptGenerationSources
+) {
+  const sections: string[] = [];
+  const normalizedTranscript = toNullableTrimmed(sources.transcript);
+  const normalizedCaption = toNullableTrimmed(sources.caption);
+  const normalizedCleanedText = toNullableTrimmed(sources.cleanedText);
+
+  if (normalizedTranscript) {
+    sections.push(`Transcript:\n${normalizedTranscript}`);
+  }
+  if (normalizedCaption) {
+    sections.push(`Caption:\n${normalizedCaption}`);
+  }
+  if (normalizedCleanedText) {
+    sections.push(`Cleaned notes:\n${normalizedCleanedText}`);
+  }
+
+  return sections.join("\n\n");
+}
+
+export function normalizeInstagramCollectionDraftIds(
+  draftIds: Array<string | null | undefined>,
+  maxStops = INSTAGRAM_COLLECTION_MAX_STOPS
+) {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of draftIds) {
+    const draftId = toNullableTrimmed(value);
+    if (!draftId || seen.has(draftId)) continue;
+    seen.add(draftId);
+    normalized.push(draftId);
+    if (normalized.length >= maxStops) break;
+  }
+
+  return normalized;
+}
+
+export function addInstagramCollectionDraftId(
+  draftIds: Array<string | null | undefined>,
+  draftId: string | null | undefined,
+  maxStops = INSTAGRAM_COLLECTION_MAX_STOPS
+) {
+  const normalizedDraftId = toNullableTrimmed(draftId);
+  const normalized = normalizeInstagramCollectionDraftIds(draftIds, maxStops);
+  if (!normalizedDraftId || normalized.includes(normalizedDraftId) || normalized.length >= maxStops) {
+    return normalized;
+  }
+  return [...normalized, normalizedDraftId];
+}
+
+export function removeInstagramCollectionDraftId(
+  draftIds: Array<string | null | undefined>,
+  draftId: string | null | undefined
+) {
+  const normalizedDraftId = toNullableTrimmed(draftId);
+  if (!normalizedDraftId) return normalizeInstagramCollectionDraftIds(draftIds);
+  return normalizeInstagramCollectionDraftIds(draftIds).filter((value) => value !== normalizedDraftId);
+}
+
+export function deriveInstagramCollectionRouteTitle(
+  routeTitle: string | null | undefined,
+  draftCount: number,
+  singleStopTitle: string | null | undefined
+) {
+  const normalizedRouteTitle = toNullableTrimmed(routeTitle);
+  if (normalizedRouteTitle) return normalizedRouteTitle;
+  if (draftCount <= 1) return toNullableTrimmed(singleStopTitle);
+  return `Instagram Route (${draftCount} stops)`;
+}
+
+export function getInstagramCollectionDraftStatus(
+  draft: InstagramCollectionDraftSnapshot
+): InstagramCollectionDraftStatus {
+  if (draft.status === "failed") return "failed";
+  if (draft.status === "published") return "published";
+  if (draft.status === "draft_ready" && draft.location.publishReady) return "ready";
+  if (draft.status === "draft_ready") return "needs_location";
+  return "importing";
+}
+
+export function canMasterPublishInstagramDrafts(
+  drafts: Array<InstagramCollectionDraftSnapshot | null | undefined>,
+  maxStops = INSTAGRAM_COLLECTION_MAX_STOPS
+) {
+  if (drafts.length === 0 || drafts.length > maxStops) return false;
+  return drafts.every((draft) => {
+    if (!draft) return false;
+    return getInstagramCollectionDraftStatus(draft) === "ready";
+  });
+}
+
 export function resolveInstagramDraftTitle(content: InstagramDraftContent) {
   return toNullableTrimmed(content.editedTitle) || toNullableTrimmed(content.generatedTitle);
 }
@@ -346,5 +546,5 @@ export function nextInstagramDraftStatus(
 }
 
 export function successJobStatusForPhase(phase: InstagramImportJobPhase): InstagramImportJobStatus {
-  return phase === "publish" ? "published" : "draft_ready";
+  return phase === "import" ? "draft_ready" : "published";
 }

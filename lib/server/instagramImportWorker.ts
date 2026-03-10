@@ -13,13 +13,20 @@ import {
   proxyGoogleImageUrl,
 } from "@/lib/placesImages";
 import {
+  buildInstagramScriptGenerationSourceText,
   composeInstagramImportSourceText,
+  deriveInstagramRouteAttribution,
+  deriveInstagramCollectionRouteTitle,
   estimateTextTokenCount,
+  INSTAGRAM_COLLECTION_MAX_STOPS,
   type InstagramDraftContent,
   type InstagramImportDraftStatus,
   type InstagramImportJobPhase,
+  type InstagramScriptGenerationSources,
+  normalizeInstagramCollectionDraftIds,
   nextInstagramDraftStatus,
   parseInstagramPublicMetadataFromHtml,
+  parseInstagramProfileImageUrlFromHtml,
   resolveInstagramDraftScript,
   resolveInstagramDraftTitle,
   successJobStatusForPhase,
@@ -75,6 +82,7 @@ type InstagramImportDraftRow = {
 type InstagramImportJobRow = {
   id: string;
   draft_id: string;
+  draft_ids: string[] | null;
   phase: InstagramImportJobPhase;
   status: "queued" | "processing" | "draft_ready" | "published" | "failed";
   progress: number;
@@ -151,6 +159,23 @@ const DRAFT_SELECT = `
 const JOB_SELECT = `
   id,
   draft_id,
+  draft_ids,
+  phase,
+  status,
+  progress,
+  message,
+  error,
+  attempts,
+  locked_at,
+  last_heartbeat_at,
+  lock_token,
+  created_at,
+  updated_at
+`;
+
+const JOB_SELECT_LEGACY = `
+  id,
+  draft_id,
   phase,
   status,
   progress,
@@ -166,6 +191,7 @@ const JOB_SELECT = `
 
 const GOOGLE_TEXT_SEARCH_NEW_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const INSTAGRAM_FETCH_TIMEOUT_MS = 12_000;
+const INSTAGRAM_PROFILE_FETCH_TIMEOUT_MS = 4_000;
 const YT_DLP_TIMEOUT_MS = 90_000;
 const FFMPEG_TIMEOUT_MS = 45_000;
 const JOB_STALE_MS = 10 * 60 * 1000;
@@ -176,6 +202,140 @@ const INSTAGRAM_FETCH_USER_AGENTS = [
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
 ];
 
+function isMissingDraftIdsColumnError(message: string | null | undefined) {
+  const normalized = (message || "").toLowerCase();
+  return normalized.includes("draft_ids") && normalized.includes("does not exist");
+}
+
+function toInstagramImportJobRow(row: Record<string, unknown>) {
+  return {
+    ...(row as Omit<InstagramImportJobRow, "draft_ids">),
+    draft_ids: Array.isArray(row.draft_ids) ? (row.draft_ids as string[]) : null,
+  } satisfies InstagramImportJobRow;
+}
+
+export function getInstagramDraftIdsMigrationError() {
+  return "Instagram master publish requires the draft_ids migration. Run the latest Supabase migration and try again.";
+}
+
+function isMissingCustomRouteStoryByColumnError(message: string | null | undefined) {
+  const normalized = (message || "").toLowerCase();
+  const isStoryByLookup =
+    normalized.includes("story_by") ||
+    normalized.includes("story_by_url") ||
+    normalized.includes("story_by_avatar_url") ||
+    normalized.includes("story_by_source");
+  return (
+    isStoryByLookup &&
+    ((normalized.includes("column") && normalized.includes("does not exist")) ||
+      (normalized.includes("could not find") && normalized.includes("schema cache")))
+  );
+}
+
+async function fetchInstagramProfileImageUrl(profileUrl: string) {
+  for (const userAgent of INSTAGRAM_FETCH_USER_AGENTS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), INSTAGRAM_PROFILE_FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(profileUrl, {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": userAgent,
+          "Accept": "text/html,application/xhtml+xml",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        cache: "no-store",
+      });
+      if (!response.ok) continue;
+      const html = await response.text();
+      const imageUrl = parseInstagramProfileImageUrlFromHtml(html);
+      if (imageUrl) return imageUrl;
+    } catch {
+      continue;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  return null;
+}
+
+async function resolveInstagramRouteAttributionForDrafts(drafts: InstagramImportDraftRow[]) {
+  const baseAttribution = deriveInstagramRouteAttribution(
+    drafts.map((draft) => ({
+      ownerTitle: draft.source_owner_title,
+    }))
+  );
+  if (!baseAttribution.storyBy || !baseAttribution.storyByUrl || baseAttribution.isCollective) {
+    return baseAttribution;
+  }
+
+  const storyByAvatarUrl =
+    (await fetchInstagramProfileImageUrl(baseAttribution.storyByUrl).catch(() => null)) || null;
+  return {
+    ...baseAttribution,
+    storyByAvatarUrl,
+  };
+}
+
+async function createInstagramCustomRoute(
+  admin: SupabaseClient,
+  payload: {
+    jam_id: string;
+    city: string;
+    transport_mode: "walk";
+    length_minutes: number;
+    title: string;
+    narrator_default: "adult";
+    narrator_guidance: null;
+    narrator_voice: null;
+    status: "generating";
+    experience_kind: "mix";
+    story_by: string | null;
+    story_by_url: string | null;
+    story_by_avatar_url: string | null;
+    story_by_source: "instagram" | null;
+  }
+) {
+  const { data: routeWithAttribution, error: routeWithAttributionErr } = await admin
+    .from("custom_routes")
+    .insert(payload)
+    .select("id")
+    .single();
+
+  if (!routeWithAttributionErr && routeWithAttribution?.id) {
+    return routeWithAttribution.id as string;
+  }
+
+  if (!isMissingCustomRouteStoryByColumnError(routeWithAttributionErr?.message)) {
+    throw new Error(routeWithAttributionErr?.message || "Failed to create custom route");
+  }
+
+  const legacyPayload = {
+    jam_id: payload.jam_id,
+    city: payload.city,
+    transport_mode: payload.transport_mode,
+    length_minutes: payload.length_minutes,
+    title: payload.title,
+    narrator_default: payload.narrator_default,
+    narrator_guidance: payload.narrator_guidance,
+    narrator_voice: payload.narrator_voice,
+    status: payload.status,
+    experience_kind: payload.experience_kind,
+  };
+  const { data: legacyRoute, error: legacyRouteErr } = await admin
+    .from("custom_routes")
+    .insert(legacyPayload)
+    .select("id")
+    .single();
+  if (legacyRouteErr || !legacyRoute?.id) {
+    throw new Error(legacyRouteErr?.message || "Failed to create custom route");
+  }
+  return legacyRoute.id as string;
+}
+
 function getOpenAiApiKey() {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is required.");
@@ -185,6 +345,10 @@ function getOpenAiApiKey() {
 function estimateRouteLengthMinutes(script: string) {
   const words = script.split(/\s+/).filter(Boolean).length;
   return Math.max(5, Math.min(30, Math.round(words / 120) || 5));
+}
+
+function estimateRouteLengthMinutesForScripts(scripts: string[]) {
+  return estimateRouteLengthMinutes(scripts.join("\n\n"));
 }
 
 function buildDraftContent(row: InstagramImportDraftRow): InstagramDraftContent {
@@ -233,6 +397,10 @@ export function serializeInstagramJob(job: InstagramImportJobRow | null) {
     attempts: job.attempts,
     updatedAt: job.updated_at,
   };
+}
+
+function getJobDraftIds(job: InstagramImportJobRow) {
+  return normalizeInstagramCollectionDraftIds(job.draft_ids ?? [job.draft_id], INSTAGRAM_COLLECTION_MAX_STOPS);
 }
 
 export function serializeInstagramDraft(
@@ -492,16 +660,30 @@ async function cleanupImportedText(apiKey: string, importedText: string) {
   return await runChatCompletion(apiKey, systemPrompt, userPrompt);
 }
 
-async function convertCleanedTextToTourStop(apiKey: string, cleanedText: string) {
+async function convertCleanedTextToTourStop(
+  apiKey: string,
+  sources: InstagramScriptGenerationSources
+) {
+  const promptSourceText = buildInstagramScriptGenerationSourceText(sources);
+  if (!promptSourceText) {
+    throw new Error("Script generation sources were empty");
+  }
+
   const systemPrompt = [
     "You convert travel source material into one EchoJam tour stop.",
+    "Use the transcript for narrative flow, spoken details, and sequencing when it is available.",
+    "Use the caption to add place names, logistics, concrete facts, and context when it is available.",
+    "Treat cleaned notes as supporting context, but do not ignore transcript or caption.",
+    "If transcript and caption disagree, prefer the most concrete factual details.",
     "If the source mentions multiple locations, pick one primary place only.",
     "Choose the place most central to the story, not a route summary.",
+    "Do not invent locations or details.",
     "Return strict JSON only.",
   ].join(" ");
 
   const userPrompt = [
-    "Convert this cleaned Instagram source into exactly one draft stop.",
+    "Convert this Instagram source into exactly one draft stop.",
+    "Use both transcript and caption together when both are available.",
     "Output JSON with keys: title, script, placeQuery, cityHint, countryHint, confidence.",
     "title: a short user-facing stop title.",
     "script: 90-180 words of spoken tour narration.",
@@ -511,7 +693,7 @@ async function convertCleanedTextToTourStop(apiKey: string, cleanedText: string)
     "confidence: number from 0 to 1.",
     "Use null for unknown hints.",
     "",
-    cleanedText,
+    promptSourceText,
   ].join("\n");
 
   const raw = await runChatCompletion(apiKey, systemPrompt, userPrompt);
@@ -607,16 +789,45 @@ async function loadDraft(admin: SupabaseClient, draftId: string) {
   return data as InstagramImportDraftRow;
 }
 
-async function loadLatestJobForDraft(admin: SupabaseClient, draftId: string) {
+async function loadDraftsByIds(admin: SupabaseClient, draftIds: string[]) {
+  const normalizedDraftIds = normalizeInstagramCollectionDraftIds(draftIds, INSTAGRAM_COLLECTION_MAX_STOPS);
   const { data, error } = await admin
+    .from("instagram_import_drafts")
+    .select(DRAFT_SELECT)
+    .in("id", normalizedDraftIds);
+  if (error) throw new Error(error.message);
+
+  const rows = (data ?? []) as InstagramImportDraftRow[];
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const ordered = normalizedDraftIds.map((draftId) => rowsById.get(draftId) ?? null);
+  const missingDraftId = normalizedDraftIds.find((draftId) => !rowsById.has(draftId));
+  if (missingDraftId) {
+    throw new Error("Instagram draft not found");
+  }
+  return ordered as InstagramImportDraftRow[];
+}
+
+async function loadLatestJobForDraft(admin: SupabaseClient, draftId: string) {
+  const query = admin
     .from("instagram_import_jobs")
     .select(JOB_SELECT)
     .eq("draft_id", draftId)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) throw new Error(error.message);
-  return (data ?? null) as InstagramImportJobRow | null;
+  const { data, error } = await query;
+  if (!error) return data ? toInstagramImportJobRow(data) : null;
+  if (!isMissingDraftIdsColumnError(error.message)) throw new Error(error.message);
+
+  const legacy = await admin
+    .from("instagram_import_jobs")
+    .select(JOB_SELECT_LEGACY)
+    .eq("draft_id", draftId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (legacy.error) throw new Error(legacy.error.message);
+  return legacy.data ? toInstagramImportJobRow(legacy.data) : null;
 }
 
 export async function getInstagramDraftResponseById(
@@ -633,22 +844,76 @@ export async function getInstagramDraftResponseById(
 export async function createInstagramImportJob(
   draftId: string,
   phase: InstagramImportJobPhase,
-  admin: SupabaseClient = getSupabaseAdminClient()
+  admin: SupabaseClient = getSupabaseAdminClient(),
+  opts?: { draftIds?: string[] | null; message?: string | null }
 ) {
+  const normalizedDraftIds =
+    phase === "publish_collection"
+      ? normalizeInstagramCollectionDraftIds(opts?.draftIds ?? [draftId], INSTAGRAM_COLLECTION_MAX_STOPS)
+      : null;
+  const insertPayload: Record<string, unknown> = {
+    draft_id: draftId,
+    phase,
+    status: "queued",
+    progress: 0,
+    message:
+      toNullableTrimmed(opts?.message) ||
+      (phase === "import"
+        ? "Queued for import"
+        : phase === "publish_collection"
+          ? "Queued for master publish"
+          : "Queued for publish"),
+    error: null,
+  };
+  if (normalizedDraftIds) {
+    insertPayload.draft_ids = normalizedDraftIds;
+  }
+
   const { data, error } = await admin
+    .from("instagram_import_jobs")
+    .insert(insertPayload)
+    .select(JOB_SELECT)
+    .single();
+  if (!error && data) return toInstagramImportJobRow(data);
+  if (!isMissingDraftIdsColumnError(error?.message)) {
+    throw new Error(error?.message || "Failed to create Instagram import job");
+  }
+  if (phase === "publish_collection") {
+    throw new Error(getInstagramDraftIdsMigrationError());
+  }
+
+  const legacyResult = await admin
     .from("instagram_import_jobs")
     .insert({
       draft_id: draftId,
       phase,
       status: "queued",
       progress: 0,
-      message: phase === "import" ? "Queued for import" : "Queued for publish",
+      message:
+        toNullableTrimmed(opts?.message) ||
+        (phase === "import" ? "Queued for import" : "Queued for publish"),
       error: null,
     })
-    .select(JOB_SELECT)
+    .select(JOB_SELECT_LEGACY)
     .single();
-  if (error || !data) throw new Error(error?.message || "Failed to create Instagram import job");
-  return data as InstagramImportJobRow;
+  if (legacyResult.error || !legacyResult.data) {
+    throw new Error(legacyResult.error?.message || "Failed to create Instagram import job");
+  }
+  return toInstagramImportJobRow(legacyResult.data);
+}
+
+function extractCollectionRouteTitleFromJobMessage(message: string | null | undefined) {
+  const normalized = toNullableTrimmed(message);
+  const prefix = "Queued for master publish:";
+  if (!normalized || !normalized.startsWith(prefix)) return null;
+  return toNullableTrimmed(normalized.slice(prefix.length));
+}
+
+function getInstagramImportClaimMessage(job: Pick<InstagramImportJobRow, "phase" | "message">) {
+  if (job.phase === "publish_collection") {
+    return toNullableTrimmed(job.message) || "Publishing collection";
+  }
+  return job.phase === "import" ? "Importing Instagram post" : "Publishing draft";
 }
 
 export async function searchInstagramImportPlaces(
@@ -696,52 +961,130 @@ async function updateDraft(
   if (error) throw new Error(error.message);
 }
 
+async function updateDrafts(
+  admin: SupabaseClient,
+  draftIds: string[],
+  patch: Partial<InstagramImportDraftRow>
+) {
+  if (draftIds.length === 0) return;
+  const { error } = await admin
+    .from("instagram_import_drafts")
+    .update(patch)
+    .in("id", draftIds);
+  if (error) throw new Error(error.message);
+}
+
 async function claimNextJob(admin: SupabaseClient) {
-  const { data: queued, error: queuedErr } = await admin
+  const queuedResult = await admin
     .from("instagram_import_jobs")
     .select(JOB_SELECT)
     .eq("status", "queued")
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
-  if (queuedErr) throw new Error(queuedErr.message);
-
-  let candidate = (queued ?? null) as InstagramImportJobRow | null;
-  if (!candidate) {
-    const staleBefore = new Date(Date.now() - JOB_STALE_MS).toISOString();
-    const { data: stale, error: staleErr } = await admin
+  let candidate: InstagramImportJobRow | null = null;
+  let legacyMode = false;
+  if (!queuedResult.error) {
+    candidate = queuedResult.data ? toInstagramImportJobRow(queuedResult.data) : null;
+  } else if (isMissingDraftIdsColumnError(queuedResult.error.message)) {
+    legacyMode = true;
+    const legacyQueued = await admin
       .from("instagram_import_jobs")
-      .select(JOB_SELECT)
-      .eq("status", "processing")
-      .lt("locked_at", staleBefore)
+      .select(JOB_SELECT_LEGACY)
+      .eq("status", "queued")
       .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
-    if (staleErr) throw new Error(staleErr.message);
-    candidate = (stale ?? null) as InstagramImportJobRow | null;
+    if (legacyQueued.error) throw new Error(legacyQueued.error.message);
+    candidate = legacyQueued.data ? toInstagramImportJobRow(legacyQueued.data) : null;
+  } else {
+    throw new Error(queuedResult.error.message);
+  }
+
+  if (!candidate) {
+    const staleBefore = new Date(Date.now() - JOB_STALE_MS).toISOString();
+    const stale = legacyMode
+      ? await admin
+          .from("instagram_import_jobs")
+          .select(JOB_SELECT_LEGACY)
+          .eq("status", "processing")
+          .lt("locked_at", staleBefore)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle()
+      : await admin
+          .from("instagram_import_jobs")
+          .select(JOB_SELECT)
+          .eq("status", "processing")
+          .lt("locked_at", staleBefore)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+    if (stale.error) {
+      if (!legacyMode && isMissingDraftIdsColumnError(stale.error.message)) {
+        const legacyStale = await admin
+          .from("instagram_import_jobs")
+          .select(JOB_SELECT_LEGACY)
+          .eq("status", "processing")
+          .lt("locked_at", staleBefore)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (legacyStale.error) throw new Error(legacyStale.error.message);
+        candidate = legacyStale.data ? toInstagramImportJobRow(legacyStale.data) : null;
+        legacyMode = true;
+      } else {
+        throw new Error(stale.error.message);
+      }
+    } else {
+      candidate = stale.data ? toInstagramImportJobRow(stale.data) : null;
+    }
   }
   if (!candidate) return null;
 
   const lockToken = randomUUID();
   const now = new Date().toISOString();
-  const { data: claimed, error: claimErr } = await admin
-    .from("instagram_import_jobs")
-    .update({
-      status: "processing",
-      progress: Math.max(candidate.progress || 0, 5),
-      message: candidate.phase === "import" ? "Importing Instagram post" : "Publishing draft",
-      error: null,
-      attempts: (candidate.attempts || 0) + 1,
-      locked_at: now,
-      last_heartbeat_at: now,
-      lock_token: lockToken,
-    })
-    .eq("id", candidate.id)
-    .eq("status", candidate.status)
-    .select(JOB_SELECT)
-    .maybeSingle();
-  if (claimErr || !claimed) return null;
-  return { job: claimed as InstagramImportJobRow, lockToken };
+  const claimPatch = {
+    status: "processing" as const,
+    progress: Math.max(candidate.progress || 0, 5),
+    message: getInstagramImportClaimMessage(candidate),
+    error: null,
+    attempts: (candidate.attempts || 0) + 1,
+    locked_at: now,
+    last_heartbeat_at: now,
+    lock_token: lockToken,
+  };
+  const claimedResult = legacyMode
+    ? await admin
+        .from("instagram_import_jobs")
+        .update(claimPatch)
+        .eq("id", candidate.id)
+        .eq("status", candidate.status)
+        .select(JOB_SELECT_LEGACY)
+        .maybeSingle()
+    : await admin
+        .from("instagram_import_jobs")
+        .update(claimPatch)
+        .eq("id", candidate.id)
+        .eq("status", candidate.status)
+        .select(JOB_SELECT)
+        .maybeSingle();
+  if (claimedResult.error) {
+    if (!legacyMode && isMissingDraftIdsColumnError(claimedResult.error.message)) {
+      const legacyClaimed = await admin
+        .from("instagram_import_jobs")
+        .update(claimPatch)
+        .eq("id", candidate.id)
+        .eq("status", candidate.status)
+        .select(JOB_SELECT_LEGACY)
+        .maybeSingle();
+      if (legacyClaimed.error || !legacyClaimed.data) return null;
+      return { job: toInstagramImportJobRow(legacyClaimed.data), lockToken };
+    }
+    return null;
+  }
+  if (!claimedResult.data) return null;
+  return { job: toInstagramImportJobRow(claimedResult.data), lockToken };
 }
 
 async function buildImportedTranscript(
@@ -810,7 +1153,11 @@ async function processImportJob(
     progress: 72,
     message: "Converting to tour draft",
   });
-  const converted = await convertCleanedTextToTourStop(apiKey, cleanedText);
+  const converted = await convertCleanedTextToTourStop(apiKey, {
+    caption: metadata.caption,
+    transcript,
+    cleanedText,
+  });
   const candidates = await searchPlaces(converted.placeQuery, converted.cityHint, converted.countryHint, 3);
   const topCandidate = candidates[0] ?? null;
 
@@ -869,10 +1216,16 @@ async function createJam(admin: SupabaseClient) {
   return data.id as string;
 }
 
-async function publishDraftToRoute(
-  admin: SupabaseClient,
-  draft: InstagramImportDraftRow
-) {
+type PublishableInstagramDraft = {
+  stopId: string;
+  city: string;
+  finalTitle: string;
+  finalScript: string;
+  confirmedPlace: InstagramPlaceCandidate;
+  routeImage: string;
+};
+
+function buildPublishableInstagramDraft(draft: InstagramImportDraftRow): PublishableInstagramDraft {
   const finalTitle = resolveInstagramDraftTitle(buildDraftContent(draft));
   const finalScript = resolveInstagramDraftScript(buildDraftContent(draft));
   const confirmedPlace = makePlaceCandidate(
@@ -882,42 +1235,60 @@ async function publishDraftToRoute(
     draft.confirmed_place_image_url,
     draft.confirmed_google_place_id
   );
+
   if (!finalTitle || !finalScript || !confirmedPlace) {
     throw new Error("Draft is missing title, script, or confirmed place");
   }
 
-  const apiKey = getOpenAiApiKey();
-  const jamId = await createJam(admin);
-  const city = toNullableTrimmed(draft.place_city_hint) || toNullableTrimmed(draft.place_country_hint) || "nearby";
-  const routeLengthMinutes = estimateRouteLengthMinutes(finalScript);
-  const routeStatus = "generating";
+  const city =
+    toNullableTrimmed(draft.place_city_hint) ||
+    toNullableTrimmed(draft.place_country_hint) ||
+    "nearby";
+
   const routeImage =
     confirmedPlace.imageUrl ||
     proxyGoogleImageUrl(draft.source_thumbnail_url) ||
     draft.source_thumbnail_url ||
     cityPlaceholderImage(city);
 
-  const { data: routeRow, error: routeErr } = await admin
-    .from("custom_routes")
-    .insert({
-      jam_id: jamId,
-      city,
-      transport_mode: "walk",
-      length_minutes: routeLengthMinutes,
-      title: finalTitle,
-      narrator_default: "adult",
-      narrator_guidance: null,
-      narrator_voice: null,
-      status: routeStatus,
-      experience_kind: "mix",
-    })
-    .select("id")
-    .single();
-  if (routeErr || !routeRow?.id) {
-    throw new Error(routeErr?.message || "Failed to create custom route");
-  }
-  const routeId = routeRow.id as string;
-  const stopId = `ig-${draft.id.slice(0, 12)}`;
+  return {
+    stopId: `ig-${draft.id.slice(0, 12)}`,
+    city,
+    finalTitle,
+    finalScript,
+    confirmedPlace,
+    routeImage,
+  };
+}
+
+async function publishDraftToRoute(
+  admin: SupabaseClient,
+  draft: InstagramImportDraftRow
+) {
+  const publishableDraft = buildPublishableInstagramDraft(draft);
+  const { finalTitle, finalScript, confirmedPlace, city, routeImage, stopId } = publishableDraft;
+
+  const apiKey = getOpenAiApiKey();
+  const jamId = await createJam(admin);
+  const routeLengthMinutes = estimateRouteLengthMinutes(finalScript);
+  const routeStatus = "generating";
+  const attribution = await resolveInstagramRouteAttributionForDrafts([draft]);
+  const routeId = await createInstagramCustomRoute(admin, {
+    jam_id: jamId,
+    city,
+    transport_mode: "walk",
+    length_minutes: routeLengthMinutes,
+    title: finalTitle,
+    narrator_default: "adult",
+    narrator_guidance: null,
+    narrator_voice: null,
+    status: routeStatus,
+    experience_kind: "mix",
+    story_by: attribution.storyBy,
+    story_by_url: attribution.storyByUrl,
+    story_by_avatar_url: attribution.storyByAvatarUrl,
+    story_by_source: attribution.storyBySource,
+  });
 
   const { error: jamErr } = await admin
     .from("jams")
@@ -1002,6 +1373,165 @@ async function publishDraftToRoute(
   return { jamId, routeId };
 }
 
+async function publishDraftCollectionToRoute(
+  admin: SupabaseClient,
+  drafts: InstagramImportDraftRow[],
+  routeTitle: string | null,
+  onProgress?: (progress: number, message: string) => Promise<void>
+) {
+  const publishableDrafts = drafts.map(buildPublishableInstagramDraft);
+  const apiKey = getOpenAiApiKey();
+  const jamId = await createJam(admin);
+  const city =
+    publishableDrafts.find((draft) => draft.city !== "nearby")?.city ||
+    publishableDrafts[0]?.city ||
+    "nearby";
+  const resolvedRouteTitle =
+    deriveInstagramCollectionRouteTitle(
+      routeTitle,
+      publishableDrafts.length,
+      publishableDrafts[0]?.finalTitle ?? null
+    ) || publishableDrafts[0]?.finalTitle;
+  if (!resolvedRouteTitle) {
+    throw new Error("Route title was empty");
+  }
+
+  await onProgress?.(18, "Creating route");
+  const attribution = await resolveInstagramRouteAttributionForDrafts(drafts);
+  const routeId = await createInstagramCustomRoute(admin, {
+    jam_id: jamId,
+    city,
+    transport_mode: "walk",
+    length_minutes: estimateRouteLengthMinutesForScripts(
+      publishableDrafts.map((draft) => draft.finalScript)
+    ),
+    title: resolvedRouteTitle,
+    narrator_default: "adult",
+    narrator_guidance: null,
+    narrator_voice: null,
+    status: "generating",
+    experience_kind: "mix",
+    story_by: attribution.storyBy,
+    story_by_url: attribution.storyByUrl,
+    story_by_avatar_url: attribution.storyByAvatarUrl,
+    story_by_source: attribution.storyBySource,
+  });
+
+  const { error: jamErr } = await admin
+    .from("jams")
+    .update({
+      route_id: `custom:${routeId}`,
+      persona: "adult",
+      current_stop: 0,
+      completed_at: null,
+      preset_id: null,
+    })
+    .eq("id", jamId);
+  if (jamErr) {
+    throw new Error(jamErr.message);
+  }
+
+  await onProgress?.(34, `Adding stops (0/${publishableDrafts.length})`);
+
+  const { error: stopErr } = await admin
+    .from("custom_route_stops")
+    .insert(
+      publishableDrafts.map((publishableDraft, index) => ({
+        route_id: routeId,
+        stop_id: publishableDraft.stopId,
+        position: index,
+        title: publishableDraft.finalTitle,
+        lat: publishableDraft.confirmedPlace.lat,
+        lng: publishableDraft.confirmedPlace.lng,
+        image_url: publishableDraft.routeImage,
+        stop_kind: "story",
+        script_adult: publishableDraft.finalScript,
+        audio_url_adult: null,
+      }))
+    );
+  if (stopErr) {
+    throw new Error(stopErr.message);
+  }
+
+  for (let index = 0; index < publishableDrafts.length; index += 1) {
+    const publishableDraft = publishableDrafts[index];
+    const canonical = await ensureCanonicalStopForCustom(admin, city, {
+      id: publishableDraft.stopId,
+      title: publishableDraft.confirmedPlace.label,
+      lat: publishableDraft.confirmedPlace.lat,
+      lng: publishableDraft.confirmedPlace.lng,
+      image: publishableDraft.routeImage,
+      ...(publishableDraft.confirmedPlace.googlePlaceId
+        ? { googlePlaceId: publishableDraft.confirmedPlace.googlePlaceId }
+        : {}),
+    });
+    await upsertRouteStopMapping(
+      admin,
+      "custom",
+      routeId,
+      publishableDraft.stopId,
+      canonical.id,
+      index
+    );
+
+    await onProgress?.(
+      40 + Math.round(((index + 1) / publishableDrafts.length) * 55),
+      `Generating audio (${index + 1}/${publishableDrafts.length})`
+    );
+
+    const audioBytes = await synthesizeSpeechWithOpenAI(
+      apiKey,
+      "adult",
+      publishableDraft.finalScript
+    );
+    const audioUrl = toNullableAudioUrl(
+      await uploadNarrationAudio(
+        audioBytes,
+        `custom-${routeId}`,
+        "adult",
+        publishableDraft.stopId
+      )
+    );
+    if (!audioUrl) {
+      throw new Error("Failed to create narration audio URL");
+    }
+
+    await admin.from("canonical_stop_assets").upsert(
+      {
+        canonical_stop_id: canonical.id,
+        persona: "adult",
+        script: publishableDraft.finalScript,
+        audio_url: audioUrl,
+        status: "ready",
+        error: null,
+      },
+      { onConflict: "canonical_stop_id,persona" }
+    );
+
+    const { error: updateStopErr } = await admin
+      .from("custom_route_stops")
+      .update({
+        script_adult: publishableDraft.finalScript,
+        audio_url_adult: audioUrl,
+      })
+      .eq("route_id", routeId)
+      .eq("stop_id", publishableDraft.stopId);
+    if (updateStopErr) {
+      throw new Error(updateStopErr.message);
+    }
+  }
+
+  const { error: readyErr } = await admin
+    .from("custom_routes")
+    .update({ status: "ready" })
+    .eq("id", routeId);
+  if (readyErr) {
+    throw new Error(readyErr.message);
+  }
+
+  return { jamId, routeId };
+}
+
 async function processPublishJob(
   admin: SupabaseClient,
   job: InstagramImportJobRow,
@@ -1035,17 +1565,68 @@ async function processPublishJob(
   });
 }
 
+async function processPublishCollectionJob(
+  admin: SupabaseClient,
+  job: InstagramImportJobRow,
+  lockToken: string
+) {
+  const draftIds = getJobDraftIds(job);
+  if (draftIds.length === 0) {
+    throw new Error("Master publish did not include any draft IDs");
+  }
+  if (draftIds.length > INSTAGRAM_COLLECTION_MAX_STOPS) {
+    throw new Error(`Select at most ${INSTAGRAM_COLLECTION_MAX_STOPS} stops.`);
+  }
+
+  const drafts = await loadDraftsByIds(admin, draftIds);
+  await updateDrafts(admin, draftIds, {
+    status: "publishing",
+    error: null,
+  });
+
+  const routeTitle = extractCollectionRouteTitleFromJobMessage(job.message);
+
+  const { jamId, routeId } = await publishDraftCollectionToRoute(
+    admin,
+    drafts,
+    routeTitle,
+    async (progress, message) => {
+      await updateJobWithLock(admin, job.id, lockToken, {
+        progress,
+        message,
+      });
+    }
+  );
+
+  await updateDrafts(admin, draftIds, {
+    status: "published",
+    published_jam_id: jamId,
+    published_route_id: routeId,
+    error: null,
+  });
+
+  await updateJobWithLock(admin, job.id, lockToken, {
+    status: successJobStatusForPhase("publish_collection"),
+    progress: 100,
+    message: "Route published",
+    error: null,
+  });
+}
+
 async function failJob(
   admin: SupabaseClient,
   job: InstagramImportJobRow,
   lockToken: string,
   message: string
 ) {
-  const draft = await loadDraft(admin, job.draft_id);
-  await updateDraft(admin, draft.id, {
-    status: nextInstagramDraftStatus(draft.status, "job_failed"),
-    error: message,
-  });
+  const draftIds = getJobDraftIds(job);
+  const drafts = await loadDraftsByIds(admin, draftIds);
+  for (const draft of drafts) {
+    await updateDraft(admin, draft.id, {
+      status: nextInstagramDraftStatus(draft.status, "job_failed"),
+      error: message,
+    });
+  }
   await updateJobWithLock(admin, job.id, lockToken, {
     status: "failed",
     progress: 100,
@@ -1062,6 +1643,10 @@ async function processClaimedJob(
   try {
     if (job.phase === "import") {
       await processImportJob(admin, job, lockToken);
+      return;
+    }
+    if (job.phase === "publish_collection") {
+      await processPublishCollectionJob(admin, job, lockToken);
       return;
     }
     await processPublishJob(admin, job, lockToken);

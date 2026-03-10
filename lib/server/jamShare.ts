@@ -21,6 +21,8 @@ type CustomRouteRow = {
   length_minutes: number | null;
   transport_mode: "walk" | "drive" | null;
   city: string | null;
+  story_by: string | null;
+  story_by_source: "instagram" | null;
 };
 
 type CustomRouteStopRow = {
@@ -99,8 +101,8 @@ function formatStopCount(count: number) {
   return `${count} Stop${count === 1 ? "" : "s"}`;
 }
 
-function makePosterSubtitle(stopCount: number, personaLabel: string | null) {
-  const storyBy = personaLabel || "EchoJam";
+function makePosterSubtitle(stopCount: number, storyByLabel: string | null) {
+  const storyBy = storyByLabel || "EchoJam";
   return `${formatStopCount(stopCount)} • Story by ${storyBy}`;
 }
 
@@ -124,12 +126,31 @@ async function resolveCustomRouteSummary(routeId: string) {
   const admin = getAdmin();
   if (!admin) return null;
 
-  const { data: route, error: routeErr } = await admin
+  const routeSelectWithStoryBy = "id,title,length_minutes,transport_mode,city,story_by,story_by_source";
+  const routeSelectLegacy = "id,title,length_minutes,transport_mode,city";
+  let route: CustomRouteRow | null = null;
+
+  const routeWithStoryBy = await admin
     .from("custom_routes")
-    .select("id,title,length_minutes,transport_mode,city")
+    .select(routeSelectWithStoryBy)
     .eq("id", routeId)
     .maybeSingle();
-  if (routeErr || !route) return null;
+  if (routeWithStoryBy.error?.message?.toLowerCase().includes("story_by")) {
+    const legacyRoute = await admin
+      .from("custom_routes")
+      .select(routeSelectLegacy)
+      .eq("id", routeId)
+      .maybeSingle();
+    if (legacyRoute.error || !legacyRoute.data) return null;
+    route = {
+      ...(legacyRoute.data as Omit<CustomRouteRow, "story_by" | "story_by_source">),
+      story_by: null,
+      story_by_source: null,
+    };
+  } else {
+    if (routeWithStoryBy.error || !routeWithStoryBy.data) return null;
+    route = routeWithStoryBy.data as CustomRouteRow;
+  }
 
   const { data: stops, error: stopsErr } = await admin
     .from("custom_route_stops")
@@ -154,6 +175,7 @@ async function resolveCustomRouteSummary(routeId: string) {
     minutes,
     transportMode: typedRoute.transport_mode || null,
     city: typedRoute.city || null,
+    storyBy: typedRoute.story_by_source === "instagram" ? typedRoute.story_by : null,
   };
 }
 
@@ -223,6 +245,7 @@ export const getJamSharePayload = cache(async (jamId: string): Promise<JamShareP
         minutes: number | null;
         transportMode: "walk" | "drive" | null;
         city: string | null;
+        storyBy?: string | null;
       }
     | null = null;
 
@@ -244,7 +267,7 @@ export const getJamSharePayload = cache(async (jamId: string): Promise<JamShareP
   const personaLabel = routeRef && !routeRef.startsWith("custom:") && isPersona(jamRow.persona)
     ? getRouteNarratorLabel(getRouteById(routeRef), jamRow.persona)
     : toPersonaLabel(jamRow.persona);
-  const posterSubtitle = makePosterSubtitle(summary.stopCount, personaLabel);
+  const posterSubtitle = makePosterSubtitle(summary.stopCount, summary.storyBy ?? personaLabel);
   const description = makeDescription([
     posterSubtitle,
     summary.minutes ? `${summary.minutes} mins` : null,
