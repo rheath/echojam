@@ -34,8 +34,8 @@ function canonicalId(prefix: string, key: string) {
   return `${prefix}-${createHash("sha1").update(key).digest("hex").slice(0, 20)}`;
 }
 
-export function canonicalIdForPresetStop(city: string, stop: StopInput) {
-  return canonicalId("canon-preset", `${city}|${stop.id}`);
+export function canonicalIdForPresetStop(city: string, routeId: string, stop: StopInput) {
+  return canonicalId("canon-preset", `${city}|${routeId}|${stop.id}`);
 }
 
 function canonicalIdForCustomStop(city: string, stop: StopInput) {
@@ -148,66 +148,10 @@ async function seedLinkImageIfAllowed(
 export async function ensureCanonicalStopForPreset(
   admin: SupabaseClient,
   city: string,
+  routeId: string,
   stop: StopInput
 ): Promise<CanonicalStopRow> {
-  const normalizedGooglePlaceId = isValidGooglePlaceId(stop.googlePlaceId) ? stop.googlePlaceId!.trim() : null;
-  if (normalizedGooglePlaceId) {
-    const existingByPlaceId = await findCanonicalByGooglePlaceId(admin, city, normalizedGooglePlaceId);
-    if (existingByPlaceId) {
-      await admin
-        .from("canonical_stops")
-        .update({
-          city,
-          title: stop.title,
-          lat: stop.lat,
-          lng: stop.lng,
-          source: "preset_seed",
-          google_place_id: normalizedGooglePlaceId,
-        })
-        .eq("id", existingByPlaceId.id);
-      const refreshed = (await getCanonicalStopById(admin, existingByPlaceId.id)) ?? existingByPlaceId;
-      return seedLinkImageIfAllowed(admin, refreshed, stop.image);
-    }
-
-    const id = canonicalId("canon-preset-place", `${city}|${normalizedGooglePlaceId.toLowerCase()}`);
-    const existingById = await getCanonicalStopById(admin, id);
-    if (existingById) {
-      await admin
-        .from("canonical_stops")
-        .update({
-          city,
-          title: stop.title,
-          lat: stop.lat,
-          lng: stop.lng,
-          source: "preset_seed",
-          google_place_id: normalizedGooglePlaceId,
-        })
-        .eq("id", id);
-      const refreshed = (await getCanonicalStopById(admin, id)) ?? existingById;
-      return seedLinkImageIfAllowed(admin, refreshed, stop.image);
-    }
-
-    const { data, error } = await admin
-      .from("canonical_stops")
-      .insert({
-        id,
-        city,
-        title: stop.title,
-        lat: stop.lat,
-        lng: stop.lng,
-        image_url: isPlaceholderImage(stop.image) ? null : stop.image,
-        image_source: isPlaceholderImage(stop.image) ? "placeholder" : "link_seed",
-        source: "preset_seed",
-        google_place_id: normalizedGooglePlaceId,
-      })
-      .select("id,city,title,lat,lng,image_url,image_source,fallback_image_url,google_place_id,image_last_checked_at")
-      .single();
-
-    if (error || !data) throw new Error(error?.message || "Failed to upsert preset canonical stop");
-    return data as CanonicalStopRow;
-  }
-
-  const id = canonicalIdForPresetStop(city, stop);
+  const id = canonicalIdForPresetStop(city, routeId, stop);
   const existing = await getCanonicalStopById(admin, id);
   if (existing) {
     await admin
@@ -218,6 +162,7 @@ export async function ensureCanonicalStopForPreset(
         lat: stop.lat,
         lng: stop.lng,
         source: "preset_seed",
+        google_place_id: null,
       })
       .eq("id", id);
     const refreshed = (await getCanonicalStopById(admin, id)) ?? existing;
@@ -235,6 +180,7 @@ export async function ensureCanonicalStopForPreset(
       image_url: isPlaceholderImage(stop.image) ? null : stop.image,
       image_source: isPlaceholderImage(stop.image) ? "placeholder" : "link_seed",
       source: "preset_seed",
+      google_place_id: null,
     })
     .select("id,city,title,lat,lng,image_url,image_source,fallback_image_url,google_place_id,image_last_checked_at")
     .single();

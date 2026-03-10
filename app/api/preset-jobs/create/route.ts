@@ -39,7 +39,8 @@ async function runPresetGeneration(
   city: string,
   lengthMinutes: number,
   persona: Persona,
-  stops: StopInput[]
+  stops: StopInput[],
+  narratorGuidance?: string | null
 ) {
   const admin = getAdmin();
   const apiKey = process.env.OPENAI_API_KEY;
@@ -79,7 +80,7 @@ async function runPresetGeneration(
 
   await updateProgress("generating_script", "Generating scripts (Overview first)");
   for (const stop of orderedStops) {
-    const canonical = await ensureCanonicalStopForPreset(admin, city, stop);
+    const canonical = await ensureCanonicalStopForPreset(admin, city, routeId, stop);
     const originalPosition = stopPositionById.get(stop.id) ?? 0;
     await upsertRouteStopMapping(admin, "preset", routeId, stop.id, canonical.id, originalPosition);
 
@@ -102,7 +103,8 @@ async function runPresetGeneration(
             persona,
             stop,
             originalPosition,
-            stops.length
+            stops.length,
+            narratorGuidance
           )
         );
       } catch (e) {
@@ -293,7 +295,8 @@ export async function POST(req: Request) {
               city,
               route.durationMinutes || 30,
               body.persona,
-              stops
+              stops,
+              route.narratorGuidance
             );
           } catch (e) {
             console.error("preset job generation failed", { jobId: job.id, routeId: route.id, error: e });

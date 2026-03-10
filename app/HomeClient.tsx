@@ -5,7 +5,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { Bree_Serif, Cinzel, Forum, Grenze } from "next/font/google";
 import { supabase } from "@/lib/supabaseClient";
-import { getPresetRoutesByCity, getRouteById, type Persona, type PresetCity, type RouteDef, type RoutePricing } from "@/app/content/salemRoutes";
+import {
+  getPresetRoutesByCity,
+  getRouteById,
+  getRouteNarratorLabel,
+  type Persona,
+  type PresetCity,
+  type RouteDef,
+  type RoutePricing,
+} from "@/app/content/salemRoutes";
 import { buildPresetOverviewStop, getPresetCityMeta, isPresetOverviewStopId } from "@/lib/presetOverview";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { getMaxStops, validateMixSelection } from "@/lib/mixConstraints";
@@ -207,12 +215,25 @@ const CITY_META: Record<CityOption, { label: string; center: { lat: number; lng:
   concord: { label: "Concord", center: { lat: 42.4604, lng: -71.3489 } },
   nyc: { label: "New York City", center: { lat: 40.7527, lng: -73.9772 } },
 };
-const FEATURED_PRESET_ROUTE_IDS = [
-  "boston-revolutionary-secrets",
-  "boston-old-taverns",
-  "nyc-architecture-walk",
-  "salem-after-dark",
-] as const satisfies readonly RouteDef["id"][];
+const FEATURED_PRESET_SECTIONS = [
+  {
+    title: "Historical Mixes",
+    routeIds: [
+      "boston-revolutionary-secrets",
+      "boston-old-taverns",
+      "nyc-architecture-walk",
+      "salem-after-dark",
+    ] as const satisfies readonly RouteDef["id"][],
+  },
+  {
+    title: "NYC Family Friendly Mixes",
+    routeIds: [
+      "nyc-city-animals-adventure",
+      "nyc-superhero-city",
+      "nyc-weird-wacky-history",
+    ] as const satisfies readonly RouteDef["id"][],
+  },
+] as const;
 const DEFAULT_NEARBY_STORY_ENABLED = ["1", "true", "yes", "on"].includes(
   (process.env.NEXT_PUBLIC_ENABLE_NEARBY_STORY || "").trim().toLowerCase()
 );
@@ -295,6 +316,10 @@ function getRoutePricingLabel(pricing: RoutePricing | undefined) {
     return formatUsdCents(pricing.amountUsdCents);
   }
   return "TBD";
+}
+
+function getPresetRouteNarratorLabel(route: Pick<RouteDef, "storyBy" | "defaultPersona">) {
+  return getRouteNarratorLabel(route, route.defaultPersona);
 }
 
 function getPresetRouteStopCount(route: Pick<RouteDef, "city" | "stops">) {
@@ -604,11 +629,14 @@ const followAlongLastPositionRef = useRef<{
     return formatRouteMiles(getRouteMiles(route.stops));
   }, [route]);
   const displayListenerCount = Math.max(listenCount, 1);
-  const featuredPresetRoutes = useMemo(
+  const featuredPresetSections = useMemo(
     () =>
-      FEATURED_PRESET_ROUTE_IDS.map((routeId) => getRouteById(routeId)).filter(
-        (route): route is RouteDef => Boolean(route)
-      ),
+      FEATURED_PRESET_SECTIONS.map((section) => ({
+        title: section.title,
+        routes: section.routeIds
+          .map((routeId) => getRouteById(routeId))
+          .filter((route): route is RouteDef => Boolean(route)),
+      })).filter((section) => section.routes.length > 0),
     []
   );
   const routesForSelectedCity = useMemo(() => getPresetRoutesByCity(selectedCity), [selectedCity]);
@@ -657,7 +685,7 @@ const followAlongLastPositionRef = useRef<{
     );
     return [...orderedSelected, ...missingSelected];
   }, [buildMixOrderedStops, builderSelectedStops]);
-  const activePersonaDisplayName = personaCatalog[persona].displayName;
+  const activePersonaDisplayName = getRouteNarratorLabel(route, persona);
   const isAiPersona = (personaKey: Persona) => personaCatalog[personaKey].displayName.startsWith("AI");
   const usesNarratorIcon = (personaKey: Persona) => personaKey === "custom" || isAiPersona(personaKey);
   const customNarratorEnabled =
@@ -1346,6 +1374,9 @@ const followAlongLastPositionRef = useRef<{
       durationMinutes: payload.route.length_minutes,
       description: `${payload.route.transport_mode === "drive" ? "Drive" : "Walk"} • ${formatStopCount(mappedStops.length)}`,
       defaultPersona: isCustom ? ((payload.route.narrator_default ?? jam?.persona ?? "adult") as RouteDef["defaultPersona"]) : (presetRoute?.defaultPersona ?? "adult"),
+      storyBy: isCustom ? undefined : presetRoute?.storyBy,
+      narratorGuidance: isCustom ? (payload.route.narrator_guidance || "").trim() || null : (presetRoute?.narratorGuidance ?? null),
+      pricing: isCustom ? undefined : presetRoute?.pricing,
       city: isCustom ? toKnownCityOption(resolvedCity) : presetRoute?.city,
       transportMode: payload.route.transport_mode,
       experienceKind: isCustom ? (payload.route.experience_kind ?? "mix") : "preset",
@@ -2741,60 +2772,64 @@ async function startStopNarration() {
               </div>
             </div>
 
-            <div className={styles.landingPopular}>Historical Mixes</div>
+            {featuredPresetSections.map((section) => (
+              <div key={section.title}>
+                <div className={styles.landingPopular}>{section.title}</div>
 
-            <div className={styles.landingFeaturedGrid}>
-              {featuredPresetRoutes.map((r) => {
-                const pricingLabel = getRoutePricingLabel(r.pricing);
-                const stopCountLabel = formatStopCount(getPresetRouteStopCount(r));
-                const narratorLabel = personaCatalog[r.defaultPersona].displayName;
+                <div className={styles.landingFeaturedGrid}>
+                  {section.routes.map((r) => {
+                    const pricingLabel = getRoutePricingLabel(r.pricing);
+                    const stopCountLabel = formatStopCount(getPresetRouteStopCount(r));
+                    const narratorLabel = getPresetRouteNarratorLabel(r);
 
-                return (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedCity(r.city ?? "salem");
-                      void startPresetTourFromRoute(r.id);
-                    }}
-                    aria-label={`${r.title}, ${pricingLabel}, ${stopCountLabel}, story by ${narratorLabel}`}
-                    className={`${styles.landingFeaturedCard} ${selectedRouteId === r.id ? styles.landingFeaturedCardSelected : ""}`}
-                    style={{ backgroundImage: `url("${getLandingRouteImage(r)}")` }}
-                  >
-                    <div className={styles.landingFeaturedCardOverlay} aria-hidden="true" />
-                    <div className={styles.landingFeaturedCardPricePill} aria-hidden="true">
-                      {pricingLabel}
-                    </div>
-                    <div className={styles.landingFeaturedCardContent}>
-                      <div className={styles.landingFeaturedCardSpacer} aria-hidden="true" />
-                      <div className={styles.landingFeaturedCardTitleWrap}>
-                        <div className={`${styles.landingFeaturedCardTitle} ${getLandingTitleStyleClass(r.id)} ${getLandingTitleFontClass(r.id)}`}>
-                          {r.title}
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedCity(r.city ?? "salem");
+                          void startPresetTourFromRoute(r.id);
+                        }}
+                        aria-label={`${r.title}, ${pricingLabel}, ${stopCountLabel}, story by ${narratorLabel}`}
+                        className={`${styles.landingFeaturedCard} ${selectedRouteId === r.id ? styles.landingFeaturedCardSelected : ""}`}
+                        style={{ backgroundImage: `url("${getLandingRouteImage(r)}")` }}
+                      >
+                        <div className={styles.landingFeaturedCardOverlay} aria-hidden="true" />
+                        <div className={styles.landingFeaturedCardPricePill} aria-hidden="true">
+                          {pricingLabel}
                         </div>
-                      </div>
-                      <div className={styles.landingFeaturedCardMeta}>
-                        <div className={styles.landingFeaturedCardBadge} aria-hidden="true">
-                          <Image
-                            src={getPresetRouteIcon()}
-                            alt=""
-                            width={20}
-                            height={20}
-                            className={styles.landingFeaturedCardBadgeIcon}
-                            aria-hidden="true"
-                          />
-                        </div>
-                        <div className={styles.landingFeaturedCardMetaText}>
-                          <div className={styles.landingFeaturedCardMetaPrimary}>{stopCountLabel}</div>
-                          <div className={styles.landingFeaturedCardMetaSecondary}>
-                            Story by {narratorLabel}
+                        <div className={styles.landingFeaturedCardContent}>
+                          <div className={styles.landingFeaturedCardSpacer} aria-hidden="true" />
+                          <div className={styles.landingFeaturedCardTitleWrap}>
+                            <div className={`${styles.landingFeaturedCardTitle} ${getLandingTitleStyleClass(r.id)} ${getLandingTitleFontClass(r.id)}`}>
+                              {r.title}
+                            </div>
+                          </div>
+                          <div className={styles.landingFeaturedCardMeta}>
+                            <div className={styles.landingFeaturedCardBadge} aria-hidden="true">
+                              <Image
+                                src={getPresetRouteIcon()}
+                                alt=""
+                                width={20}
+                                height={20}
+                                className={styles.landingFeaturedCardBadgeIcon}
+                                aria-hidden="true"
+                              />
+                            </div>
+                            <div className={styles.landingFeaturedCardMetaText}>
+                              <div className={styles.landingFeaturedCardMetaPrimary}>{stopCountLabel}</div>
+                              <div className={styles.landingFeaturedCardMetaSecondary}>
+                                Story by {narratorLabel}
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
 
             <div className={styles.landingSecondaryLabel}>More ways to start</div>
 
@@ -2911,6 +2946,30 @@ async function startStopNarration() {
             <div className={styles.landingSecondaryLabel}>Locations</div>
 
             <div className={`${styles.pickRouteList} ${styles.landingRouteList}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  openPresetCity("nyc");
+                }}
+                className={`${styles.pickRouteRow} ${styles.landingSecondaryRow}`}
+              >
+                <div className={styles.pickRouteMainWithIcon}>
+                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                    <Image
+                      src="/icons/geo-alt-fill.svg"
+                      alt=""
+                      width={24}
+                      height={24}
+                      className={styles.pickRouteWalkIcon}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className={styles.pickRouteMain}>
+                    <div className={styles.pickRouteTitle}>New York City</div>
+                    <div className={styles.pickRouteMeta}>Architecture, city animals, superheroes, and weird history.</div>
+                  </div>
+                </div>
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -3201,7 +3260,7 @@ async function startStopNarration() {
                         <div className={styles.pickRouteMain}>
                           <div className={styles.pickRouteTitle}>{r.title}</div>
                           <div className={styles.pickRouteMeta}>
-                            Story by {personaCatalog[r.defaultPersona].displayName}
+                            Story by {getPresetRouteNarratorLabel(r)}
                           </div>
                           <div className={`${styles.pickRouteMeta} ${styles.pickRouteMetaSecondary}`}>
                             {r.durationLabel} • {formatStopCount(getPresetRouteStopCount(r))}

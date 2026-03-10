@@ -31,15 +31,70 @@ const PresetRoutePricingSchema = z
     }
   });
 
-const PresetRouteSeedSchema = z.object({
-  id: z.string().trim().min(1),
-  title: z.string().trim().min(1),
-  durationMinutes: z.number().int().positive(),
-  description: z.string().trim().min(1),
-  defaultPersona: z.enum(PERSONAS),
-  pricing: PresetRoutePricingSchema.optional(),
-  stopPlaceIds: z.array(z.string().trim().min(1)).min(1),
+const PresetStopSeedSchema = z.object({
+  placeId: z.string().trim().min(1),
+  title: z.string().trim().min(1).optional(),
 });
+
+const PresetRouteSeedSchema = z
+  .object({
+    id: z.string().trim().min(1),
+    title: z.string().trim().min(1),
+    durationMinutes: z.number().int().positive(),
+    description: z.string().trim().min(1),
+    defaultPersona: z.enum(PERSONAS),
+    storyBy: z.string().trim().min(1).optional(),
+    narratorGuidance: z.string().trim().min(1).optional(),
+    pricing: PresetRoutePricingSchema.optional(),
+    stopPlaceIds: z.array(z.string().trim().min(1)).min(1).optional(),
+    stops: z.array(PresetStopSeedSchema).min(1).optional(),
+  })
+  .superRefine((route, ctx) => {
+    const hasLegacyStopPlaceIds = Array.isArray(route.stopPlaceIds);
+    const hasStops = Array.isArray(route.stops);
+    if (hasLegacyStopPlaceIds === hasStops) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["stops"],
+        message: "Provide exactly one of stops or stopPlaceIds",
+      });
+      return;
+    }
+
+    const seenStopSeeds = new Set<string>();
+    const normalizedStops =
+      route.stops?.map((stop) => ({
+        placeId: stop.placeId.trim(),
+        title: stop.title?.trim() || "",
+        pathRoot: "stops" as const,
+      })) ??
+      route.stopPlaceIds?.map((placeId) => ({
+        placeId: placeId.trim(),
+        title: "",
+        pathRoot: "stopPlaceIds" as const,
+      })) ??
+      [];
+
+    normalizedStops.forEach((stop, stopIdx) => {
+      if (stop.placeId.toLowerCase().startsWith("pexels:")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [stop.pathRoot, stopIdx],
+          message: "Invalid Google Place ID (looks like legacy pexels value)",
+        });
+      }
+
+      const dedupeKey = `${stop.placeId.toLowerCase()}|${stop.title.toLowerCase()}`;
+      if (seenStopSeeds.has(dedupeKey)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [stop.pathRoot, stopIdx],
+          message: `Duplicate stop seed in route: ${stop.placeId}${stop.title ? ` (${stop.title})` : ""}`,
+        });
+      }
+      seenStopSeeds.add(dedupeKey);
+    });
+  });
 
 export const PresetCitySeedSchema = z
   .object({
@@ -58,25 +113,6 @@ export const PresetCitySeedSchema = z
       }
       routeIds.add(route.id);
 
-      const placeIds = new Set<string>();
-      route.stopPlaceIds.forEach((placeId, stopIdx) => {
-        const normalized = placeId.trim();
-        if (normalized.toLowerCase().startsWith("pexels:")) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["routes", routeIdx, "stopPlaceIds", stopIdx],
-            message: "Invalid Google Place ID (looks like legacy pexels value)",
-          });
-        }
-        if (placeIds.has(normalized)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["routes", routeIdx, "stopPlaceIds", stopIdx],
-            message: `Duplicate place id in route: ${normalized}`,
-          });
-        }
-        placeIds.add(normalized);
-      });
     });
   });
 
@@ -92,5 +128,6 @@ export const PresetMetaSchema = z.object({
 
 export type PresetRouteSeed = z.infer<typeof PresetRouteSeedSchema>;
 export type PresetRoutePricingSeed = z.infer<typeof PresetRoutePricingSchema>;
+export type PresetStopSeed = z.infer<typeof PresetStopSeedSchema>;
 export type PresetCitySeed = z.infer<typeof PresetCitySeedSchema>;
 export type PresetMeta = z.infer<typeof PresetMetaSchema>;

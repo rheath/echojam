@@ -2,13 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // @ts-expect-error Node --experimental-strip-types requires explicit .ts extension in ESM mode.
-import {
-  PresetCitySeedSchema,
-  PresetMetaSchema,
-  type PresetCitySeed,
-  type PresetMeta,
-  type PresetRoutePricingSeed,
-} from "../lib/presets/schema.ts";
+import { PresetCitySeedSchema, PresetMetaSchema, type PresetCitySeed, type PresetMeta, type PresetRoutePricingSeed, type PresetRouteSeed, type PresetStopSeed } from "../lib/presets/schema.ts";
 
 type Persona = "adult" | "preteen" | "ghost";
 
@@ -21,6 +15,13 @@ type CanonicalStopRow = {
   image_url: string | null;
   image_source: "places" | "curated" | "placeholder" | "link_seed" | null;
   google_place_id: string | null;
+};
+
+type ResolvedPlace = {
+  title: string;
+  lat: number;
+  lng: number;
+  googlePlaceId: string;
 };
 
 type StopResolved = {
@@ -44,6 +45,8 @@ type GeneratedRoute = {
   durationMinutes: number;
   description: string;
   defaultPersona: Persona;
+  storyBy?: string;
+  narratorGuidance?: string;
   pricing: GeneratedRoutePricing;
   city: string;
   stops: StopResolved[];
@@ -214,7 +217,7 @@ async function upsertCanonicalFromResolved(
   admin: SupabaseClient,
   city: string,
   placeId: string,
-  resolved: StopResolved
+  resolved: ResolvedPlace
 ): Promise<CanonicalStopRow | null> {
   const { data, error } = await admin
     .from("canonical_stops")
@@ -241,7 +244,7 @@ async function upsertCanonicalFromResolved(
   return data as CanonicalStopRow;
 }
 
-async function resolveFromPlaceDetails(placeId: string): Promise<StopResolved | null> {
+async function resolveFromPlaceDetails(placeId: string): Promise<ResolvedPlace | null> {
   const apiKey = (process.env.GOOGLE_PLACES_API_KEY || "").trim();
   if (!apiKey) return null;
 
@@ -266,7 +269,6 @@ async function resolveFromPlaceDetails(placeId: string): Promise<StopResolved | 
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
     return {
-      id: makeStopId("seed", placeId, displayName),
       title: displayName,
       lat,
       lng,
@@ -277,17 +279,32 @@ async function resolveFromPlaceDetails(placeId: string): Promise<StopResolved | 
   }
 }
 
-async function resolveStop(
+function normalizeStopSeeds(route: PresetRouteSeed): PresetStopSeed[] {
+  if (route.stops?.length) return route.stops;
+  return (route.stopPlaceIds ?? []).map((placeId) => ({ placeId }));
+}
+
+function buildResolvedStop(city: string, stopSeed: PresetStopSeed, resolvedPlace: ResolvedPlace): StopResolved {
+  const title = (stopSeed.title || "").trim() || resolvedPlace.title;
+  return {
+    id: makeStopId(city, stopSeed.placeId, title),
+    title,
+    lat: resolvedPlace.lat,
+    lng: resolvedPlace.lng,
+    googlePlaceId: stopSeed.placeId,
+  };
+}
+
+async function resolvePlace(
   admin: SupabaseClient | null,
   city: string,
   placeId: string,
   diagnostics: { unresolved: Array<{ city: string; placeId: string; reason: string }> }
-): Promise<StopResolved | null> {
+): Promise<ResolvedPlace | null> {
   if (admin) {
     const canonical = await getCanonicalByPlaceId(admin, city, placeId);
     if (canonical) {
       return {
-        id: makeStopId(city, placeId, canonical.title),
         title: canonical.title,
         lat: canonical.lat,
         lng: canonical.lng,
@@ -298,20 +315,19 @@ async function resolveStop(
 
   const fromPlaces = await resolveFromPlaceDetails(placeId);
   if (fromPlaces) {
-    const resolved: StopResolved = {
+    if (admin) await upsertCanonicalFromResolved(admin, city, placeId, fromPlaces);
+    return {
       ...fromPlaces,
-      id: makeStopId(city, placeId, fromPlaces.title),
       googlePlaceId: placeId,
     };
-    if (admin) await upsertCanonicalFromResolved(admin, city, placeId, resolved);
-    return resolved;
   }
 
   const fallback = LEGACY_FALLBACK_BY_PLACE_ID[placeId];
   if (fallback) {
     return {
-      ...fallback,
-      id: makeStopId(city, placeId, fallback.title),
+      title: fallback.title,
+      lat: fallback.lat,
+      lng: fallback.lng,
       googlePlaceId: placeId,
     };
   }
@@ -365,18 +381,23 @@ async function main() {
   for (const seed of seeds) {
     for (const route of seed.routes) {
       const resolvedStops: StopResolved[] = [];
-      for (const placeId of route.stopPlaceIds) {
-        const resolved = await resolveStop(admin, seed.city, placeId, diagnostics);
-        if (!resolved) continue;
-        resolvedStops.push(resolved);
+      const stopSeeds = normalizeStopSeeds(route);
+      for (const stopSeed of stopSeeds) {
+        const resolvedPlace = await resolvePlace(admin, seed.city, stopSeed.placeId, diagnostics);
+        if (!resolvedPlace) continue;
+        resolvedStops.push(buildResolvedStop(seed.city, stopSeed, resolvedPlace));
       }
 
-      const uniqueStops = resolvedStops.filter((stop, idx) =>
-        resolvedStops.findIndex((other) => other.googlePlaceId === stop.googlePlaceId) === idx
-      );
-
-      if (uniqueStops.length === 0) {
+      if (resolvedStops.length === 0) {
         throw new Error(`Route ${route.id} resolved zero stops.`);
+      }
+
+      const stopIds = new Set<string>();
+      for (const stop of resolvedStops) {
+        if (stopIds.has(stop.id)) {
+          throw new Error(`Route ${route.id} produced duplicate stop id: ${stop.id}`);
+        }
+        stopIds.add(stop.id);
       }
 
       generatedRoutes.push({
@@ -386,9 +407,11 @@ async function main() {
         durationMinutes: route.durationMinutes,
         description: route.description,
         defaultPersona: route.defaultPersona,
+        ...(route.storyBy ? { storyBy: route.storyBy } : {}),
+        ...(route.narratorGuidance ? { narratorGuidance: route.narratorGuidance } : {}),
         pricing: normalizeRoutePricing(route.pricing),
         city: seed.city,
-        stops: uniqueStops,
+        stops: resolvedStops,
       });
     }
   }

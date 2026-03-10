@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is required." }, { status: 500 });
 
     const admin = getAdmin();
-    const canonical = await ensureCanonicalStopForPreset(admin, city, {
+    const canonical = await ensureCanonicalStopForPreset(admin, city, route.id, {
       id: stop.id,
       title: stop.title,
       lat: stop.lat,
@@ -82,7 +82,8 @@ export async function POST(req: Request) {
         image: stop.image,
       },
       stopIndex,
-      stops.length
+      stops.length,
+      route.narratorGuidance
     );
 
     const script = toNullableTrimmed(generated);

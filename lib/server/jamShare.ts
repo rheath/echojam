@@ -2,7 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { getRouteById, type Persona } from "@/app/content/salemRoutes";
+import { getRouteById, getRouteNarratorLabel, type Persona } from "@/app/content/salemRoutes";
 import { cityPlaceholderImage, proxyGoogleImageUrl } from "@/lib/placesImages";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { getPresetCityMeta } from "@/lib/presetOverview";
@@ -241,7 +241,9 @@ export const getJamSharePayload = cache(async (jamId: string): Promise<JamShareP
     };
   }
 
-  const personaLabel = toPersonaLabel(jamRow.persona);
+  const personaLabel = routeRef && !routeRef.startsWith("custom:") && isPersona(jamRow.persona)
+    ? getRouteNarratorLabel(getRouteById(routeRef), jamRow.persona)
+    : toPersonaLabel(jamRow.persona);
   const posterSubtitle = makePosterSubtitle(summary.stopCount, personaLabel);
   const description = makeDescription([
     posterSubtitle,

@@ -1,4 +1,5 @@
 import { presetRouteData } from "@/app/content/generated/presetRoutes.generated";
+import { personaCatalog } from "@/lib/personas/catalog";
 
 export type FixedPersona = "adult" | "preteen" | "ghost";
 export type Persona = FixedPersona | "custom";
@@ -31,6 +32,8 @@ export type RouteDef = {
   durationMinutes?: number;
   description: string;
   defaultPersona: Persona;
+  storyBy?: string;
+  narratorGuidance?: string | null;
   pricing?: RoutePricing;
   city?: PresetCity;
   transportMode?: "walk" | "drive";
@@ -53,6 +56,8 @@ function mapRoute(route: (typeof presetRouteData.routes)[number]): RouteDef {
     durationMinutes: route.durationMinutes,
     description: route.description,
     defaultPersona: route.defaultPersona,
+    storyBy: "storyBy" in route ? route.storyBy : undefined,
+    narratorGuidance: "narratorGuidance" in route ? route.narratorGuidance ?? null : null,
     pricing: route.pricing,
     city: route.city,
     transportMode: "walk",
@@ -90,4 +95,10 @@ export function getRouteById(routeId: string | null | undefined): RouteDef | nul
   const route = presetRouteData.routes.find((candidate) => candidate.id === routeId);
   if (!route) return null;
   return mapRoute(route);
+}
+
+export function getRouteNarratorLabel(route: Pick<RouteDef, "storyBy"> | null | undefined, persona: Persona) {
+  const override = typeof route?.storyBy === "string" ? route.storyBy.trim() : "";
+  if (override) return override;
+  return personaCatalog[persona].displayName;
 }

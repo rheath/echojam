@@ -196,7 +196,7 @@ async function loadPresetRouteStops(
 
   for (const stop of presetStops) {
     if (mappingByStopId.has(stop.id)) continue;
-    const canonical = await ensureCanonicalStopForPreset(admin, city, {
+    const canonical = await ensureCanonicalStopForPreset(admin, city, route.id, {
       id: stop.id,
       title: stop.title,
       lat: stop.lat,

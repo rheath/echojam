@@ -22,6 +22,123 @@
         "ChIJ4f4VwT5bwokRwQ6hjfC-eTM",
         "ChIJy7cGfBlawokR5l2e93hsoEA"
       ]
+    },
+    {
+      "id": "nyc-city-animals-adventure",
+      "title": "City Animals Adventure",
+      "durationMinutes": 35,
+      "description": "A playful walk through the wild side of Central Park.",
+      "defaultPersona": "preteen",
+      "storyBy": "Animal Explorer",
+      "narratorGuidance": "You are the Animal Explorer, a friendly guide for curious kids discovering the wildlife hidden inside big cities. Focus on birds, squirrels, ducks, turtles, and other animals living alongside people in parks, ponds, trees, and buildings. Keep the tone playful and observant, ask occasional questions, encourage listeners to imagine what animals are doing when humans are not around, and explain how nature survives in a busy city.",
+      "pricing": {
+        "status": "free",
+        "displayLabel": "FREE"
+      },
+      "stops": [
+        {
+          "placeId": "ChIJaWjW_PFYwokRFD8a2YQu12U",
+          "title": "Central Park Zoo"
+        },
+        {
+          "placeId": "ChIJZaQT5aVZwokRffG4eQn-mrA",
+          "title": "Bethesda Fountain"
+        },
+        {
+          "placeId": "ChIJxcSlpvJYwokRLcMSp1tjBf4",
+          "title": "The Mall & Literary Walk"
+        },
+        {
+          "placeId": "ChIJFXzf4e9YwokRtXgpty_i74g",
+          "title": "Belvedere Castle"
+        },
+        {
+          "placeId": "ChIJT2WwCJFYwokR8VMKAE-7h54",
+          "title": "Turtle Pond"
+        },
+        {
+          "placeId": "ChIJ2aWDJ_hYwokRUKinWgKdI70",
+          "title": "Strawberry Fields"
+        }
+      ]
+    },
+    {
+      "id": "nyc-superhero-city",
+      "title": "Superhero City",
+      "durationMinutes": 35,
+      "description": "A comic-book walk through Midtown and out to the Brooklyn Bridge.",
+      "defaultPersona": "preteen",
+      "storyBy": "Superhero Guide",
+      "narratorGuidance": "You are the Superhero Guide, turning the city into a living comic book for kids. Treat buildings like secret headquarters, bridges like rescue scenes, and busy streets like places where heroes might swing or fly past. Invite the listener to imagine powers, villains, missions, and dramatic city action while grounding each stop in a real landmark with big-screen superhero energy.",
+      "pricing": {
+        "status": "free",
+        "displayLabel": "FREE"
+      },
+      "stops": [
+        {
+          "placeId": "ChIJmQJIxlVYwokRLgeuocVOGVU",
+          "title": "Times Square"
+        },
+        {
+          "placeId": "ChIJZx8c96NZwokRJklw7SVhKt4",
+          "title": "Flatiron Building"
+        },
+        {
+          "placeId": "ChIJhRwB-yFawokRi0AhGH87UTc",
+          "title": "Grand Central Terminal"
+        },
+        {
+          "placeId": "ChIJeWPFRwJZwokRGD60OOo74RU",
+          "title": "Chrysler Building"
+        },
+        {
+          "placeId": "ChIJe7vKMf9YwokRIMYfDz7iF9o",
+          "title": "Midtown Skyline"
+        },
+        {
+          "placeId": "ChIJK3vOQyNawokRXEa9errdJiU",
+          "title": "Brooklyn Bridge"
+        }
+      ]
+    },
+    {
+      "id": "nyc-weird-wacky-history",
+      "title": "Weird & Wacky History",
+      "durationMinutes": 35,
+      "description": "Odd landmarks, secret corners, and the strangest stories in the city.",
+      "defaultPersona": "preteen",
+      "storyBy": "Curious Explorer",
+      "narratorGuidance": "You are the Curious Explorer, obsessed with the strangest stories hidden in cities. Focus on funny accidents, unusual buildings, secret spaces, tiny details, and surprising moments from the past rather than formal history. Keep the tone playful, curious, and full of discovery so each stop feels like a hidden weird detail most people walk right past.",
+      "pricing": {
+        "status": "free",
+        "displayLabel": "FREE"
+      },
+      "stops": [
+        {
+          "placeId": "ChIJZx8c96NZwokRJklw7SVhKt4",
+          "title": "Flatiron Building"
+        },
+        {
+          "placeId": "ChIJ75FhiAFZwokRgGYRKvPP_xU",
+          "title": "Grand Central Whispering Gallery"
+        },
+        {
+          "placeId": "ChIJgd0_eZRZwokRPcl2V4yJdUM",
+          "title": "Hess Triangle"
+        },
+        {
+          "placeId": "ChIJ3QQCIpNZwokRK35T710RKek",
+          "title": "The Narrowest House in NYC"
+        },
+        {
+          "placeId": "ChIJhRwB-yFawokRi0AhGH87UTc",
+          "title": "Secret Track at Grand Central"
+        },
+        {
+          "placeId": "ChIJXa-d3ZBZwokRGcUkpZc_uC4",
+          "title": "Washington Square Arch"
+        }
+      ]
     }
   ]
 }
