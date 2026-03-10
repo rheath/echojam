@@ -216,6 +216,9 @@ const FEATURED_PRESET_ROUTE_IDS = [
 const DEFAULT_NEARBY_STORY_ENABLED = ["1", "true", "yes", "on"].includes(
   (process.env.NEXT_PUBLIC_ENABLE_NEARBY_STORY || "").trim().toLowerCase()
 );
+const INSTAGRAM_IMPORT_ENABLED = ["1", "true", "yes", "on"].includes(
+  (process.env.NEXT_PUBLIC_ENABLE_INSTAGRAM_IMPORT || "").trim().toLowerCase()
+);
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -2853,6 +2856,33 @@ async function startStopNarration() {
                   </div>
                 </div>
               </button>
+
+              {INSTAGRAM_IMPORT_ENABLED ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    router.push("/import/instagram");
+                  }}
+                  className={`${styles.pickRouteRow} ${styles.landingSecondaryRow}`}
+                >
+                  <div className={styles.pickRouteMainWithIcon}>
+                    <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                      <Image
+                        src="/icons/file-earmark-text.svg"
+                        alt=""
+                        width={24}
+                        height={24}
+                        className={styles.pickRouteWalkIcon}
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <div className={styles.pickRouteMain}>
+                      <div className={styles.pickRouteTitle}>Instagram</div>
+                      <div className={styles.pickRouteMeta}>Paste a public post. Turn it into a draft.</div>
+                    </div>
+                  </div>
+                </button>
+              ) : null}
             </div>
 
             <div className={styles.landingSecondaryLabel}>Locations</div>
