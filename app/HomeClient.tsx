@@ -2816,7 +2816,7 @@ async function startStopNarration() {
               <div className={`${styles.landingCopyBlock} ${styles.landingCopyBlockMobile}`}>
                 <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets</h1>
                 <p className={styles.landingCopy}>
-                  Wander with intention. Experience places through a curated lens. <strong>More story. Less directions.</strong>
+                  Wander with intention. Experience places through curated stories. <strong>More story. Less directions.</strong>
                 </p>
               </div>
             </div>
