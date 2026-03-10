@@ -2,7 +2,13 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // @ts-expect-error Node --experimental-strip-types requires explicit .ts extension in ESM mode.
-import { PresetCitySeedSchema, PresetMetaSchema, type PresetCitySeed, type PresetMeta } from "../lib/presets/schema.ts";
+import {
+  PresetCitySeedSchema,
+  PresetMetaSchema,
+  type PresetCitySeed,
+  type PresetMeta,
+  type PresetRoutePricingSeed,
+} from "../lib/presets/schema.ts";
 
 type Persona = "adult" | "preteen" | "ghost";
 
@@ -25,6 +31,12 @@ type StopResolved = {
   googlePlaceId: string;
 };
 
+type GeneratedRoutePricing = {
+  status: "free" | "paid" | "tbd";
+  displayLabel?: string;
+  amountUsdCents: number | null;
+};
+
 type GeneratedRoute = {
   id: string;
   title: string;
@@ -32,6 +44,7 @@ type GeneratedRoute = {
   durationMinutes: number;
   description: string;
   defaultPersona: Persona;
+  pricing: GeneratedRoutePricing;
   city: string;
   stops: StopResolved[];
 };
@@ -311,6 +324,21 @@ function toTsLiteral(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function normalizeRoutePricing(pricing?: PresetRoutePricingSeed): GeneratedRoutePricing {
+  if (!pricing) {
+    return {
+      status: "tbd",
+      amountUsdCents: null,
+    };
+  }
+
+  return {
+    status: pricing.status,
+    ...(pricing.displayLabel ? { displayLabel: pricing.displayLabel } : {}),
+    amountUsdCents: pricing.amountUsdCents ?? null,
+  };
+}
+
 async function main() {
   await loadEnvFromDotLocal();
   const { check, allowUnresolved } = parseArgs();
@@ -358,6 +386,7 @@ async function main() {
         durationMinutes: route.durationMinutes,
         description: route.description,
         defaultPersona: route.defaultPersona,
+        pricing: normalizeRoutePricing(route.pricing),
         city: seed.city,
         stops: uniqueStops,
       });

@@ -7,6 +7,10 @@
       "durationMinutes": 45,
       "description": "A walk through centuries of design.",
       "defaultPersona": "adult",
+      "pricing": {
+        "status": "free",
+        "displayLabel": "FREE"
+      },
       "stopPlaceIds": [ 
         "ChIJhRwB-yFawokRi0AhGH87UTc",
         "ChIJeWPFRwJZwokRGD60OOo74RU",

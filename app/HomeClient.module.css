@@ -103,6 +103,10 @@
   --landing-card-overlay: rgba(0, 0, 0, 0.5);
   --landing-icon-circle-bg: rgba(255, 255, 255, 0.08);
   --landing-icon-filter: invert(1);
+  --landing-price-pill-bg: rgba(6, 7, 10, 0.92);
+  --landing-price-pill-fg: #f8f8fa;
+  --landing-price-pill-border: rgba(255, 255, 255, 0.08);
+  --landing-price-pill-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
   --landing-badge-bg: rgba(7, 8, 12, 0.5);
   --landing-image-pane-bg: #c9c9cc;
   --landing-mobile-hero-fg: #f4f4f6;
@@ -141,6 +145,10 @@
   --landing-card-overlay: rgba(30, 22, 16, 0.26);
   --landing-icon-circle-bg: rgba(23, 20, 18, 0.08);
   --landing-icon-filter: none;
+  --landing-price-pill-bg: rgba(20, 16, 14, 0.92);
+  --landing-price-pill-fg: #fcfbf8;
+  --landing-price-pill-border: rgba(255, 255, 255, 0.14);
+  --landing-price-pill-shadow: 0 10px 28px rgba(87, 63, 40, 0.18);
   --landing-badge-bg: rgba(245, 239, 229, 0.7);
   --landing-image-pane-bg: #e6dfd5;
   --landing-toggle-bg: rgba(255, 255, 255, 0.58);
@@ -285,6 +293,28 @@
   flex-direction: column;
   justify-content: flex-end;
   gap: 16px;
+}
+
+.landingFeaturedCardPricePill {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  max-width: calc(100% - 32px); 
+  border-radius: 999px; 
+  background: var(--landing-price-pill-bg);
+  color: var(--landing-price-pill-fg); 
+  backdrop-filter: blur(10px);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .landingFeaturedCardSpacer {
@@ -2382,6 +2412,14 @@
 
   .landingFeaturedCardContent {
     min-height: 252px;
+  }
+
+  .landingFeaturedCardPricePill {
+    top: 12px;
+    left: 12px;
+    max-width: calc(100% - 24px); 
+    padding: 6px;
+    font-size: 11px;
   }
 
   .landingFeaturedCardTitleWrap {

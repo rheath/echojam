@@ -7,6 +7,10 @@
       "durationMinutes": 45,
       "description": "Hidden stories from the American Revolution.",
       "defaultPersona": "adult",
+      "pricing": {
+        "status": "free",
+        "displayLabel": "FREE"
+      },
       "stopPlaceIds": [
         "ChIJDXUUlIRw44kRT_pEDqwG790",
         "ChIJKyNuvJ1w44kRBE-pe_yDhj8",
@@ -24,6 +28,11 @@
       "durationMinutes": 40,
       "description": "Historic pubs and gathering places where politics and nightlife overlapped.",
       "defaultPersona": "adult",
+      "pricing": {
+        "status": "paid",
+        "displayLabel": "$0.99",
+        "amountUsdCents": 99
+      },
       "stopPlaceIds": [
         "ChIJHTF784Vw44kRgfkpGmXBtic",
         "ChIJnZfW9YVw44kRp5FwX3GRHcg",

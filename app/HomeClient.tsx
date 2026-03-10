@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { Bree_Serif, Cinzel, Forum, Grenze } from "next/font/google";
 import { supabase } from "@/lib/supabaseClient";
-import { getPresetRoutesByCity, getRouteById, type Persona, type PresetCity, type RouteDef } from "@/app/content/salemRoutes";
+import { getPresetRoutesByCity, getRouteById, type Persona, type PresetCity, type RouteDef, type RoutePricing } from "@/app/content/salemRoutes";
 import { buildPresetOverviewStop, getPresetCityMeta, isPresetOverviewStopId } from "@/lib/presetOverview";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { getMaxStops, validateMixSelection } from "@/lib/mixConstraints";
@@ -281,6 +281,20 @@ function formatRouteMiles(miles: number) {
 
 function formatStopCount(count: number) {
   return `${count} stop${count === 1 ? "" : "s"}`;
+}
+
+function formatUsdCents(amountUsdCents: number) {
+  return `$${(amountUsdCents / 100).toFixed(2)}`;
+}
+
+function getRoutePricingLabel(pricing: RoutePricing | undefined) {
+  const displayLabel = typeof pricing?.displayLabel === "string" ? pricing.displayLabel.trim() : "";
+  if (displayLabel) return displayLabel;
+  if (pricing?.status === "free") return "FREE";
+  if (pricing?.status === "paid" && typeof pricing.amountUsdCents === "number") {
+    return formatUsdCents(pricing.amountUsdCents);
+  }
+  return "TBD";
 }
 
 function getPresetRouteStopCount(route: Pick<RouteDef, "city" | "stops">) {
@@ -2730,47 +2744,56 @@ async function startStopNarration() {
             <div className={styles.landingPopular}>Historical Mixes</div>
 
             <div className={styles.landingFeaturedGrid}>
-              {featuredPresetRoutes.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedCity(r.city ?? "salem");
-                    void startPresetTourFromRoute(r.id);
-                  }}
-                  aria-label={`${r.title}, ${formatStopCount(getPresetRouteStopCount(r))}, story by ${personaCatalog[r.defaultPersona].displayName}`}
-                  className={`${styles.landingFeaturedCard} ${selectedRouteId === r.id ? styles.landingFeaturedCardSelected : ""}`}
-                  style={{ backgroundImage: `url("${getLandingRouteImage(r)}")` }}
-                >
-                  <div className={styles.landingFeaturedCardOverlay} aria-hidden="true" />
-                  <div className={styles.landingFeaturedCardContent}>
-                    <div className={styles.landingFeaturedCardSpacer} aria-hidden="true" />
-                    <div className={styles.landingFeaturedCardTitleWrap}>
-                      <div className={`${styles.landingFeaturedCardTitle} ${getLandingTitleStyleClass(r.id)} ${getLandingTitleFontClass(r.id)}`}>
-                        {r.title}
-                      </div>
+              {featuredPresetRoutes.map((r) => {
+                const pricingLabel = getRoutePricingLabel(r.pricing);
+                const stopCountLabel = formatStopCount(getPresetRouteStopCount(r));
+                const narratorLabel = personaCatalog[r.defaultPersona].displayName;
+
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedCity(r.city ?? "salem");
+                      void startPresetTourFromRoute(r.id);
+                    }}
+                    aria-label={`${r.title}, ${pricingLabel}, ${stopCountLabel}, story by ${narratorLabel}`}
+                    className={`${styles.landingFeaturedCard} ${selectedRouteId === r.id ? styles.landingFeaturedCardSelected : ""}`}
+                    style={{ backgroundImage: `url("${getLandingRouteImage(r)}")` }}
+                  >
+                    <div className={styles.landingFeaturedCardOverlay} aria-hidden="true" />
+                    <div className={styles.landingFeaturedCardPricePill} aria-hidden="true">
+                      {pricingLabel}
                     </div>
-                    <div className={styles.landingFeaturedCardMeta}>
-                      <div className={styles.landingFeaturedCardBadge} aria-hidden="true">
-                        <Image
-                          src={getPresetRouteIcon()}
-                          alt=""
-                          width={20}
-                          height={20}
-                          className={styles.landingFeaturedCardBadgeIcon}
-                          aria-hidden="true"
-                        />
+                    <div className={styles.landingFeaturedCardContent}>
+                      <div className={styles.landingFeaturedCardSpacer} aria-hidden="true" />
+                      <div className={styles.landingFeaturedCardTitleWrap}>
+                        <div className={`${styles.landingFeaturedCardTitle} ${getLandingTitleStyleClass(r.id)} ${getLandingTitleFontClass(r.id)}`}>
+                          {r.title}
+                        </div>
                       </div>
-                      <div className={styles.landingFeaturedCardMetaText}>
-                        <div className={styles.landingFeaturedCardMetaPrimary}>{formatStopCount(getPresetRouteStopCount(r))}</div>
-                        <div className={styles.landingFeaturedCardMetaSecondary}>
-                          Story by {personaCatalog[r.defaultPersona].displayName}
+                      <div className={styles.landingFeaturedCardMeta}>
+                        <div className={styles.landingFeaturedCardBadge} aria-hidden="true">
+                          <Image
+                            src={getPresetRouteIcon()}
+                            alt=""
+                            width={20}
+                            height={20}
+                            className={styles.landingFeaturedCardBadgeIcon}
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div className={styles.landingFeaturedCardMetaText}>
+                          <div className={styles.landingFeaturedCardMetaPrimary}>{stopCountLabel}</div>
+                          <div className={styles.landingFeaturedCardMetaSecondary}>
+                            Story by {narratorLabel}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
 
             <div className={styles.landingSecondaryLabel}>More ways to start</div>

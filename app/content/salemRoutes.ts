@@ -3,6 +3,11 @@ import { presetRouteData } from "@/app/content/generated/presetRoutes.generated"
 export type FixedPersona = "adult" | "preteen" | "ghost";
 export type Persona = FixedPersona | "custom";
 export type PresetCity = "salem" | "boston" | "concord" | "nyc";
+export type RoutePricing = {
+  status: "free" | "paid" | "tbd";
+  displayLabel?: string;
+  amountUsdCents?: number | null;
+};
 
 export type Stop = {
   id: string;
@@ -26,6 +31,7 @@ export type RouteDef = {
   durationMinutes?: number;
   description: string;
   defaultPersona: Persona;
+  pricing?: RoutePricing;
   city?: PresetCity;
   transportMode?: "walk" | "drive";
   experienceKind?: "preset" | "mix" | "follow_along";
@@ -47,6 +53,7 @@ function mapRoute(route: (typeof presetRouteData.routes)[number]): RouteDef {
     durationMinutes: route.durationMinutes,
     description: route.description,
     defaultPersona: route.defaultPersona,
+    pricing: route.pricing,
     city: route.city,
     transportMode: "walk",
     experienceKind: "preset",

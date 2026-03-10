@@ -7,6 +7,10 @@
       "durationMinutes": 30,
       "description": "Ghost stories and folklore.",
       "defaultPersona": "ghost",
+      "pricing": {
+        "status": "free",
+        "displayLabel": "FREE"
+      },
       "stopPlaceIds": [
         "ChIJB916r2UU44kRKAWug1nsKlI",
         "ChIJw6yCIDsV44kRyjucYZkurnQ",
