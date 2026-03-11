@@ -2903,7 +2903,7 @@ async function startStopNarration() {
               </div>
             ))}
 
-            <div className={styles.landingSecondaryLabel}>More ways to start</div>
+            <div className={styles.landingSecondaryLabel}>Create your own</div>
 
             <div className={`${styles.pickRouteList} ${styles.landingRouteList}`}>
               <button
@@ -2927,7 +2927,7 @@ async function startStopNarration() {
                     />
                   </div>
                   <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>Create your mix</div>
+                    <div className={styles.pickRouteTitle}>Mix Studio</div>
                     <div className={styles.pickRouteMeta}>Pick your stops. Choose a storyteller.</div>
                     <div className={`${styles.pickRouteMeta} ${styles.pickRouteMetaSecondary}`}>
                       Publish for $1.99 and set your listening price.
@@ -2956,8 +2956,8 @@ async function startStopNarration() {
                     />
                   </div>
                   <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>My Location</div>
-                    <div className={styles.pickRouteMeta}>{surpriseMixSubtitle}</div>
+                    <div className={styles.pickRouteTitle}>What Happened Here</div>
+                    <div className={styles.pickRouteMeta}>Hear the story of the place you&apos;re standing.</div>
                   </div>
                 </div>
               </button>
@@ -2981,38 +2981,12 @@ async function startStopNarration() {
                     />
                   </div>
                   <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>Follow along</div>
-                    <div className={styles.pickRouteMeta}>Pick one destination. Stories appear as you drive.</div>
+                    <div className={styles.pickRouteTitle}>Along the Way</div>
+                    <div className={styles.pickRouteMeta}>Stories appear as you travel to your destination.</div>
                   </div>
                 </div>
               </button>
 
-              {INSTAGRAM_IMPORT_ENABLED ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    router.push("/import/instagram");
-                  }}
-                  className={`${styles.pickRouteRow} ${styles.landingSecondaryRow}`}
-                >
-                  <div className={styles.pickRouteMainWithIcon}>
-                    <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                      <Image
-                        src="/icons/file-earmark-text.svg"
-                        alt=""
-                        width={24}
-                        height={24}
-                        className={styles.pickRouteWalkIcon}
-                        aria-hidden="true"
-                      />
-                    </div>
-                    <div className={styles.pickRouteMain}>
-                      <div className={styles.pickRouteTitle}>Instagram</div>
-                      <div className={styles.pickRouteMeta}>Paste a public post. Turn it into a draft.</div>
-                    </div>
-                  </div>
-                </button>
-              ) : null}
             </div>
 
             <div className={styles.landingSecondaryLabel}>Locations</div>
@@ -3444,7 +3418,33 @@ async function startStopNarration() {
               <h2 className={styles.pickHeading}>Create your mix</h2>
             </div>
 
-            
+            {INSTAGRAM_IMPORT_ENABLED ? (
+              <button
+                type="button"
+                onClick={() => {
+                  router.push("/import/instagram");
+                }}
+                className={`${styles.pickRouteRow} ${styles.buildMixEntryRow}`}
+              >
+                <div className={styles.pickRouteMainWithIcon}>
+                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                    <Image
+                      src="/icons/file-earmark-text.svg"
+                      alt=""
+                      width={24}
+                      height={24}
+                      className={styles.pickRouteWalkIcon}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className={styles.pickRouteMain}>
+                    <div className={styles.pickRouteTitle}>Creator Mixes</div>
+                    <div className={styles.pickRouteMeta}>Mixes created by the people who know the place best.</div>
+                  </div>
+                </div>
+              </button>
+            ) : null}
+
             <div className={styles.buildMixLinkAddWrap}>
               <div className={styles.buildMixSearchRow}>
                 <div className={styles.buildMixSearchInputWrap}>
@@ -3685,9 +3685,9 @@ async function startStopNarration() {
             </button>
 
             <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>Follow Along</h2>
+              <h2 className={styles.pickHeading}>Along the Way</h2>
               <p className={styles.followAlongLead}>
-                Choose one destination. Wandrful will preload stories and surface them automatically as you drive.
+                Stories appear as you travel to your destination.
               </p>
             </div>
 

@@ -61,46 +61,45 @@ const VISITED_COLOR = "#8e93a3";
 const UPCOMING_COLOR = "#2b1b3f";
 const USER_COLOR = "#2e78ff";
 const ORIGIN_COLOR = "#111111";
-const DEFAULT_MAP_ID = "DEMO_MAP_ID";
 const MINIMAL_TOURISM_MAP_STYLES: google.maps.MapTypeStyle[] = [
   {
     elementType: "geometry",
-    stylers: [{ color: "#f4f4f1" }],
+    stylers: [{ color: "#f6f5f1" }],
   },
   {
     elementType: "labels.text.fill",
-    stylers: [{ color: "#4a4a4a" }],
+    stylers: [{ color: "#767676" }],
   },
   {
     elementType: "labels.text.stroke",
-    stylers: [{ color: "#f4f4f1" }],
+    stylers: [{ color: "#f6f5f1" }],
   },
   {
     featureType: "administrative",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#d3d3d3" }],
+    elementType: "labels",
+    stylers: [{ visibility: "off" }],
   },
   {
-    featureType: "landscape.man_made",
+    featureType: "administrative.land_parcel",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "administrative.neighborhood",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "landscape",
     elementType: "geometry",
-    stylers: [{ color: "#ecece8" }],
+    stylers: [{ color: "#f1f0eb" }],
   },
   {
     featureType: "poi",
-    elementType: "labels.icon",
     stylers: [{ visibility: "off" }],
   },
   {
-    featureType: "poi.business",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.medical",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.school",
-    stylers: [{ visibility: "off" }],
+    featureType: "poi.park",
+    elementType: "geometry",
+    stylers: [{ color: "#ecebe4" }],
   },
   {
     featureType: "road",
@@ -110,11 +109,35 @@ const MINIMAL_TOURISM_MAP_STYLES: google.maps.MapTypeStyle[] = [
   {
     featureType: "road",
     elementType: "geometry.stroke",
-    stylers: [{ color: "#dddddd" }],
+    stylers: [{ color: "#e9e6df" }],
+  },
+  {
+    featureType: "road",
+    elementType: "labels.icon",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "road.arterial",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#8a857d" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry",
+    stylers: [{ color: "#fdfcf8" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#e0ddd6" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#7d776f" }],
   },
   {
     featureType: "road.local",
-    elementType: "labels",
     stylers: [{ visibility: "off" }],
   },
   {
@@ -124,12 +147,12 @@ const MINIMAL_TOURISM_MAP_STYLES: google.maps.MapTypeStyle[] = [
   {
     featureType: "water",
     elementType: "geometry",
-    stylers: [{ color: "#d9d9d9" }],
+    stylers: [{ color: "#d8dde1" }],
   },
   {
     featureType: "water",
     elementType: "labels.text.fill",
-    stylers: [{ color: "#666666" }],
+    stylers: [{ color: "#7a7f84" }],
   },
 ];
 
@@ -149,9 +172,9 @@ export default function RouteMap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
-  const stopMarkersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
-  const endpointMarkersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
-  const meMarkerRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
+  const stopMarkersRef = useRef<google.maps.Marker[]>([]);
+  const endpointMarkersRef = useRef<google.maps.Marker[]>([]);
+  const meMarkerRef = useRef<google.maps.Marker | null>(null);
   const routeLineRef = useRef<google.maps.Polyline | null>(null);
   const routeLineUnderlayRef = useRef<google.maps.Polyline | null>(null);
   const [isMapReady, setIsMapReady] = useState(false);
@@ -247,7 +270,6 @@ export default function RouteMap({
         const map = new Map(containerRef.current, {
           center: { lat: initialView.lat, lng: initialView.lng },
           zoom: initialView.zoom,
-          mapId: (process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID || "").trim() || DEFAULT_MAP_ID,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
@@ -303,7 +325,7 @@ export default function RouteMap({
         map,
         position: { lat: stop.lat, lng: stop.lng },
         title: stop.title,
-        pin: buildStopMarkerPin(stop.status, stop.label),
+        icon: buildStopMarkerIcon(stop.status, stop.label),
         zIndex: stop.status === "current" ? 30 : 20 + idx,
         clickable: true,
       });
@@ -327,10 +349,9 @@ export default function RouteMap({
           map,
           position: myPos,
           title: "Your location",
-          pin: new google.maps.marker.PinElement({
+          icon: buildPinIcon({
             background: USER_COLOR,
             borderColor: "#ffffff",
-            glyph: "",
             scale: 0.72,
           }),
           zIndex: 10,
@@ -493,7 +514,7 @@ function buildDisplayStops(
   });
 }
 
-function buildStopMarkerPin(status: StopVisualStatus, label: string) {
+function buildStopMarkerIcon(status: StopVisualStatus, label: string) {
   const background =
     status === "current"
       ? CURRENT_STOP_COLOR
@@ -503,7 +524,7 @@ function buildStopMarkerPin(status: StopVisualStatus, label: string) {
           ? VISITED_COLOR
           : UPCOMING_COLOR;
 
-  return new google.maps.marker.PinElement({
+  return buildPinIcon({
     background,
     borderColor: "#ffffff",
     glyphColor: status === "current" ? "#111111" : "#ffffff",
@@ -513,7 +534,7 @@ function buildStopMarkerPin(status: StopVisualStatus, label: string) {
 }
 
 function buildEndpointMarkers(map: google.maps.Map, endpoints: Props["endpoints"]) {
-  const markers: google.maps.marker.AdvancedMarkerElement[] = [];
+  const markers: google.maps.Marker[] = [];
 
   if (endpoints?.origin) {
     markers.push(
@@ -521,7 +542,7 @@ function buildEndpointMarkers(map: google.maps.Map, endpoints: Props["endpoints"
         map,
         position: endpoints.origin,
         title: endpoints.origin.label || "Start",
-        pin: new google.maps.marker.PinElement({
+        icon: buildPinIcon({
           background: ORIGIN_COLOR,
           borderColor: "#ffffff",
           glyphColor: "#ffffff",
@@ -539,7 +560,7 @@ function buildEndpointMarkers(map: google.maps.Map, endpoints: Props["endpoints"
         map,
         position: endpoints.destination,
         title: endpoints.destination.label || "Finish",
-        pin: new google.maps.marker.PinElement({
+        icon: buildPinIcon({
           background: ARRIVAL_COLOR,
           borderColor: "#ffffff",
           glyphColor: "#ffffff",
@@ -597,15 +618,15 @@ function fitMapToRoute(
   map.fitBounds(bounds, 56);
 }
 
-function clearMarkers(markers: google.maps.marker.AdvancedMarkerElement[]) {
+function clearMarkers(markers: google.maps.Marker[]) {
   for (const marker of markers) {
-    marker.map = null;
+    marker.setMap(null);
   }
 }
 
-function clearMarker(marker: google.maps.marker.AdvancedMarkerElement | null) {
+function clearMarker(marker: google.maps.Marker | null) {
   if (marker) {
-    marker.map = null;
+    marker.setMap(null);
   }
 }
 
@@ -644,17 +665,64 @@ function createPinMarker(params: {
   map: google.maps.Map;
   position: google.maps.LatLngLiteral;
   title: string;
-  pin: google.maps.marker.PinElement;
+  icon: google.maps.Icon;
   zIndex?: number;
   clickable?: boolean;
 }) {
-  const marker = new google.maps.marker.AdvancedMarkerElement({
+  const marker = new google.maps.Marker({
     map: params.map,
     position: params.position,
     title: params.title,
     zIndex: params.zIndex,
-    content: params.pin.element,
-    gmpClickable: Boolean(params.clickable),
+    icon: params.icon,
+    clickable: Boolean(params.clickable),
   });
   return marker;
+}
+
+function buildPinIcon(params: {
+  background: string;
+  borderColor: string;
+  glyph?: string;
+  glyphColor?: string;
+  scale?: number;
+}): google.maps.Icon {
+  const scale = params.scale ?? 1;
+  const width = 36;
+  const height = 36;
+  const scaledWidth = width * scale;
+  const scaledHeight = height * scale;
+  const glyph = params.glyph ?? "";
+  const glyphColor = params.glyphColor ?? "#ffffff";
+  const glyphFontSize = glyph.length > 1 ? 14 : 18;
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 36 36">
+      <circle
+        cx="18"
+        cy="18"
+        r="15"
+        fill="${params.background}"
+        stroke="${params.borderColor}"
+        stroke-width="2.5"
+      />
+      ${glyph
+        ? `<text x="18" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="${glyphFontSize}" font-weight="700" fill="${glyphColor}">${escapeSvgText(glyph)}</text>`
+        : ""}
+    </svg>
+  `.trim();
+
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new google.maps.Size(scaledWidth, scaledHeight),
+    anchor: new google.maps.Point(scaledWidth / 2, scaledHeight / 2),
+  };
+}
+
+function escapeSvgText(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
 }

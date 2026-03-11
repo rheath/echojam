@@ -695,6 +695,10 @@
   gap: 10px;
 }
 
+.buildMixEntryRow {
+  margin-top: 18px;
+}
+
 .buildMixSearchRow {
   display: block;
 }
