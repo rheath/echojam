@@ -308,7 +308,7 @@
   align-items: center;
   max-width: calc(100% - 164px); 
   border-radius: 999px; 
-  background: var(--landing-price-pill-bg);
+  background: #111;
   color: var(--landing-price-pill-fg); 
   backdrop-filter: blur(10px);
   font-size: 15px;
@@ -438,6 +438,154 @@
   opacity: 0.84;
 }
 
+.pickRouteCardGrid {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+.pickRouteCardShell {
+  position: relative;
+}
+
+.pickRouteCard {
+  position: relative;
+  min-height: 258px;
+  width: 100%;
+  border: 1px solid #333;
+  border-radius: 20px;
+  overflow: hidden;
+  background-color: #14161b;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  isolation: isolate;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+  transform: translateY(0);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    opacity 180ms ease;
+}
+
+.pickRouteCard:hover {
+  border-color: #666;
+}
+
+.pickRouteCard:focus-visible {
+  outline: 2px solid rgba(255, 121, 168, 0.95);
+  outline-offset: 3px;
+}
+
+.pickRouteCardSelected {
+
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+}
+
+.pickRouteCardPending,
+.pickRouteCard:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+.pickRouteCardOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.pickRouteCardContent {
+  position: relative;
+  z-index: 1;
+  min-height: 258px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 16px;
+}
+
+.pickRouteCardSpacer {
+  flex: 1 1 auto;
+}
+
+.pickRouteCardTitleWrap {
+  flex: 1 1 auto;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.pickRouteCardTitle {
+  max-width: 82%;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 0.95;
+  text-shadow: 0 4px 4px rgba(0, 0, 0, 0.75);
+}
+
+.pickRouteCardMeta {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.pickRouteCardBadge {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: rgba(7, 8, 12, 0.5);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+}
+
+.pickRouteCardBadgeIcon {
+  width: 18px;
+  height: 18px;
+  filter: invert(1);
+  opacity: 0.94;
+}
+
+.pickRouteCardMetaText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.pickRouteCardMetaPrimary {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.pickRouteCardMetaSecondary {
+  font-size: 15px;
+  line-height: 1.2;
+  opacity: 0.84;
+}
+
+.pickRouteActionList {
+  margin-top: 24px;
+  border-top: 1px solid #34353b;
+  border-bottom: 1px solid #34353b;
+}
+
+.pickRouteActionList > :last-child {
+  border-bottom: 0;
+}
+
 .landingRouteList {
   margin-top: 12px;
   border-top: 1px solid var(--landing-divider);
@@ -464,6 +612,79 @@
 
 .landingSecondaryRow .pickRouteMeta {
   font-size: 15px;
+}
+
+.landingLocationSection {
+  margin-top: 20px;
+  margin-left: -32px;
+  margin-right: -32px;
+  padding: 16px 32px 18px;
+  background: #fff1; 
+  align-self: stretch;
+}
+
+.landingLocationSection .landingSecondaryLabel {
+  margin-top: 0;
+}
+
+.landingLocationGrid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.landingLocationCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: center;
+}
+
+.landingLocationCard:hover .landingLocationImageWrap {
+  transform: translateY(-2px);
+  border-color: var(--landing-card-border-hover);
+  box-shadow: var(--landing-card-shadow);
+}
+
+.landingLocationCard:focus-visible {
+  outline: none;
+}
+
+.landingLocationCard:focus-visible .landingLocationImageWrap {
+  border-color: var(--landing-card-border-hover);
+  box-shadow: var(--landing-selected-shadow);
+  transform: translateY(-2px);
+}
+
+.landingLocationImageWrap {
+  position: relative;
+  width: min(100%, 84px);
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  border: 1px solid var(--landing-card-border);
+  box-shadow: var(--landing-card-shadow);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.landingLocationImage {
+  object-fit: cover;
+}
+
+.landingLocationTitle {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.15;
 }
 
 .landingPaidLabel {
@@ -1367,8 +1588,40 @@
   width: calc(100% + 64px);
   margin-left: -32px;
   padding: 12px 32px 16px;
-  border-top: 1px solid #2b2b33;
+  border-top: 1px solid #666;
   background: #0a0a10;
+}
+
+.pickRouteStickyCtaContent {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+}
+
+.pickRouteStickyCtaTitle {
+  font-size: 14px;
+  font-weight: normal;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.pickRouteStickyCtaPricePill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #111;
+  color: var(--landing-price-pill-fg);
+  backdrop-filter: blur(10px);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  padding:0px;
 }
 
 .buildMixStickyCtaEnter {
@@ -2506,10 +2759,47 @@
     max-width: 100%;
   }
 
+  .pickRouteCardGrid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+  }
+
+  .pickRouteCard {
+    min-height: 180px;
+  }
+
+  .pickRouteCardContent {
+    min-height: 180px;
+  }
+
+  .pickRouteCardTitle {
+    max-width: 100%;
+  }
+
+  .pickRouteActionList {
+    margin-top: 20px;
+  }
+
   
 
   .landingRouteList {
     margin-top: 24px;
+  }
+
+  .landingLocationGrid {
+    margin-top: 18px;
+    gap: 12px;
+  }
+
+  .landingLocationSection {
+    margin-top: 18px;
+    margin-left: -16px;
+    margin-right: 0;
+    padding: 14px 16px 16px;
+  }
+
+  .landingLocationImageWrap {
+    width: min(100%, 72px);
   }
 
   .landingSecondaryRow {
@@ -2629,7 +2919,7 @@
     margin-left: 0;
     margin-top: 0;
     padding: 12px 24px calc(16px + env(safe-area-inset-bottom));
-    justify-content: center;
+    justify-content: space-between;
     z-index: 20;
   }
 

@@ -2903,6 +2903,51 @@ async function startStopNarration() {
               </div>
             ))}
 
+            <div className={styles.landingLocationSection}>
+              <div className={styles.landingSecondaryLabel}>Browse locations</div>
+
+              <div className={styles.landingLocationGrid}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    openPresetCity("nyc");
+                  }}
+                  className={styles.landingLocationCard}
+                >
+                  <div className={styles.landingLocationImageWrap} aria-hidden="true">
+                    <Image
+                      src={getPresetCityMeta("nyc").fallbackImage}
+                      alt=""
+                      fill
+                      unoptimized
+                      sizes="(max-width: 720px) 40vw, 160px"
+                      className={styles.landingLocationImage}
+                    />
+                  </div>
+                  <div className={styles.landingLocationTitle}>New York City</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    openPresetCity("boston");
+                  }}
+                  className={styles.landingLocationCard}
+                >
+                  <div className={styles.landingLocationImageWrap} aria-hidden="true">
+                    <Image
+                      src={getPresetCityMeta("boston").fallbackImage}
+                      alt=""
+                      fill
+                      unoptimized
+                      sizes="(max-width: 720px) 40vw, 160px"
+                      className={styles.landingLocationImage}
+                    />
+                  </div>
+                  <div className={styles.landingLocationTitle}>Boston</div>
+                </button>
+              </div>
+            </div>
+
             <div className={styles.landingSecondaryLabel}>Create your own</div>
 
             <div className={`${styles.pickRouteList} ${styles.landingRouteList}`}>
@@ -2987,59 +3032,6 @@ async function startStopNarration() {
                 </div>
               </button>
 
-            </div>
-
-            <div className={styles.landingSecondaryLabel}>Locations</div>
-
-            <div className={`${styles.pickRouteList} ${styles.landingRouteList}`}>
-              <button
-                type="button"
-                onClick={() => {
-                  openPresetCity("nyc");
-                }}
-                className={`${styles.pickRouteRow} ${styles.landingSecondaryRow}`}
-              >
-                <div className={styles.pickRouteMainWithIcon}>
-                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                    <Image
-                      src="/icons/geo-alt-fill.svg"
-                      alt=""
-                      width={24}
-                      height={24}
-                      className={styles.pickRouteWalkIcon}
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>New York City</div>
-                    <div className={styles.pickRouteMeta}>Architecture, city animals, superheroes, and weird history.</div>
-                  </div>
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  openPresetCity("boston");
-                }}
-                className={`${styles.pickRouteRow} ${styles.landingSecondaryRow}`}
-              >
-                <div className={styles.pickRouteMainWithIcon}>
-                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                    <Image
-                      src="/icons/geo-alt-fill.svg"
-                      alt=""
-                      width={24}
-                      height={24}
-                      className={styles.pickRouteWalkIcon}
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>Boston</div>
-                    <div className={styles.pickRouteMeta}>Revolutionary secrets and old taverns.</div>
-                  </div>
-                </div>
-              </button>
             </div>
 
             <div className={styles.landingFooter}>
@@ -3276,65 +3268,66 @@ async function startStopNarration() {
                 </button>
                 <div className={styles.pickCopyBlock}>
                   <h2 className={styles.pickHeading}>
-                    Choose your route in{" "}
-                    <button type="button" className={styles.pickHeadingCityLink} onClick={goHome}>
+                    Choose your mix in{" "} 
                       {selectedCityLabel}
-                    </button>
+                     
                   </h2>
                 </div>
 
-                <div className={styles.pickRouteList}>
+                <div className={styles.pickRouteCardGrid}>
                   {routesForSelectedCity.map((r) => {
                     const isRoutePending = pendingPresetRouteAction?.routeId === r.id;
+                    const pricingLabel = getRoutePricingLabel(r.pricing);
+                    const stopCountLabel = formatStopCount(getPresetRouteStopCount(r));
+                    const narratorLabel = getPresetRouteNarratorLabel(r);
 
                     return (
-                    <div
-                      key={r.id}
-                      className={`${styles.pickRouteRow} ${selectedRouteId === r.id ? styles.pickRouteRowSelected : ""}`}
-                    >
+                    <div key={r.id} className={styles.pickRouteCardShell}>
                       <button
                         type="button"
                         onClick={() => {
                           startTourFromRoute(r.id);
                         }}
                         disabled={isRoutePending}
-                        className={styles.pickRoutePrimaryButton}
+                        className={`${styles.pickRouteCard} ${selectedRouteId === r.id ? styles.pickRouteCardSelected : ""} ${isRoutePending ? styles.pickRouteCardPending : ""}`}
+                        style={{ backgroundImage: `url("${getLandingRouteImage(r)}")` }}
                       >
-                        <div className={styles.pickRouteMainWithIcon}>
-                          <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                            <Image
-                              src={getPresetRouteIcon()}
-                              alt=""
-                              width={24}
-                              height={24}
-                              className={styles.pickRouteWalkIcon}
-                              aria-hidden="true"
-                            />
-                          </div>
-                          <div className={styles.pickRouteMain}>
-                            <div className={styles.pickRouteTitle}>{r.title}</div>
-                            <div className={styles.pickRouteMeta}>
-                              Story by {getPresetRouteNarratorLabel(r)}
-                            </div>
-                            <div className={`${styles.pickRouteMeta} ${styles.pickRouteMetaSecondary}`}>
-                              {r.durationLabel} • {formatStopCount(getPresetRouteStopCount(r))}
-                            </div>
-                          </div>
+                        <div className={styles.pickRouteCardOverlay} aria-hidden="true" />
+                        <div className={styles.landingFeaturedCardPricePill} aria-hidden="true">
+                          {pricingLabel}
                         </div>
-                        <div className={styles.pickRowArrow} aria-hidden="true">
-                          <Image
-                            src="/icons/chevron-right.svg"
-                            alt=""
-                            width={28}
-                            height={28}
-                            className={styles.landingArrowIcon}
-                            aria-hidden="true"
-                          />
+                        <div className={styles.pickRouteCardContent}>
+                          <div className={styles.pickRouteCardSpacer} aria-hidden="true" />
+                          <div className={styles.pickRouteCardTitleWrap}>
+                            <div className={`${styles.pickRouteCardTitle} ${getLandingTitleStyleClass(r.id)} ${getLandingTitleFontClass(r.id)}`}>
+                              {r.title}
+                            </div>
+                          </div>
+                          <div className={styles.pickRouteCardMeta}>
+                            <div className={styles.pickRouteCardBadge} aria-hidden="true">
+                              <Image
+                                src={getPresetRouteIcon()}
+                                alt=""
+                                width={18}
+                                height={18}
+                                className={styles.pickRouteCardBadgeIcon}
+                                aria-hidden="true"
+                              />
+                            </div>
+                            <div className={styles.pickRouteCardMetaText}>
+                              <div className={styles.pickRouteCardMetaPrimary}>Story by {narratorLabel}</div>
+                              <div className={styles.pickRouteCardMetaSecondary}>
+                                {r.durationLabel} • {stopCountLabel}
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       </button>
                     </div>
                     );
                   })}
+                </div>
+                <div className={styles.pickRouteActionList}>
                   <button
                     type="button"
                     onClick={() => {
@@ -3371,6 +3364,28 @@ async function startStopNarration() {
                       </div>
                     </button>
                 </div>
+                {selectedRoute && selectedPersona && (
+                  <div className={`${styles.pickDurationStartWrap} ${styles.buildMixStickyCtaWrap} ${styles.buildMixStickyCtaEnter}`}>
+                    <div className={styles.pickRouteStickyCtaContent}>
+                      <div className={styles.pickRouteStickyCtaTitle}>{selectedRoute.title}</div>
+                      <div className={styles.pickRouteStickyCtaPricePill}>
+                        {getRoutePricingLabel(selectedRoute.pricing)}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setErr(null);
+                        setNarratorFlowSource(null);
+                        setPickDurationPage("narrator");
+                      }}
+                      disabled={Boolean(pendingPresetRouteAction)}
+                      className={`${styles.landingCtaButton} ${styles.startTourButton}`}
+                    >
+                      Start
+                    </button>
+                  </div>
+                )}
               </section>
 
               <section className={styles.pickImagePane}>
@@ -4394,7 +4409,7 @@ async function startStopNarration() {
                     disabled={isActivePresetWalkRegenerating}
                     aria-label={`Regenerate ${route.title} with latest guidance`}
                   >
-                    {isActivePresetWalkRegenerating ? "Regenerating..." : "Regenerate"}
+                    {isActivePresetWalkRegenerating ? "Regenerating..." : "Refresh"}
                   </button>
                 )}
 
