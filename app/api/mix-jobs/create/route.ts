@@ -9,6 +9,7 @@ import {
 import { type TransportMode } from "@/lib/mixConstraints";
 import {
   prepareCustomRouteJob,
+  type CustomRouteExperienceKind,
   runCustomRouteGeneration,
 } from "@/lib/customRouteGeneration";
 
@@ -22,6 +23,7 @@ type CreateBody = {
   source?: "manual" | "instant" | "follow_along";
   routeTitle?: string | null;
   narratorGuidance?: string | null;
+  experienceKind?: CustomRouteExperienceKind | null;
 };
 
 const CREATE_JOB_REQUEST_TIMEOUT_MS = 12000;
@@ -68,7 +70,7 @@ export async function POST(req: Request) {
             source: body.source,
             routeTitle: body.routeTitle,
             narratorGuidance,
-            experienceKind: "mix",
+            experienceKind: body.experienceKind ?? "mix",
           });
         } catch (e) {
           if (

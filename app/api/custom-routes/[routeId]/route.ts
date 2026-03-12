@@ -65,7 +65,7 @@ type RouteRow = {
   narrator_default: "adult" | "preteen" | "ghost" | "custom" | null;
   narrator_guidance: string | null;
   narrator_voice: string | null;
-  experience_kind: "mix" | "follow_along" | null;
+  experience_kind: "mix" | "follow_along" | "walk_discovery" | null;
   origin_label: string | null;
   origin_lat: number | null;
   origin_lng: number | null;

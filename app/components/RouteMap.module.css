@@ -37,31 +37,31 @@
   color: #4f5564;
 }
 
-:global(.gm-style .gm-style-iw-c) {
+.mapShell :global(.gm-style .gm-style-iw-c) {
   padding: 12px !important;
   max-height: none !important;
 }
 
-:global(.gm-style .gm-style-iw-ch) {
+.mapShell :global(.gm-style .gm-style-iw-ch) {
   padding: 0 !important;
   min-height: 28px !important;
 }
 
-:global(.gm-style .gm-style-iw-chr) {
+.mapShell :global(.gm-style .gm-style-iw-chr) {
   height: 28px !important;
 }
 
-:global(.gm-style .gm-ui-hover-effect) {
+.mapShell :global(.gm-style .gm-ui-hover-effect) {
   width: 28px !important;
   height: 28px !important;
   margin: 0 !important;
 }
 
-:global(.gm-style .gm-ui-hover-effect > span) {
+.mapShell :global(.gm-style .gm-ui-hover-effect > span) {
   margin: 4px !important;
 }
 
-:global(.gm-style .gm-style-iw-d) {
+.mapShell :global(.gm-style .gm-style-iw-d) {
   overflow: visible !important;
   max-height: none !important;
 }

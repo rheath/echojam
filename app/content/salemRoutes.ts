@@ -46,7 +46,7 @@ export type RouteDef = {
   pricing?: RoutePricing;
   city?: PresetCity;
   transportMode?: "walk" | "drive";
-  experienceKind?: "preset" | "mix" | "follow_along";
+  experienceKind?: "preset" | "mix" | "follow_along" | "walk_discovery";
   routePathCoords?: [number, number][] | null;
   origin?: { lat: number; lng: number; label: string; subtitle?: string | null } | null;
   destination?: { lat: number; lng: number; label: string; subtitle?: string | null } | null;

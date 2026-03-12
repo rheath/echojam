@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
-import { Bangers, Bree_Serif, Cinzel, Forum, Grenze, Schoolbell, Special_Elite } from "next/font/google";
 import { supabase } from "@/lib/supabaseClient";
 import {
   getPresetRoutesByCity,
@@ -23,46 +22,22 @@ import {
   shouldTriggerFollowAlongStop,
   type FollowAlongLocation,
 } from "@/lib/followAlong";
+import {
+  appendWalkDiscoveryPosition,
+  buildWalkDiscoveryCandidateKey,
+  pruneWalkDiscoveryCooldowns,
+  shouldExpireWalkDiscoverySuggestion,
+  type WalkDiscoveryPositionSample,
+  type WalkDiscoverySuggestion,
+  WALK_DISCOVERY_COOLDOWN_MS,
+  WALK_DISCOVERY_FETCH_MIN_MOVE_METERS,
+  WALK_DISCOVERY_MIN_DISTANCE_FROM_ACCEPTED_METERS,
+} from "@/lib/walkDiscovery";
 import dynamic from "next/dynamic";
 import styles from "./HomeClient.module.css";
 
 const RouteMap = dynamic(() => import("./components/RouteMap"), { ssr: false });
 const SCRIPT_MODAL_EXIT_MS = 240;
-
-const landingRevolutionaryFont = Cinzel({
-  subsets: ["latin"],
-  weight: ["600", "700"],
-});
-
-const landingTavernsFont = Bree_Serif({
-  subsets: ["latin"],
-  weight: "400",
-});
-
-const landingArchitectureFont = Forum({
-  subsets: ["latin"],
-  weight: "400",
-});
-
-const landingSalemFont = Grenze({
-  subsets: ["latin"],
-  weight: ["500", "600"],
-});
-
-const landingAnimalsFont = Schoolbell({
-  subsets: ["latin"],
-  weight: "400",
-});
-
-const landingSuperheroFont = Bangers({
-  subsets: ["latin"],
-  weight: "400",
-});
-
-const landingWeirdHistoryFont = Special_Elite({
-  subsets: ["latin"],
-  weight: "400",
-});
 
 
 type JamRow = {
@@ -123,7 +98,7 @@ type CustomRouteResponse = {
     city?: string | null;
     length_minutes: number;
     transport_mode: TransportMode;
-    experience_kind?: "mix" | "follow_along" | null;
+    experience_kind?: "mix" | "follow_along" | "walk_discovery" | null;
     status: "queued" | "generating" | "generating_script" | "generating_audio" | "ready" | "ready_with_warnings" | "failed";
     narrator_default?: Persona | null;
     narrator_guidance?: string | null;
@@ -212,12 +187,38 @@ type NearbyPlacesResponse = {
   sourceSummary: Record<string, number>;
 };
 
+type WalkDiscoveryStartResponse = {
+  jamId: string;
+  routeId: string;
+  routeRef: string;
+  insertedStopId: string;
+  insertedStopIndex: number;
+  source: string;
+  distanceMeters: number | null;
+  startupSuggestionKey: string;
+};
+
+type WalkDiscoverySuggestResponse = {
+  suggestion: WalkDiscoverySuggestion | null;
+};
+
+type WalkDiscoveryAcceptResponse = {
+  jamId: string;
+  routeId: string;
+  routeRef: string;
+  insertedStopId: string;
+  insertedStopIndex: number;
+  source: string;
+  distanceMeters: number | null;
+};
+
 type StartCustomMixOptions = {
   source?: "manual" | "instant";
   routeTitle?: string;
   errorStep?: FlowStep;
   cityOverride?: string;
   narratorGuidance?: string | null;
+  experienceKind?: "mix" | "walk_discovery";
 };
 
 type StartPresetTourOptions = {
@@ -243,6 +244,7 @@ const PERSONA_KEYS: Array<Exclude<Persona, "custom">> = ["adult", "preteen", "gh
 const CUSTOM_NARRATOR_MAX_CHARS = 500;
 const DEFAULT_STOP_IMAGE = "/images/salem/placeholder.png";
 const LANDING_THEME_STORAGE_KEY = "wandrful-theme";
+const WALK_DISCOVERY_STORAGE_PREFIX = "wandrful-walk-discovery";
 const CITY_META: Record<CityOption, { label: string; center: { lat: number; lng: number } }> = {
   salem: { label: "Salem", center: { lat: 42.5195, lng: -70.8967 } },
   boston: { label: "Boston", center: { lat: 42.3601, lng: -71.0589 } },
@@ -251,7 +253,7 @@ const CITY_META: Record<CityOption, { label: string; center: { lat: number; lng:
 };
 const FEATURED_PRESET_SECTIONS = [
   {
-    title: "Time Travel Stories",
+    title: "Time Travel Journeys",
     routeIds: [
       "boston-revolutionary-secrets",
       "boston-old-taverns",
@@ -260,7 +262,7 @@ const FEATURED_PRESET_SECTIONS = [
     ] as const satisfies readonly RouteDef["id"][],
   },
   {
-    title: "City Adventure Stories",
+    title: "City Adventure Journeys",
     routeIds: [
       "nyc-city-animals-adventure",
       "nyc-superhero-city",
@@ -376,13 +378,13 @@ function hashString(value: string) {
 }
 
 function getLandingTitleFontClass(routeId: string) {
-  if (routeId === "boston-revolutionary-secrets") return landingRevolutionaryFont.className;
-  if (routeId === "boston-old-taverns") return landingTavernsFont.className;
-  if (routeId === "nyc-architecture-walk") return landingArchitectureFont.className;
-  if (routeId === "salem-after-dark") return landingSalemFont.className;
-  if (routeId === "nyc-city-animals-adventure") return landingAnimalsFont.className;
-  if (routeId === "nyc-superhero-city") return landingSuperheroFont.className;
-  if (routeId === "nyc-weird-wacky-history") return landingWeirdHistoryFont.className;
+  if (routeId === "boston-revolutionary-secrets") return styles.landingTitleFontRevolutionary;
+  if (routeId === "boston-old-taverns") return styles.landingTitleFontTaverns;
+  if (routeId === "nyc-architecture-walk") return styles.landingTitleFontArchitecture;
+  if (routeId === "salem-after-dark") return styles.landingTitleFontSalem;
+  if (routeId === "nyc-city-animals-adventure") return styles.landingTitleFontAnimals;
+  if (routeId === "nyc-superhero-city") return styles.landingTitleFontSuperhero;
+  if (routeId === "nyc-weird-wacky-history") return styles.landingTitleFontWeirdHistory;
   return "";
 }
 
@@ -554,6 +556,41 @@ async function requestCurrentGeoPosition(timeoutMs = 8000): Promise<{ lat: numbe
   });
 }
 
+function getWalkDiscoveryStorageKey(jamId: string) {
+  return `${WALK_DISCOVERY_STORAGE_PREFIX}:${jamId}`;
+}
+
+function loadWalkDiscoveryCooldowns(jamId: string) {
+  if (typeof window === "undefined") return {} as Record<string, number>;
+  try {
+    const raw = window.localStorage.getItem(getWalkDiscoveryStorageKey(jamId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const numeric: Record<string, number> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        numeric[key] = value;
+      }
+    }
+    return pruneWalkDiscoveryCooldowns(numeric);
+  } catch {
+    return {};
+  }
+}
+
+function saveWalkDiscoveryCooldowns(jamId: string, cooldowns: Record<string, number>) {
+  if (typeof window === "undefined") return;
+  try {
+    const pruned = pruneWalkDiscoveryCooldowns(cooldowns);
+    window.localStorage.setItem(
+      getWalkDiscoveryStorageKey(jamId),
+      JSON.stringify(pruned)
+    );
+  } catch {
+    // Ignore localStorage failures; discovery still works in-memory.
+  }
+}
+
 export default function HomeClient() {
   const [distanceToStopM, setDistanceToStopM] = useState<number | null>(null);
 const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
@@ -609,6 +646,10 @@ const [isGeneratingScriptForModal, setIsGeneratingScriptForModal] = useState(fal
 const [isGeneratingAudioForCurrentStop, setIsGeneratingAudioForCurrentStop] = useState(false);
 const [isGeneratingNearbyStory, setIsGeneratingNearbyStory] = useState(false);
 const [isResolvingNearbyGeo, setIsResolvingNearbyGeo] = useState(false);
+const [isStartingWalkDiscovery, setIsStartingWalkDiscovery] = useState(false);
+const [walkDiscoverySuggestion, setWalkDiscoverySuggestion] = useState<WalkDiscoverySuggestion | null>(null);
+const [isResolvingWalkDiscoverySuggestion, setIsResolvingWalkDiscoverySuggestion] = useState(false);
+const [isAcceptingWalkDiscoverySuggestion, setIsAcceptingWalkDiscoverySuggestion] = useState(false);
 const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
 const [isEditingStopsFromWalk, setIsEditingStopsFromWalk] = useState(false);
 const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
@@ -621,6 +662,10 @@ const followAlongLastPositionRef = useRef<{
   lng: number;
   timestamp: number;
 } | null>(null);
+const walkDiscoveryRecentPositionsRef = useRef<WalkDiscoveryPositionSample[]>([]);
+const walkDiscoveryLastFetchPosRef = useRef<{ lat: number; lng: number } | null>(null);
+const walkDiscoveryCooldownsRef = useRef<Record<string, number>>({});
+const walkDiscoveryRequestIdRef = useRef(0);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -650,6 +695,7 @@ const followAlongLastPositionRef = useRef<{
     [customRoute, jam?.route_id]
   );
   const persona: Persona = (jam?.persona ?? "adult") as Persona;
+  const isWalkDiscoveryRoute = route?.experienceKind === "walk_discovery";
   const isPresetWalkRoute = Boolean(jam?.route_id && !jam.route_id.startsWith("custom:"));
   const currentStopIndex = useMemo(() => {
     if (!route || activeStopIndex === null) return null;
@@ -915,7 +961,7 @@ const followAlongLastPositionRef = useRef<{
   }, []);
 
   // ---------- Supabase: load jam ----------
-  async function loadJamById(id: string) {
+  const loadJamById = useCallback(async (id: string) => {
     setErr(null);
     const { data, error } = await supabase
       .from("jams")
@@ -972,7 +1018,7 @@ const followAlongLastPositionRef = useRef<{
     }
     else if (data.completed_at) setStep("end");
     else setStep("walk");
-  }
+  }, []);
 
   // ---------- Supabase: create jam ----------
   async function createJam(routeId?: string, personaValue: Persona = "adult", opts?: { skipStep?: boolean }) {
@@ -1022,7 +1068,7 @@ const followAlongLastPositionRef = useRef<{
   }
 
   // ---------- Supabase: update jam ----------
-  async function updateJam(patch: Partial<JamRow>): Promise<boolean> {
+  const updateJam = useCallback(async (patch: Partial<JamRow>): Promise<boolean> => {
     if (!jam) return false;
     setErr(null);
 
@@ -1039,7 +1085,7 @@ const followAlongLastPositionRef = useRef<{
     }
     setJam(data as JamRow);
     return true;
-  }
+  }, [jam]);
 
   function handleNarratorSelect(nextPersona: Persona) {
     setErr(null);
@@ -1084,6 +1130,7 @@ const followAlongLastPositionRef = useRef<{
         cityOverride: customRouteCity,
         routeTitle: route.title,
         narratorGuidance: narratorSelection.narratorGuidance,
+        experienceKind: route.experienceKind === "walk_discovery" ? "walk_discovery" : "mix",
       });
       return;
     }
@@ -1109,6 +1156,10 @@ const followAlongLastPositionRef = useRef<{
     setGenerationJobKind(null);
     setIsScriptModalOpen(false);
     setIsScriptModalClosing(false);
+    setIsStartingWalkDiscovery(false);
+    setWalkDiscoverySuggestion(null);
+    setIsResolvingWalkDiscoverySuggestion(false);
+    setIsAcceptingWalkDiscoverySuggestion(false);
     setReturnToWalkOnClose(false);
     setNarratorFlowSource(null);
     setSelectedRouteId(null);
@@ -1125,6 +1176,9 @@ const followAlongLastPositionRef = useRef<{
     setFollowAlongOffRoute(false);
     setFollowAlongRouteProgressM(null);
     setFollowAlongStatusCopy("Waiting for route preview");
+    walkDiscoveryRecentPositionsRef.current = [];
+    walkDiscoveryLastFetchPosRef.current = null;
+    walkDiscoveryCooldownsRef.current = {};
     setPickDurationPage("routes");
     setStep("landing");
   }
@@ -1155,7 +1209,7 @@ const followAlongLastPositionRef = useRef<{
 
   async function launchLandingAlongTheWay() {
     closeLandingJourneyModal();
-    await openFollowAlongSetup();
+    await startWalkDiscoveryExperience();
   }
 
   function toFollowAlongOrigin(
@@ -1208,6 +1262,7 @@ const followAlongLastPositionRef = useRef<{
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function openFollowAlongSetup() {
     const sessionId = followAlongSessionRef.current + 1;
     followAlongSessionRef.current = sessionId;
@@ -1530,6 +1585,223 @@ async function startStopNarration() {
     // autoplay might still be blocked in some cases; user can press play manually
   }
 }
+
+  const persistWalkDiscoveryCooldown = useCallback(
+    (candidateKey: string, until = Date.now() + WALK_DISCOVERY_COOLDOWN_MS) => {
+      if (!jam?.id) return;
+      const nextCooldowns = pruneWalkDiscoveryCooldowns({
+        ...walkDiscoveryCooldownsRef.current,
+        [candidateKey]: until,
+      });
+      walkDiscoveryCooldownsRef.current = nextCooldowns;
+      saveWalkDiscoveryCooldowns(jam.id, nextCooldowns);
+    },
+    [jam?.id]
+  );
+
+  const refreshWalkDiscoverySuggestion = useCallback(async (force = false) => {
+    if (!jam?.id || !isWalkDiscoveryRoute) return;
+    if (isResolvingWalkDiscoverySuggestion || isAcceptingWalkDiscoverySuggestion) return;
+
+    let coords = myPos;
+    if (!coords) {
+      try {
+        coords = await requestCurrentGeoPosition();
+        setMyPos(coords);
+        setGeoAllowed(true);
+      } catch {
+        setGeoAllowed(false);
+        return;
+      }
+    }
+    if (!coords) return;
+
+    const lastAcceptedStop = route?.stops[route.stops.length - 1] ?? null;
+    if (
+      lastAcceptedStop &&
+      haversineMeters(
+        coords.lat,
+        coords.lng,
+        lastAcceptedStop.lat,
+        lastAcceptedStop.lng
+      ) < WALK_DISCOVERY_MIN_DISTANCE_FROM_ACCEPTED_METERS
+    ) {
+      return;
+    }
+
+    const lastFetchPos = walkDiscoveryLastFetchPosRef.current;
+    if (
+      !force &&
+      lastFetchPos &&
+      haversineMeters(coords.lat, coords.lng, lastFetchPos.lat, lastFetchPos.lng) <
+        WALK_DISCOVERY_FETCH_MIN_MOVE_METERS
+    ) {
+      return;
+    }
+
+    const acceptedCandidateKeys = (route?.stops ?? []).map((stop) =>
+      buildWalkDiscoveryCandidateKey({
+        title: stop.title,
+        lat: stop.lat,
+        lng: stop.lng,
+      })
+    );
+
+    const requestId = walkDiscoveryRequestIdRef.current + 1;
+    walkDiscoveryRequestIdRef.current = requestId;
+    walkDiscoveryLastFetchPosRef.current = coords;
+    setIsResolvingWalkDiscoverySuggestion(true);
+
+    try {
+      const body = await fetchJsonWithTimeout<WalkDiscoverySuggestResponse>(
+        "/api/walk-discovery/suggest",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jamId: jam.id,
+            lat: coords.lat,
+            lng: coords.lng,
+            recentPositions: walkDiscoveryRecentPositionsRef.current,
+            acceptedCandidateKeys,
+            cooldownCandidateKeys: Object.keys(
+              pruneWalkDiscoveryCooldowns(walkDiscoveryCooldownsRef.current)
+            ),
+          }),
+        },
+        START_JOB_TIMEOUT_MS
+      );
+      if (requestId !== walkDiscoveryRequestIdRef.current) return;
+      setWalkDiscoverySuggestion(body.suggestion);
+    } catch (e) {
+      if (requestId !== walkDiscoveryRequestIdRef.current) return;
+      setErr(e instanceof Error ? e.message : "Failed to refresh nearby suggestion.");
+    } finally {
+      if (requestId === walkDiscoveryRequestIdRef.current) {
+        setIsResolvingWalkDiscoverySuggestion(false);
+      }
+    }
+  }, [
+    jam?.id,
+    isWalkDiscoveryRoute,
+    isResolvingWalkDiscoverySuggestion,
+    isAcceptingWalkDiscoverySuggestion,
+    myPos,
+    route,
+  ]);
+
+  async function startWalkDiscoveryExperience() {
+    if (
+      !isNearbyStoryEnabled ||
+      isStartingWalkDiscovery ||
+      isResolvingNearbyGeo
+    ) {
+      return;
+    }
+
+    try {
+      setErr(null);
+      setIsStartingWalkDiscovery(true);
+      setGenerationJobId(null);
+      setGenerationJobKind(null);
+      setGenerationProgress(15);
+      setGenerationStatusLabel(GENERATION_STATUS_LABELS.generating_script);
+      setGenerationMessage("Finding a story near you...");
+      setStep("generating");
+
+      let coords = myPos;
+      if (!coords) {
+        setIsResolvingNearbyGeo(true);
+        coords = await requestCurrentGeoPosition();
+        setMyPos(coords);
+        setGeoAllowed(true);
+      }
+
+      const body = await fetchJsonWithTimeout<WalkDiscoveryStartResponse>(
+        "/api/walk-discovery/start",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jamId: jam?.id ?? null,
+            lat: coords.lat,
+            lng: coords.lng,
+            persona: "adult",
+          }),
+        },
+        START_JOB_TIMEOUT_MS
+      );
+
+      router.replace(`/?jam=${body.jamId}`);
+      setWalkDiscoverySuggestion(null);
+      await loadJamById(body.jamId);
+      setPendingAutoplayStopId(body.insertedStopId);
+    } catch (e) {
+      setGenerationJobId(null);
+      setGenerationJobKind(null);
+      setGenerationProgress(0);
+      setStep("landing");
+      setErr(e instanceof Error ? e.message : "Failed to start On the Move.");
+    } finally {
+      setIsResolvingNearbyGeo(false);
+      setIsStartingWalkDiscovery(false);
+    }
+  }
+
+  async function rejectWalkDiscoverySuggestion() {
+    if (!walkDiscoverySuggestion) return;
+    persistWalkDiscoveryCooldown(walkDiscoverySuggestion.candidateKey);
+    setWalkDiscoverySuggestion((current) =>
+      current ? { ...current, status: "rejected" } : current
+    );
+    window.setTimeout(() => {
+      setWalkDiscoverySuggestion(null);
+      void refreshWalkDiscoverySuggestion(true);
+    }, 0);
+  }
+
+  async function acceptWalkDiscoverySuggestion() {
+    if (!jam?.id || !walkDiscoverySuggestion || isAcceptingWalkDiscoverySuggestion) return;
+
+    setIsAcceptingWalkDiscoverySuggestion(true);
+    setErr(null);
+
+    try {
+      const body = await fetchJsonWithTimeout<WalkDiscoveryAcceptResponse>(
+        "/api/walk-discovery/accept",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jamId: jam.id,
+            persona,
+            candidate: {
+              id: walkDiscoverySuggestion.id,
+              title: walkDiscoverySuggestion.title,
+              lat: walkDiscoverySuggestion.lat,
+              lng: walkDiscoverySuggestion.lng,
+              image: walkDiscoverySuggestion.image,
+              source: walkDiscoverySuggestion.source,
+              distanceMeters: walkDiscoverySuggestion.distanceMeters,
+              googlePlaceId: walkDiscoverySuggestion.googlePlaceId ?? undefined,
+            },
+          }),
+        },
+        START_JOB_TIMEOUT_MS
+      );
+
+      setWalkDiscoverySuggestion((current) =>
+        current ? { ...current, status: "accepted" } : current
+      );
+      await loadJamById(body.jamId);
+      setPendingAutoplayStopId(body.insertedStopId);
+      setWalkDiscoverySuggestion(null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to accept nearby stop.");
+    } finally {
+      setIsAcceptingWalkDiscoverySuggestion(false);
+    }
+  }
 
   async function handleNearbyStory() {
     if (!isNearbyStoryEnabled || isGeneratingNearbyStory || isResolvingNearbyGeo) return;
@@ -2098,10 +2370,11 @@ async function startStopNarration() {
             lengthMinutes: 30,
             persona: personaForGeneration,
             stops: stopsToGenerate,
-            source: options?.source ?? "manual",
-            routeTitle: options?.routeTitle,
-            narratorGuidance,
-          }),
+              source: options?.source ?? "manual",
+              routeTitle: options?.routeTitle,
+              narratorGuidance,
+              experienceKind: options?.experienceKind ?? "mix",
+            }),
         },
         START_JOB_TIMEOUT_MS
       );
@@ -2212,7 +2485,7 @@ async function startStopNarration() {
       return;
     }
     loadJamById(jamIdFromUrl);
-  }, [jamIdFromUrl, debugStepFromUrl]);
+  }, [jamIdFromUrl, debugStepFromUrl, loadJamById]);
 
   useEffect(() => {
     const jamId = jam?.id;
@@ -2389,7 +2662,7 @@ async function startStopNarration() {
       if (nextPollTimeout !== null) window.clearTimeout(nextPollTimeout);
       if (pollAbortController) pollAbortController.abort();
     };
-  }, [step, generationJobId, generationJobKind, loadResolvedRoute, selectedPersona, jam?.persona]);
+  }, [step, generationJobId, generationJobKind, loadResolvedRoute, selectedPersona, jam?.persona, loadJamById]);
 
   useEffect(() => {
     if (!route) return;
@@ -2409,7 +2682,35 @@ async function startStopNarration() {
         ? jam.current_stop
         : null
     );
-  }, [route?.id, route?.experienceKind, jam?.current_stop]);
+  }, [route, jam?.current_stop]);
+
+  useEffect(() => {
+    if (!isWalkDiscoveryRoute) return;
+    setActiveStopIndex(
+      typeof jam?.current_stop === "number" && jam.current_stop >= 0
+        ? jam.current_stop
+        : null
+    );
+  }, [isWalkDiscoveryRoute, jam?.current_stop]);
+
+  useEffect(() => {
+    if (!jam?.id) {
+      walkDiscoveryCooldownsRef.current = {};
+      walkDiscoveryRecentPositionsRef.current = [];
+      walkDiscoveryLastFetchPosRef.current = null;
+      setWalkDiscoverySuggestion(null);
+      return;
+    }
+    walkDiscoveryCooldownsRef.current = loadWalkDiscoveryCooldowns(jam.id);
+    walkDiscoveryRecentPositionsRef.current = [];
+    walkDiscoveryLastFetchPosRef.current = null;
+    setWalkDiscoverySuggestion(null);
+  }, [jam?.id]);
+
+  useEffect(() => {
+    if (step === "walk" && isWalkDiscoveryRoute) return;
+    setWalkDiscoverySuggestion(null);
+  }, [step, isWalkDiscoveryRoute]);
 
 // ---------- watchPosition ----------
   useEffect(() => {
@@ -2425,20 +2726,30 @@ async function startStopNarration() {
         const nextPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         setMyPos(nextPos);
         setGeoAllowed(true);
+        walkDiscoveryRecentPositionsRef.current = appendWalkDiscoveryPosition(
+          walkDiscoveryRecentPositionsRef.current,
+          {
+            ...nextPos,
+            timestamp: pos.timestamp,
+          }
+        );
 
         if (!currentStop) {
           setDistanceToStopM(null);
           setProximity("far");
-          return;
+        } else {
+          const meters = haversineMeters(nextPos.lat, nextPos.lng, currentStop.lat, currentStop.lng);
+          setDistanceToStopM(meters);
+
+          // Thresholds (tweak later)
+          if (meters <= 35) setProximity("arrived");
+          else if (meters <= 80) setProximity("near");
+          else setProximity("far");
         }
 
-        const meters = haversineMeters(nextPos.lat, nextPos.lng, currentStop.lat, currentStop.lng);
-        setDistanceToStopM(meters);
-
-        // Thresholds (tweak later)
-        if (meters <= 35) setProximity("arrived");
-        else if (meters <= 80) setProximity("near");
-        else setProximity("far");
+        if (isWalkDiscoveryRoute && !walkDiscoverySuggestion) {
+          void refreshWalkDiscoverySuggestion(false);
+        }
       },
       () => {
         setGeoAllowed(false);
@@ -2452,7 +2763,7 @@ async function startStopNarration() {
   return () => {
     if (watchId !== null) navigator.geolocation.clearWatch(watchId);
   };
-}, [step, currentStop]);
+}, [step, currentStop, isWalkDiscoveryRoute, walkDiscoverySuggestion, refreshWalkDiscoverySuggestion]);
 
   useEffect(() => {
     if (step !== "followAlongDrive") return;
@@ -2549,7 +2860,7 @@ async function startStopNarration() {
     return () => {
       if (watchId !== null) navigator.geolocation.clearWatch(watchId);
     };
-  }, [step, route, currentStopIndex, activeStopIndex]);
+  }, [step, route, currentStopIndex, activeStopIndex, updateJam]);
 
   useEffect(() => {
     const el = audioRef.current;
@@ -2610,6 +2921,74 @@ async function startStopNarration() {
   }, [step, route]);
 
   useEffect(() => {
+    if (step !== "walk" || !isWalkDiscoveryRoute || !jam?.id) return;
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      setWalkDiscoverySuggestion(null);
+      walkDiscoveryLastFetchPosRef.current = null;
+      void requestCurrentGeoPosition()
+        .then((coords) => {
+          setMyPos(coords);
+          setGeoAllowed(true);
+          void refreshWalkDiscoverySuggestion(true);
+        })
+        .catch(() => {
+          setGeoAllowed(false);
+        });
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [step, isWalkDiscoveryRoute, jam?.id, refreshWalkDiscoverySuggestion]);
+
+  useEffect(() => {
+    if (!walkDiscoverySuggestion) return;
+    if (
+      !shouldExpireWalkDiscoverySuggestion({
+        suggestion: walkDiscoverySuggestion,
+        currentPosition: myPos,
+      })
+    ) {
+      const timeoutMs = Math.max(0, walkDiscoverySuggestion.expiresAt - Date.now());
+      const timeoutId = window.setTimeout(() => {
+        if (!walkDiscoverySuggestion) return;
+        persistWalkDiscoveryCooldown(walkDiscoverySuggestion.candidateKey);
+        setWalkDiscoverySuggestion((current) =>
+          current ? { ...current, status: "expired" } : current
+        );
+        window.setTimeout(() => {
+          setWalkDiscoverySuggestion(null);
+          void refreshWalkDiscoverySuggestion(true);
+        }, 0);
+      }, timeoutMs);
+      return () => {
+        window.clearTimeout(timeoutId);
+      };
+    }
+
+    persistWalkDiscoveryCooldown(walkDiscoverySuggestion.candidateKey);
+    setWalkDiscoverySuggestion((current) =>
+      current ? { ...current, status: "expired" } : current
+    );
+    const nextTick = window.setTimeout(() => {
+      setWalkDiscoverySuggestion(null);
+      void refreshWalkDiscoverySuggestion(true);
+    }, 0);
+    return () => {
+      window.clearTimeout(nextTick);
+    };
+  }, [walkDiscoverySuggestion, myPos, persistWalkDiscoveryCooldown, refreshWalkDiscoverySuggestion]);
+
+  useEffect(() => {
+    if ((step === "walk" || step === "followAlongDrive") && currentStop) return;
+    setDistanceToStopM(null);
+    setProximity("far");
+  }, [step, currentStop]);
+
+  useEffect(() => {
     if (!pendingAutoplayStopId) return;
     if (!currentStop || currentStop.id !== pendingAutoplayStopId) return;
     if (!hasCurrentAudio) {
@@ -2626,7 +3005,15 @@ async function startStopNarration() {
 
   useEffect(() => {
     if (step !== "walk" && step !== "followAlongDrive") return;
-    setActiveStopIndex(null);
+    if (route?.experienceKind === "follow_along" || route?.experienceKind === "walk_discovery") {
+      setActiveStopIndex(
+        typeof jam?.current_stop === "number" && jam.current_stop >= 0
+          ? jam.current_stop
+          : null
+      );
+    } else {
+      setActiveStopIndex(null);
+    }
     setPendingAutoplayStopId(null);
     const el = audioRef.current;
     if (el) {
@@ -2636,7 +3023,7 @@ async function startStopNarration() {
     setIsPlaying(false);
     setAudioTime(0);
     setAudioDuration(0);
-  }, [step, route?.id]);
+  }, [step, route?.id, route?.experienceKind, jam?.current_stop]);
 
   useEffect(() => {
     if (step !== "pickDuration") return;
@@ -2681,6 +3068,20 @@ async function startStopNarration() {
     if (step !== "pickDuration" || !customNarratorEnabled) return;
     setSelectedPersona("custom");
   }, [step, customNarratorEnabled]);
+
+  useEffect(() => {
+    if (step !== "walk" || !isWalkDiscoveryRoute || !jam?.id) return;
+    if (walkDiscoverySuggestion || isResolvingWalkDiscoverySuggestion) return;
+    void refreshWalkDiscoverySuggestion(false);
+  }, [
+    step,
+    isWalkDiscoveryRoute,
+    jam?.id,
+    route?.id,
+    walkDiscoverySuggestion,
+    isResolvingWalkDiscoverySuggestion,
+    refreshWalkDiscoverySuggestion,
+  ]);
 
   useEffect(() => {
     if (step !== "buildMix") return;
@@ -3166,7 +3567,10 @@ async function startStopNarration() {
                       onClick={() => {
                         void launchLandingAlongTheWay();
                       }}
-                      className={styles.landingJourneyOption}
+                      className={`${styles.landingJourneyOption} ${
+                        (isStartingWalkDiscovery || isResolvingNearbyGeo) ? styles.pickRouteRowDisabled : ""
+                      }`}
+                      disabled={isStartingWalkDiscovery || isResolvingNearbyGeo}
                     >
                       <div className={styles.landingJourneyOptionMain}>
                         <div className={styles.pickRouteIconCircle} aria-hidden="true">
@@ -3181,7 +3585,11 @@ async function startStopNarration() {
                         </div>
                         <div className={styles.pickRouteMain}>
                           <div className={styles.pickRouteTitle}>On the move</div>
-                          <div className={styles.pickRouteMeta}>Stories unfold as you travel.</div>
+                          <div className={styles.pickRouteMeta}>
+                            {isStartingWalkDiscovery
+                              ? "Starting your walk..."
+                              : "Stories unfold as you wander."}
+                          </div>
                         </div>
                       </div>
                     </button>
@@ -3196,7 +3604,11 @@ async function startStopNarration() {
 
 {/* banner UI inside the WALK section
 */}
-{geoAllowed === true && proximity !== "far" && distanceToStopM !== null && (
+{(step === "walk" || step === "followAlongDrive") &&
+ currentStop &&
+ geoAllowed === true &&
+ proximity !== "far" &&
+ distanceToStopM !== null && (
   <div className={styles.proximityBanner}>
     <div className={styles.compactText}>
       <div className={styles.strongText}>
@@ -4579,6 +4991,65 @@ async function startStopNarration() {
                   />
                 </button>
               </div>
+
+              {isWalkDiscoveryRoute && (walkDiscoverySuggestion || isResolvingWalkDiscoverySuggestion) && (
+                <div className={styles.walkDiscoveryPanel}>
+                  <div className={styles.walkDiscoveryCard}>
+                    <div className={styles.walkDiscoveryEyebrow}>Along the way</div>
+                    {walkDiscoverySuggestion ? (
+                      <>
+                        <div className={styles.walkDiscoveryContent}>
+                          <div className={styles.walkDiscoveryImageWrap}>
+                            <Image
+                              src={toSafeStopImage(walkDiscoverySuggestion.image)}
+                              alt={walkDiscoverySuggestion.title}
+                              fill
+                              className={styles.walkDiscoveryImage}
+                              unoptimized
+                            />
+                          </div>
+                          <div className={styles.walkDiscoveryBody}>
+                            <div className={styles.walkDiscoveryTitle}>
+                              {walkDiscoverySuggestion.title}
+                            </div>
+                            <div className={styles.walkDiscoveryMeta}>
+                              {typeof walkDiscoverySuggestion.distanceMeters === "number" &&
+                              walkDiscoverySuggestion.distanceMeters > 0
+                                ? `${estimateWalkMinutes(walkDiscoverySuggestion.distanceMeters)} min away`
+                                : "Nearby now"}
+                            </div>
+                            <div className={styles.walkDiscoveryQuestion}>
+                              Add this stop to your journey?
+                            </div>
+                          </div>
+                        </div>
+                        <div className={styles.walkDiscoveryActions}>
+                          <button
+                            type="button"
+                            className={styles.walkDiscoveryNoButton}
+                            onClick={() => void rejectWalkDiscoverySuggestion()}
+                            disabled={isAcceptingWalkDiscoverySuggestion}
+                          >
+                            No
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.walkDiscoveryYesButton}
+                            onClick={() => void acceptWalkDiscoverySuggestion()}
+                            disabled={isAcceptingWalkDiscoverySuggestion}
+                          >
+                            {isAcceptingWalkDiscoverySuggestion ? "Adding..." : "Yes"}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className={styles.walkDiscoveryLoading}>
+                        Looking for your next nearby story...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className={styles.stopList}>
                 {stopList.map((stop, idx) => {

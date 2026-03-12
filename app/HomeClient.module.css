@@ -375,6 +375,34 @@
   max-width: 82%;
 }
 
+.landingTitleFontRevolutionary {
+  font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
+}
+
+.landingTitleFontTaverns {
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.landingTitleFontArchitecture {
+  font-family: Didot, "Bodoni MT", "Times New Roman", serif;
+}
+
+.landingTitleFontSalem {
+  font-family: "Baskerville", "Times New Roman", serif;
+}
+
+.landingTitleFontAnimals {
+  font-family: "Chalkboard SE", "Marker Felt", "Comic Sans MS", cursive;
+}
+
+.landingTitleFontSuperhero {
+  font-family: Impact, Haettenschweiler, "Arial Black", sans-serif;
+}
+
+.landingTitleFontWeirdHistory {
+  font-family: "American Typewriter", "Courier New", monospace;
+}
+
 .landingFeaturedCardTitleRevolutionary {
   font-size: 22px;
   font-weight: 600;
@@ -2084,6 +2112,107 @@
   margin-left: auto;
 }
 
+.walkDiscoveryPanel {
+  margin-top: 22px;
+}
+
+.walkDiscoveryCard {
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 16px;
+}
+
+.walkDiscoveryEyebrow {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #ff9dbb;
+}
+
+.walkDiscoveryContent {
+  margin-top: 10px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.walkDiscoveryImageWrap {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  border-radius: 14px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.walkDiscoveryImage {
+  object-fit: cover;
+}
+
+.walkDiscoveryBody {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.walkDiscoveryTitle {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.walkDiscoveryMeta {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.walkDiscoveryQuestion {
+  font-size: 15px;
+  opacity: 0.95;
+}
+
+.walkDiscoveryActions {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+}
+
+.walkDiscoveryNoButton,
+.walkDiscoveryYesButton {
+  flex: 1 1 0;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.walkDiscoveryNoButton {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: #fff;
+}
+
+.walkDiscoveryYesButton {
+  border: 0;
+  background: #ff5f92;
+  color: #11111a;
+}
+
+.walkDiscoveryNoButton:disabled,
+.walkDiscoveryYesButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.walkDiscoveryLoading {
+  margin-top: 10px;
+  font-size: 15px;
+  opacity: 0.82;
+}
+
 .walkFindMoreButton {
   width: 100%;
   border: 0;
@@ -3121,7 +3250,7 @@
     margin-left: 0;
     margin-top: 0;
     padding: 12px 24px calc(16px + env(safe-area-inset-bottom));
-    justify-content: space-between;
+    justify-content: right;
     z-index: 20;
   }
 

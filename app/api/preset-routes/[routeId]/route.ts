@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRouteById } from "@/app/content/salemRoutes";
-import { toNullableAudioUrl, toNullableTrimmed } from "@/lib/mixGeneration";
+import { toNullableTrimmed } from "@/lib/mixGeneration";
 import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
 import { listPresetRouteStopAssets, mapPresetAssetsByStop } from "@/lib/presetRouteAssets";
 import { buildGooglePlaceIdPhotoUrl, isValidGooglePlaceId, proxyGoogleImageUrl } from "@/lib/placesImages";

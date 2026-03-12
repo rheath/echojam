@@ -23,7 +23,7 @@ import {
   type TransportMode,
 } from "@/lib/mixConstraints";
 
-export type CustomRouteExperienceKind = "mix" | "follow_along";
+export type CustomRouteExperienceKind = "mix" | "follow_along" | "walk_discovery";
 export type CustomRouteStopKind = "story" | "arrival";
 
 export type PreparedCustomRouteStop = StopInput & {
