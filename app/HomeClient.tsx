@@ -1212,6 +1212,13 @@ const walkDiscoveryRequestIdRef = useRef(0);
     await startWalkDiscoveryExperience();
   }
 
+  function launchLandingMixStudio() {
+    closeLandingJourneyModal();
+    setSelectedCity("salem");
+    setInstantDiscoveryCity(null);
+    goToCreateOwnMixBuilder();
+  }
+
   function toFollowAlongOrigin(
     coords: { lat: number; lng: number },
     subtitle?: string | null
@@ -3448,42 +3455,6 @@ async function startStopNarration() {
               </div>
             )}
 
-            <div className={styles.landingSecondaryLabel}>Under Development</div>
-
-            <div className={`${styles.pickRouteList} ${styles.landingRouteList}`}>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedCity("salem");
-                  setInstantDiscoveryCity(null);
-                  goToCreateOwnMixBuilder();
-                }}
-                className={`${styles.pickRouteRow} ${styles.landingSecondaryRow} ${isCreateOwnSelected ? styles.pickRouteRowSelected : ""}`}
-              >
-                <div className={styles.pickRouteMainWithIcon}>
-                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                    <Image
-                      src="/icons/shuffle.svg"
-                      alt=""
-                      width={24}
-                      height={24}
-                      className={styles.pickRouteWalkIcon}
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>Mix Studio</div>
-                    <div className={styles.pickRouteMeta}>Choose stops. Shape the story.</div>
-                    
-                  </div>
-                </div>
-              </button>
-
-
-               
-
-            </div>
-
             {showLandingThemeToggle && (
               <div className={styles.landingFooter}>
                 <button
@@ -3536,31 +3507,7 @@ async function startStopNarration() {
                   </button> 
                   <h2 className={styles.landingJourneyModalTitle}>Mix your journey</h2>
                   <div className={styles.landingJourneyModalBody}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void launchLandingAroundMe();
-                      }}
-                      className={`${styles.landingJourneyOption} ${isSurpriseMixDisabled ? styles.pickRouteRowDisabled : ""}`}
-                      disabled={isSurpriseMixDisabled}
-                    >
-                      <div className={styles.landingJourneyOptionMain}>
-                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                          <Image
-                            src="/icons/pin-angle-fill.svg"
-                            alt=""
-                            width={24}
-                            height={24}
-                            className={styles.pickRouteWalkIcon}
-                            aria-hidden="true"
-                          />
-                        </div>
-                        <div className={styles.pickRouteMain}>
-                          <div className={styles.pickRouteTitle}>Nearby</div>
-                          <div className={styles.pickRouteMeta}>Discover the story of where you are. </div>
-                        </div>
-                      </div>
-                    </button>
+                    
 
                     <button
                       type="button"
@@ -3584,16 +3531,64 @@ async function startStopNarration() {
                           />
                         </div>
                         <div className={styles.pickRouteMain}>
-                          <div className={styles.pickRouteTitle}>On the move</div>
+                          <div className={styles.pickRouteTitle}>Wander</div>
                           <div className={styles.pickRouteMeta}>
                             {isStartingWalkDiscovery
                               ? "Starting your walk..."
-                              : "Stories unfold as you wander."}
+                              : "Stories unfold around you as you move."}
                           </div>
                         </div>
                       </div>
                     </button>
- 
+
+                    <button
+                      type="button"
+                      onClick={launchLandingMixStudio}
+                      className={styles.landingJourneyOption}
+                    >
+                      <div className={styles.landingJourneyOptionMain}>
+                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                          <Image
+                            src="/icons/shuffle.svg"
+                            alt=""
+                            width={24}
+                            height={24}
+                            className={styles.pickRouteWalkIcon}
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div className={styles.pickRouteMain}>
+                          <div className={styles.pickRouteTitle}>Mix Studio</div>
+                          <div className={styles.pickRouteMeta}>Choose stops. Shape the story.</div>
+                        </div>
+                      </div>
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void launchLandingAroundMe();
+                      }}
+                      className={`${styles.landingJourneyOption} ${isSurpriseMixDisabled ? styles.pickRouteRowDisabled : ""}`}
+                      disabled={isSurpriseMixDisabled}
+                    >
+                      <div className={styles.landingJourneyOptionMain}>
+                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                          <Image
+                            src="/icons/pin-angle-fill.svg"
+                            alt=""
+                            width={24}
+                            height={24}
+                            className={styles.pickRouteWalkIcon}
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div className={styles.pickRouteMain}>
+                          <div className={styles.pickRouteTitle}>Nearby (Kill)</div>
+                          <div className={styles.pickRouteMeta}>Combined with Wander but testing needed </div>
+                        </div>
+                      </div>
+                    </button>
                   </div>
                 </div>
               </div>
