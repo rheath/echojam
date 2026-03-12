@@ -70,12 +70,6 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    if (persona === "custom" && !narratorGuidance) {
-      return NextResponse.json(
-        { error: "Narrator guidance is required." },
-        { status: 400 }
-      );
-    }
 
     const preview = await fetchDrivingRoutePreview(body.origin, body.destination);
     const admin = getAdmin();

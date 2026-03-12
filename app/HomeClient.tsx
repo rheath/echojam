@@ -96,6 +96,17 @@ type CityOption = PresetCity;
 type TransportMode = "walk" | "drive";
 type LandingTheme = "dark" | "light";
 
+function isCustomNarratorFlowSource(
+  narratorFlowSource: NarratorFlowSource,
+  isPresetWalkRoute: boolean
+) {
+  return (
+    narratorFlowSource === "followAlong" ||
+    narratorFlowSource === "buildMix" ||
+    (narratorFlowSource === "walkEdit" && !isPresetWalkRoute)
+  );
+}
+
 type CustomMixStop = {
   id: string;
   title: string;
@@ -240,7 +251,7 @@ const CITY_META: Record<CityOption, { label: string; center: { lat: number; lng:
 };
 const FEATURED_PRESET_SECTIONS = [
   {
-    title: "Historical Mixes",
+    title: "Time Travel Stories",
     routeIds: [
       "boston-revolutionary-secrets",
       "boston-old-taverns",
@@ -249,7 +260,7 @@ const FEATURED_PRESET_SECTIONS = [
     ] as const satisfies readonly RouteDef["id"][],
   },
   {
-    title: "NYC Family Friendly Mixes",
+    title: "City Adventure Stories",
     routeIds: [
       "nyc-city-animals-adventure",
       "nyc-superhero-city",
@@ -551,6 +562,7 @@ const [isPlaying, setIsPlaying] = useState(false);
 const [audioTime, setAudioTime] = useState(0);
 const [audioDuration, setAudioDuration] = useState(0);
 const [listenCount, setListenCount] = useState(0);
+const [isLandingJourneyModalOpen, setIsLandingJourneyModalOpen] = useState(false);
 const [selectedRouteId, setSelectedRouteId] = useState<RouteDef["id"] | null>(null);
 const [isCreateOwnSelected, setIsCreateOwnSelected] = useState(false);
 const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
@@ -575,7 +587,7 @@ const [generationJobKind, setGenerationJobKind] = useState<GenerationJobKind | n
 const [generationProgress, setGenerationProgress] = useState(0);
 const [generationStatusLabel, setGenerationStatusLabel] = useState(GENERATION_STATUS_LABELS.queued);
 const [generationMessage, setGenerationMessage] = useState("Queued");
-const [landingTheme, setLandingTheme] = useState<LandingTheme>("dark");
+const [landingTheme, setLandingTheme] = useState<LandingTheme>("light");
 const [hasLoadedLandingTheme, setHasLoadedLandingTheme] = useState(false);
 const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
 const [followAlongOrigin, setFollowAlongOrigin] = useState<FollowAlongLocation | null>(null);
@@ -629,6 +641,7 @@ const followAlongLastPositionRef = useRef<{
 
   const jamIdFromUrl = searchParams.get("jam");
   const debugStepFromUrl = searchParams.get("debugStep");
+  const showLandingThemeToggle = true;
   const nextLandingTheme = landingTheme === "dark" ? "light" : "dark";
 
   // Derive route + stop from jam
@@ -732,16 +745,30 @@ const followAlongLastPositionRef = useRef<{
     pendingPresetRouteAction.mode === "regenerate";
   const isAiPersona = (personaKey: Persona) => personaCatalog[personaKey].displayName.startsWith("AI");
   const usesNarratorIcon = (personaKey: Persona) => personaKey === "custom" || isAiPersona(personaKey);
-  const customNarratorEnabled =
-    narratorFlowSource === "followAlong" ||
-    narratorFlowSource === "buildMix" ||
-    (narratorFlowSource === "walkEdit" && !isPresetWalkRoute);
-  const trimmedCustomNarratorGuidance = customNarratorGuidance.trim();
+  const customNarratorEnabled = isCustomNarratorFlowSource(narratorFlowSource, isPresetWalkRoute);
+  const narratorSelectionIsCustomOnly = customNarratorEnabled;
+  const resolveNarratorSubmitSelection = useCallback(
+    (personaOverride?: Persona, guidanceOverride?: string | null) => {
+      const trimmedGuidance = (guidanceOverride ?? customNarratorGuidance).trim();
+      if (narratorSelectionIsCustomOnly) {
+        return {
+          persona: (trimmedGuidance ? "custom" : "adult") as Persona,
+          narratorGuidance: trimmedGuidance || null,
+        };
+      }
+
+      return {
+        persona: (personaOverride ?? selectedPersona) as Persona | null,
+        narratorGuidance:
+          (personaOverride ?? selectedPersona) === "custom" ? trimmedGuidance || null : null,
+      };
+    },
+    [customNarratorGuidance, narratorSelectionIsCustomOnly, selectedPersona]
+  );
   const narratorSubmitDisabled =
-    !selectedPersona ||
+    (!narratorSelectionIsCustomOnly && !selectedPersona) ||
     isGeneratingMix ||
-    isCreatingFollowAlong ||
-    (selectedPersona === "custom" && trimmedCustomNarratorGuidance.length === 0);
+    isCreatingFollowAlong;
   const narratorSubmitLabel = returnToWalkOnClose
     ? "Update Narrator"
     : narratorFlowSource === "followAlong"
@@ -749,12 +776,12 @@ const followAlongLastPositionRef = useRef<{
       : "Create Tour";
   const customNarratorHelpText =
     narratorFlowSource === "followAlong"
-      ? "Tell EchoJam who this drive is for and how the narration should sound."
-      : "Tell EchoJam who this tour is for and how the narration should sound.";
+      ? "You can personalize the tone, topic, or perspective. If you skip this, your narrator with be focused on history."
+      : "You can personalize the tone, topic, or perspective. If you skip this, your narrator with be focused on history.";
   const customNarratorPlaceholder =
     narratorFlowSource === "followAlong"
       ? "Road-trip voice for two adults who love architecture, local lore, and concise stories."
-      : "This tour is for my niece Kate who is 8 years old. She loves animals, so make it kid friendly, fun, and mention animals whenever relevant.";
+      : "Describe your narrator...";
   const maxStopsForSelection = useMemo(
     () => getMaxStops(),
     []
@@ -836,6 +863,11 @@ const followAlongLastPositionRef = useRef<{
       : null;
 
   useEffect(() => {
+    if (!showLandingThemeToggle) {
+      setLandingTheme("light");
+      setHasLoadedLandingTheme(true);
+      return;
+    }
     if (typeof window === "undefined") return;
     try {
       const storedTheme = window.localStorage.getItem(LANDING_THEME_STORAGE_KEY);
@@ -847,16 +879,17 @@ const followAlongLastPositionRef = useRef<{
     } finally {
       setHasLoadedLandingTheme(true);
     }
-  }, []);
+  }, [showLandingThemeToggle]);
 
   useEffect(() => {
+    if (!showLandingThemeToggle) return;
     if (!hasLoadedLandingTheme || typeof window === "undefined") return;
     try {
       window.localStorage.setItem(LANDING_THEME_STORAGE_KEY, landingTheme);
     } catch {
       // Ignore localStorage access failures; the toggle still works for this session.
     }
-  }, [hasLoadedLandingTheme, landingTheme]);
+  }, [hasLoadedLandingTheme, landingTheme, showLandingThemeToggle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1011,26 +1044,23 @@ const followAlongLastPositionRef = useRef<{
   function handleNarratorSelect(nextPersona: Persona) {
     setErr(null);
     setSelectedPersona(nextPersona);
-    if (nextPersona !== "custom") {
+    if (!customNarratorEnabled && nextPersona !== "custom") {
       setCustomNarratorGuidance((current) => current.trim());
     }
-    if (customNarratorEnabled) {
+    if (narratorSelectionIsCustomOnly) {
       return;
     }
     void submitNarratorSelection(nextPersona);
   }
 
   async function submitNarratorSelection(personaOverride?: Persona) {
-    const personaForSubmit = personaOverride ?? selectedPersona;
+    const narratorSelection = resolveNarratorSubmitSelection(personaOverride);
+    const personaForSubmit = narratorSelection.persona;
     if (!personaForSubmit) return;
-    if (personaForSubmit === "custom" && trimmedCustomNarratorGuidance.length === 0) {
-      setErr("Add narrator guidance to create a custom narrator.");
-      return;
-    }
 
     if (narratorFlowSource === "buildMix") {
       await startCustomMixGeneration(builderSelectedStops, personaForSubmit, {
-        narratorGuidance: personaForSubmit === "custom" ? trimmedCustomNarratorGuidance : null,
+        narratorGuidance: narratorSelection.narratorGuidance,
       });
       return;
     }
@@ -1053,7 +1083,7 @@ const followAlongLastPositionRef = useRef<{
         errorStep: "pickDuration",
         cityOverride: customRouteCity,
         routeTitle: route.title,
-        narratorGuidance: personaForSubmit === "custom" ? trimmedCustomNarratorGuidance : null,
+        narratorGuidance: narratorSelection.narratorGuidance,
       });
       return;
     }
@@ -1108,6 +1138,24 @@ const followAlongLastPositionRef = useRef<{
     setNarratorFlowSource(null);
     setPickDurationPage("routes");
     setStep("pickDuration");
+  }
+
+  function openLandingJourneyModal() {
+    setIsLandingJourneyModalOpen(true);
+  }
+
+  function closeLandingJourneyModal() {
+    setIsLandingJourneyModalOpen(false);
+  }
+
+  async function launchLandingAroundMe() {
+    closeLandingJourneyModal();
+    await handleNearbyStory();
+  }
+
+  async function launchLandingAlongTheWay() {
+    closeLandingJourneyModal();
+    await openFollowAlongSetup();
   }
 
   function toFollowAlongOrigin(
@@ -1165,8 +1213,8 @@ const followAlongLastPositionRef = useRef<{
     followAlongSessionRef.current = sessionId;
     setErr(null);
     setSelectedRouteId(null);
-    setSelectedPersona((current) => current ?? "adult");
-    setCustomNarratorGuidance((current) => current.trim());
+    setSelectedPersona("custom");
+    setCustomNarratorGuidance((current) => current);
     setNarratorFlowSource(null);
     setFollowAlongDestinationQuery("");
     setFollowAlongDestinationResults([]);
@@ -1258,13 +1306,10 @@ const followAlongLastPositionRef = useRef<{
   }
 
   async function startFollowAlongExperience(personaOverride?: Persona) {
-    const personaForSubmit = personaOverride ?? selectedPersona;
+    const narratorSelection = resolveNarratorSubmitSelection(personaOverride);
+    const personaForSubmit = narratorSelection.persona;
     if (!followAlongOrigin || !followAlongDestination || !personaForSubmit) {
       setErr("Choose a destination and storyteller first.");
-      return;
-    }
-    if (personaForSubmit === "custom" && trimmedCustomNarratorGuidance.length === 0) {
-      setErr("Add narrator guidance to create a custom narrator.");
       return;
     }
 
@@ -1291,8 +1336,7 @@ const followAlongLastPositionRef = useRef<{
             origin: followAlongOrigin,
             destination: followAlongDestination,
             persona: personaForSubmit,
-            narratorGuidance:
-              personaForSubmit === "custom" ? trimmedCustomNarratorGuidance : null,
+            narratorGuidance: narratorSelection.narratorGuidance,
           }),
         },
         START_JOB_TIMEOUT_MS
@@ -2022,16 +2066,13 @@ async function startStopNarration() {
     options?: StartCustomMixOptions
   ) {
     const stopsToGenerate = prioritizeOverviewById(stopsOverride ?? builderSelectedStops);
-    const personaForGeneration = personaOverride ?? selectedPersona;
-    const narratorGuidance =
-      personaForGeneration === "custom"
-        ? (options?.narratorGuidance ?? customNarratorGuidance).trim()
-        : null;
+    const narratorSelection = resolveNarratorSubmitSelection(
+      personaOverride,
+      options?.narratorGuidance
+    );
+    const personaForGeneration = narratorSelection.persona;
+    const narratorGuidance = narratorSelection.narratorGuidance;
     if (!stopsToGenerate.length || !personaForGeneration) return false;
-    if (personaForGeneration === "custom" && !narratorGuidance) {
-      setErr("Add narrator guidance to create a custom narrator.");
-      return false;
-    }
     const validation = validateMixSelection(30, "walk", stopsToGenerate.length, {
       minStops: options?.source === "instant" ? 1 : undefined,
     });
@@ -2606,10 +2647,7 @@ async function startStopNarration() {
         setSelectedCity(presetRoute.city);
       }
       setSelectedRouteId(routeId);
-      setSelectedPersona((jam.persona ?? null) as Persona | null);
-      if ((jam.persona ?? null) !== "custom") {
-        setCustomNarratorGuidance((current) => current.trim());
-      }
+      setSelectedPersona(routeId ? ((jam.persona ?? null) as Persona | null) : "custom");
       setNarratorFlowSource("walkEdit");
       setPickDurationPage("narrator");
       return;
@@ -2640,6 +2678,11 @@ async function startStopNarration() {
   }, [step, isEditingStopsFromWalk, narratorFlowSource, availableStopsForCity]);
 
   useEffect(() => {
+    if (step !== "pickDuration" || !customNarratorEnabled) return;
+    setSelectedPersona("custom");
+  }, [step, customNarratorEnabled]);
+
+  useEffect(() => {
     if (step !== "buildMix") return;
     if (myPos) return;
     let cancelled = false;
@@ -2664,6 +2707,20 @@ async function startStopNarration() {
     if (!["landing", "pickDuration", "buildMix", "followAlongSetup", "generating", "walk", "followAlongDrive"].includes(step)) return;
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [step]);
+
+  useEffect(() => {
+    if (!isLandingJourneyModalOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      closeLandingJourneyModal();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isLandingJourneyModalOpen]);
 
   useEffect(() => {
     return () => {
@@ -2755,6 +2812,7 @@ async function startStopNarration() {
       : isSurpriseMixUnavailable
         ? "Coming soon"
         : "One nearby landmark. Story by AI Historian.";
+  const showLandingDiscoverNearby = false;
 
   // ---------- UI ----------
   return (
@@ -2816,8 +2874,17 @@ async function startStopNarration() {
               <div className={`${styles.landingCopyBlock} ${styles.landingCopyBlockMobile}`}>
                 <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets</h1>
                 <p className={styles.landingCopy}>
-                  Wander with intention. Experience places through curated stories. <strong>More story. Less directions.</strong>
+                  Experience places through story. <br/> <strong>More story. Less directions.</strong>
                 </p>
+                <div className={styles.landingHeroCtaWrap}>
+                  <button
+                    type="button"
+                    onClick={openLandingJourneyModal}
+                    className={styles.landingHeroCta}
+                  >
+                    Mix your journey
+                  </button>
+                </div>
               </div>
             </div>
           </section>
@@ -2836,8 +2903,17 @@ async function startStopNarration() {
               <div className={styles.landingCopyBlock}>
                 <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets.</h1>
                 <p className={styles.landingCopy}>
-                  Wander with intention. Experience places through a curated lens. <strong>More story. Less directions.</strong>
+                  Experience places through a curated lens. <strong>More story. Less directions.</strong>
                 </p>
+                <div className={styles.landingHeroCtaWrap}>
+                  <button
+                    type="button"
+                    onClick={openLandingJourneyModal}
+                    className={styles.landingHeroCta}
+                  >
+                    Mix your journey
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -2903,52 +2979,75 @@ async function startStopNarration() {
               </div>
             ))}
 
-            <div className={styles.landingLocationSection}>
-              <div className={styles.landingSecondaryLabel}>Browse locations</div>
+            {showLandingDiscoverNearby && (
+              <div className={styles.landingLocationSection}>
+                <div className={styles.landingSecondaryLabel}>Discover Nearby</div>
 
-              <div className={styles.landingLocationGrid}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    openPresetCity("nyc");
-                  }}
-                  className={styles.landingLocationCard}
-                >
-                  <div className={styles.landingLocationImageWrap} aria-hidden="true">
-                    <Image
-                      src={getPresetCityMeta("nyc").fallbackImage}
-                      alt=""
-                      fill
-                      unoptimized
-                      sizes="(max-width: 720px) 40vw, 160px"
-                      className={styles.landingLocationImage}
-                    />
-                  </div>
-                  <div className={styles.landingLocationTitle}>New York City</div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    openPresetCity("boston");
-                  }}
-                  className={styles.landingLocationCard}
-                >
-                  <div className={styles.landingLocationImageWrap} aria-hidden="true">
-                    <Image
-                      src={getPresetCityMeta("boston").fallbackImage}
-                      alt=""
-                      fill
-                      unoptimized
-                      sizes="(max-width: 720px) 40vw, 160px"
-                      className={styles.landingLocationImage}
-                    />
-                  </div>
-                  <div className={styles.landingLocationTitle}>Boston</div>
-                </button>
+                <div className={styles.landingLocationGrid}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleNearbyStory();
+                    }}
+                    className={`${styles.landingLocationCard} ${isSurpriseMixDisabled ? styles.pickRouteRowDisabled : ""}`}
+                    disabled={isSurpriseMixDisabled}
+                    aria-label={`Around me. ${surpriseMixSubtitle}`}
+                  >
+                    <div className={`${styles.landingLocationImageWrap} ${styles.landingLocationIconWrap}`} aria-hidden="true">
+                      <Image
+                        src="/icons/pin-angle-fill.svg"
+                        alt=""
+                        width={28}
+                        height={28}
+                        className={styles.landingLocationIcon}
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <div className={styles.landingLocationTitle}>Nearby</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openPresetCity("nyc");
+                    }}
+                    className={styles.landingLocationCard}
+                  >
+                    <div className={styles.landingLocationImageWrap} aria-hidden="true">
+                      <Image
+                        src={getPresetCityMeta("nyc").fallbackImage}
+                        alt=""
+                        fill
+                        unoptimized
+                        sizes="(max-width: 720px) 40vw, 160px"
+                        className={styles.landingLocationImage}
+                      />
+                    </div>
+                    <div className={styles.landingLocationTitle}>New York City</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openPresetCity("boston");
+                    }}
+                    className={styles.landingLocationCard}
+                  >
+                    <div className={styles.landingLocationImageWrap} aria-hidden="true">
+                      <Image
+                        src={getPresetCityMeta("boston").fallbackImage}
+                        alt=""
+                        fill
+                        unoptimized
+                        sizes="(max-width: 720px) 40vw, 160px"
+                        className={styles.landingLocationImage}
+                      />
+                    </div>
+                    <div className={styles.landingLocationTitle}>Boston</div>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
-            <div className={styles.landingSecondaryLabel}>Create your own</div>
+            <div className={styles.landingSecondaryLabel}>Under Development</div>
 
             <div className={`${styles.pickRouteList} ${styles.landingRouteList}`}>
               <button
@@ -2973,87 +3072,124 @@ async function startStopNarration() {
                   </div>
                   <div className={styles.pickRouteMain}>
                     <div className={styles.pickRouteTitle}>Mix Studio</div>
-                    <div className={styles.pickRouteMeta}>Pick your stops. Choose a storyteller.</div>
-                    <div className={`${styles.pickRouteMeta} ${styles.pickRouteMetaSecondary}`}>
-                      Publish for $1.99 and set your listening price.
-                    </div>
+                    <div className={styles.pickRouteMeta}>Choose stops. Shape the story.</div>
+                    
                   </div>
                 </div>
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  void handleNearbyStory();
-                }}
-                className={`${styles.pickRouteRow} ${styles.landingSecondaryRow} ${isSurpriseMixDisabled ? styles.pickRouteRowDisabled : ""}`}
-                disabled={isSurpriseMixDisabled}
-              >
-                <div className={styles.pickRouteMainWithIcon}>
-                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                    <Image
-                      src="/icons/lightning-fill.svg"
-                      alt=""
-                      width={24}
-                      height={24}
-                      className={styles.pickRouteWalkIcon}
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>What Happened Here</div>
-                    <div className={styles.pickRouteMeta}>Hear the story of the place you&apos;re standing.</div>
-                  </div>
-                </div>
-              </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  void openFollowAlongSetup();
-                }}
-                className={`${styles.pickRouteRow} ${styles.landingSecondaryRow}`}
-              >
-                <div className={styles.pickRouteMainWithIcon}>
-                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                    <Image
-                      src="/icons/play-fill.svg"
-                      alt=""
-                      width={24}
-                      height={24}
-                      className={styles.pickRouteWalkIcon}
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>Along the Way</div>
-                    <div className={styles.pickRouteMeta}>Stories appear as you travel to your destination.</div>
-                  </div>
-                </div>
-              </button>
+               
 
             </div>
 
-            <div className={styles.landingFooter}>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={landingTheme === "light"}
-                aria-label={`Switch to ${nextLandingTheme} mode`}
-                onClick={toggleLandingTheme}
-                className={styles.landingThemeToggle}
-              >
-                <span className={styles.landingThemeToggleCopy}>
-                  <span className={styles.landingThemeToggleLabel}>Theme</span>
-                  <span className={styles.landingThemeToggleValue}>
-                    {landingTheme === "dark" ? "Dark mode" : "Light mode"}
+            {showLandingThemeToggle && (
+              <div className={styles.landingFooter}>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={landingTheme === "light"}
+                  aria-label={`Switch to ${nextLandingTheme} mode`}
+                  onClick={toggleLandingTheme}
+                  className={styles.landingThemeToggle}
+                >
+                  <span className={styles.landingThemeToggleCopy}>
+                    <span className={styles.landingThemeToggleLabel}>Theme</span>
+                    <span className={styles.landingThemeToggleValue}>
+                      {landingTheme === "dark" ? "Dark mode" : "Light mode"}
+                    </span>
                   </span>
-                </span>
-                <span className={styles.landingThemeToggleTrack} aria-hidden="true">
-                  <span className={styles.landingThemeToggleThumb} />
-                </span>
-              </button>
-            </div>
+                  <span className={styles.landingThemeToggleTrack} aria-hidden="true">
+                    <span className={styles.landingThemeToggleThumb} />
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {isLandingJourneyModalOpen && (
+              <div
+                className={styles.landingJourneyModalOverlay}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Mix your story"
+                onClick={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  closeLandingJourneyModal();
+                }}
+              >
+                <div className={styles.landingJourneyModal}>
+                  <button
+                    type="button"
+                    className={styles.landingJourneyModalClose}
+                    onClick={closeLandingJourneyModal}
+                    aria-label="Close mix your story"
+                  >
+                    <Image
+                      src="/icons/x.svg"
+                      alt=""
+                      width={18}
+                      height={18}
+                      className={styles.landingJourneyModalCloseIcon}
+                      aria-hidden="true"
+                    />
+                  </button> 
+                  <h2 className={styles.landingJourneyModalTitle}>Mix your journey</h2>
+                  <div className={styles.landingJourneyModalBody}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void launchLandingAroundMe();
+                      }}
+                      className={`${styles.landingJourneyOption} ${isSurpriseMixDisabled ? styles.pickRouteRowDisabled : ""}`}
+                      disabled={isSurpriseMixDisabled}
+                    >
+                      <div className={styles.landingJourneyOptionMain}>
+                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                          <Image
+                            src="/icons/pin-angle-fill.svg"
+                            alt=""
+                            width={24}
+                            height={24}
+                            className={styles.pickRouteWalkIcon}
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div className={styles.pickRouteMain}>
+                          <div className={styles.pickRouteTitle}>Nearby</div>
+                          <div className={styles.pickRouteMeta}>Discover the story of where you are. </div>
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void launchLandingAlongTheWay();
+                      }}
+                      className={styles.landingJourneyOption}
+                    >
+                      <div className={styles.landingJourneyOptionMain}>
+                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                          <Image
+                            src="/icons/play-fill.svg"
+                            alt=""
+                            width={24}
+                            height={24}
+                            className={styles.pickRouteWalkIcon}
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div className={styles.pickRouteMain}>
+                          <div className={styles.pickRouteTitle}>On the move</div>
+                          <div className={styles.pickRouteMeta}>Stories unfold as you travel.</div>
+                        </div>
+                      </div>
+                    </button>
+ 
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         </main>
       )}
@@ -3093,42 +3229,86 @@ async function startStopNarration() {
                     aria-hidden="true"
                   />
                 </button>
-                <h2 className={`${styles.pickHeading} ${styles.pickHeadingBelowClose}`}>Select your storyteller</h2>
-                <div className={styles.pickPersonaRow}>
-                  {PERSONA_KEYS.map((personaKey) => {
-                    const personaInfo = personaCatalog[personaKey];
-                    return (
-                    <button
-                      key={personaKey}
-                      onClick={() => {
-                        void handleNarratorSelect(personaKey);
-                      }}
-                      className={`${styles.pickNarratorOption} ${selectedPersona === personaKey ? styles.pickNarratorOptionSelected : ""}`}
-                    >
-                        <div className={styles.pickNarratorOptionContent}>
-                          <div className={styles.pickNarratorWithAvatar}>
-                            <div className={styles.pickNarratorAvatarWrap}>
-                            {usesNarratorIcon(personaKey) ? (
+                <h2 className={`${styles.pickHeading} ${styles.pickHeadingBelowClose}`}>How should this feel?</h2>
+                {!narratorSelectionIsCustomOnly && (
+                  <div className={styles.pickPersonaRow}>
+                    {PERSONA_KEYS.map((personaKey) => {
+                      const personaInfo = personaCatalog[personaKey];
+                      return (
+                        <button
+                          key={personaKey}
+                          onClick={() => {
+                            void handleNarratorSelect(personaKey);
+                          }}
+                          className={`${styles.pickNarratorOption} ${selectedPersona === personaKey ? styles.pickNarratorOptionSelected : ""}`}
+                        >
+                          <div className={styles.pickNarratorOptionContent}>
+                            <div className={styles.pickNarratorWithAvatar}>
+                              <div className={styles.pickNarratorAvatarWrap}>
+                                {usesNarratorIcon(personaKey) ? (
+                                  <Image
+                                    src="/icons/stars.svg"
+                                    alt=""
+                                    width={24}
+                                    height={24}
+                                    className={styles.pickNarratorFutureIcon}
+                                    aria-hidden="true"
+                                  />
+                                ) : (
+                                  <Image
+                                    src={personaInfo.avatarSrc}
+                                    alt={personaInfo.avatarAlt}
+                                    fill
+                                    className={styles.pickNarratorAvatar}
+                                  />
+                                )}
+                              </div>
+                              <div>
+                                <div className={styles.pickRouteTitle}>{personaInfo.displayName}</div>
+                                <div className={styles.pickNarratorSub}>{personaInfo.description}</div>
+                              </div>
+                            </div>
+                            <div className={styles.pickRowArrow} aria-hidden="true">
                               <Image
-                                src="/icons/stars.svg"
+                                src="/icons/chevron-right.svg"
                                 alt=""
-                                width={24}
-                                height={24}
-                                className={styles.pickNarratorFutureIcon}
+                                width={28}
+                                height={28}
+                                className={styles.landingArrowIcon}
                                 aria-hidden="true"
                               />
-                            ) : (
-                              <Image
-                                src={personaInfo.avatarSrc}
-                                alt={personaInfo.avatarAlt}
-                                fill
-                                className={styles.pickNarratorAvatar}
-                              />
-                            )}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      disabled={!customNarratorEnabled}
+                      aria-disabled={!customNarratorEnabled}
+                      onClick={() => {
+                        if (!customNarratorEnabled) return;
+                        handleNarratorSelect("custom");
+                      }}
+                      className={`${styles.pickNarratorOption} ${selectedPersona === "custom" ? styles.pickNarratorOptionSelected : ""} ${!customNarratorEnabled ? styles.pickNarratorOptionDisabled : ""}`}
+                    >
+                      <div className={styles.pickNarratorOptionContent}>
+                        <div className={styles.pickNarratorWithAvatar}>
+                          <div className={styles.pickNarratorAvatarWrap}>
+                            <Image
+                              src="/icons/stars.svg"
+                              alt=""
+                              width={24}
+                              height={24}
+                              className={styles.pickNarratorFutureIcon}
+                              aria-hidden="true"
+                            />
                           </div>
                           <div>
-                            <div className={styles.pickRouteTitle}>{personaInfo.displayName}</div>
-                            <div className={styles.pickNarratorSub}>{personaInfo.description}</div>
+                            <div className={styles.pickRouteTitle}>Create your own storyteller</div>
+                            <div className={styles.pickNarratorSub}>
+                              {customNarratorEnabled ? "Describe the voice, audience, and tone you want." : "Available for custom tours only"}
+                            </div>
                           </div>
                         </div>
                         <div className={styles.pickRowArrow} aria-hidden="true">
@@ -3143,55 +3323,11 @@ async function startStopNarration() {
                         </div>
                       </div>
                     </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    disabled={!customNarratorEnabled}
-                    aria-disabled={!customNarratorEnabled}
-                    onClick={() => {
-                      if (!customNarratorEnabled) return;
-                      handleNarratorSelect("custom");
-                    }}
-                    className={`${styles.pickNarratorOption} ${selectedPersona === "custom" ? styles.pickNarratorOptionSelected : ""} ${!customNarratorEnabled ? styles.pickNarratorOptionDisabled : ""}`}
-                  >
-                    <div className={styles.pickNarratorOptionContent}>
-                      <div className={styles.pickNarratorWithAvatar}>
-                        <div className={styles.pickNarratorAvatarWrap}>
-                          <Image
-                            src="/icons/stars.svg"
-                            alt=""
-                            width={24}
-                            height={24}
-                            className={styles.pickNarratorFutureIcon}
-                            aria-hidden="true"
-                          />
-                        </div>
-                        <div>
-                          <div className={styles.pickRouteTitle}>Create your own storyteller</div>
-                          <div className={styles.pickNarratorSub}>
-                            {customNarratorEnabled ? "Describe the voice, audience, and tone you want." : "Available for custom tours only"}
-                          </div>
-                        </div>
-                      </div>
-                      <div className={styles.pickRowArrow} aria-hidden="true">
-                        <Image
-                          src="/icons/chevron-right.svg"
-                          alt=""
-                          width={28}
-                          height={28}
-                          className={styles.landingArrowIcon}
-                          aria-hidden="true"
-                        />
-                      </div>
-                    </div>
-                  </button>
-                </div>
-                {customNarratorEnabled && selectedPersona === "custom" && (
+                  </div>
+                )}
+                {customNarratorEnabled && (narratorSelectionIsCustomOnly || selectedPersona === "custom") && (
                   <div className={styles.customNarratorPanel}>
-                    <label htmlFor="customNarratorGuidance" className={styles.customNarratorLabel}>
-                      Describe your narrator
-                    </label>
+                     
                     <p className={styles.customNarratorHelp}>
                       {customNarratorHelpText}
                     </p>
@@ -3208,7 +3344,7 @@ async function startStopNarration() {
                       maxLength={CUSTOM_NARRATOR_MAX_CHARS}
                     />
                     <div className={styles.customNarratorCount}>
-                      {trimmedCustomNarratorGuidance.length}/{CUSTOM_NARRATOR_MAX_CHARS}
+                      {customNarratorGuidance.length}/{CUSTOM_NARRATOR_MAX_CHARS}
                     </div>
                   </div>
                 )}
@@ -3430,7 +3566,7 @@ async function startStopNarration() {
               />
             </button>
             <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>Create your mix</h2>
+              <h2 className={styles.pickHeading}>Mix your journey</h2>
             </div>
 
             {INSTAGRAM_IMPORT_ENABLED ? (
@@ -3453,8 +3589,8 @@ async function startStopNarration() {
                     />
                   </div>
                   <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>Creator Mixes</div>
-                    <div className={styles.pickRouteMeta}>Mixes created by the people who know the place best.</div>
+                    <div className={styles.pickRouteTitle}>Start with Instagram</div>
+                    <div className={styles.pickRouteMeta}>Turn your posts into a journey.</div>
                   </div>
                 </div>
               </button>
@@ -3462,6 +3598,8 @@ async function startStopNarration() {
 
             <div className={styles.buildMixLinkAddWrap}>
               <div className={styles.buildMixSearchRow}>
+              <div className={styles.pickRouteTitle}>Start with a place</div>
+                    <div className={styles.pickRouteMeta}>Build your story from scratch</div>
                 <div className={styles.buildMixSearchInputWrap}>
                   <input
                     type="text"
@@ -3642,6 +3780,7 @@ async function startStopNarration() {
                       setErr(selectionValidation.message);
                       return;
                     }
+                    setSelectedPersona("custom");
                     setNarratorFlowSource("buildMix");
                     setPickDurationPage("narrator");
                     setStep("pickDuration");
@@ -3842,6 +3981,7 @@ async function startStopNarration() {
                 type="button"
                 onClick={() => {
                   setErr(null);
+                  setSelectedPersona("custom");
                   setNarratorFlowSource("followAlong");
                   setPickDurationPage("narrator");
                   setStep("pickDuration");
@@ -4350,6 +4490,7 @@ async function startStopNarration() {
                           className={`${styles.walkNarratorAvatarWrap} ${styles.walkNarratorAvatarButton}`}
                           onClick={() => {
                             setReturnToWalkOnClose(true);
+                            if (!isPresetWalkRoute) setSelectedPersona("custom");
                             setNarratorFlowSource("walkEdit");
                             setPickDurationPage("narrator");
                             setStep("pickDuration");
@@ -4379,6 +4520,7 @@ async function startStopNarration() {
                           type="button"
                           onClick={() => {
                             setReturnToWalkOnClose(true);
+                            if (!isPresetWalkRoute) setSelectedPersona("custom");
                             setNarratorFlowSource("walkEdit");
                             setPickDurationPage("narrator");
                             setStep("pickDuration");

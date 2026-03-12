@@ -53,12 +53,6 @@ export async function POST(req: Request) {
       (async () => {
         const body = (await req.json()) as CreateBody;
         const narratorGuidance = toNullableTrimmed(body.narratorGuidance);
-        if (body.persona === "custom" && !narratorGuidance) {
-          return NextResponse.json(
-            { error: "Narrator guidance is required." },
-            { status: 400 }
-          );
-        }
 
         const admin = getAdmin();
         let prepared;

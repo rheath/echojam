@@ -152,11 +152,39 @@ async function createJam(
   return jam.id as string;
 }
 
+function normalizeCustomNarratorSelection(
+  persona: Persona,
+  narratorGuidance: string | null
+) {
+  if (persona === "custom" && !narratorGuidance) {
+    return {
+      persona: "adult" as Persona,
+      narratorGuidance: null,
+      narratorVoice: null,
+    };
+  }
+
+  return {
+    persona,
+    narratorGuidance,
+    narratorVoice:
+      persona === "custom" && narratorGuidance
+        ? selectCustomNarratorVoice(narratorGuidance)
+        : null,
+  };
+}
+
 export async function prepareCustomRouteJob(
   input: PrepareCustomRouteJobInput
 ): Promise<PreparedCustomRouteJob> {
   const city = (input.city || "").trim().toLowerCase() || "nearby";
-  const narratorGuidance = toNullableTrimmed(input.narratorGuidance);
+  const normalizedNarratorGuidance = toNullableTrimmed(input.narratorGuidance);
+  const narratorSelection = normalizeCustomNarratorSelection(
+    input.persona,
+    normalizedNarratorGuidance
+  );
+  const narratorGuidance = narratorSelection.narratorGuidance;
+  const persona = narratorSelection.persona;
   const experienceKind = input.experienceKind ?? "mix";
   const minStops = input.source === "instant" ? 1 : undefined;
   const validation = validateMixSelection(
@@ -168,13 +196,9 @@ export async function prepareCustomRouteJob(
   if (!validation.ok) {
     throw new Error(validation.message);
   }
-  if (input.persona === "custom" && !narratorGuidance) {
-    throw new Error("Narrator guidance is required.");
-  }
-
   let jamId = input.jamId ?? null;
   if (!jamId) {
-    jamId = await createJam(input.admin, input.persona);
+    jamId = await createJam(input.admin, persona);
   }
 
   const { data: activeJob } = await input.admin
@@ -206,12 +230,11 @@ export async function prepareCustomRouteJob(
     transport_mode: input.transportMode,
     length_minutes: input.lengthMinutes,
     title: routeTitle,
-    narrator_default: input.persona,
+    narrator_default: persona,
     narrator_guidance: narratorGuidance,
     narrator_voice:
-      input.persona === "custom"
-        ? input.narratorVoice ??
-          (narratorGuidance ? selectCustomNarratorVoice(narratorGuidance) : null)
+      persona === "custom"
+        ? input.narratorVoice ?? narratorSelection.narratorVoice
         : null,
     status: "generating",
     experience_kind: experienceKind,
@@ -298,7 +321,7 @@ export async function prepareCustomRouteJob(
     .from("jams")
     .update({
       route_id: `custom:${routeId}`,
-      persona: input.persona,
+      persona,
       current_stop: 0,
       completed_at: null,
       preset_id: null,
@@ -351,7 +374,7 @@ export async function prepareCustomRouteJob(
     city,
     transportMode: input.transportMode,
     lengthMinutes: input.lengthMinutes,
-    persona: input.persona,
+    persona,
     narratorGuidance,
     stops: input.stops,
   };

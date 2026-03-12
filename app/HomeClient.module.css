@@ -224,6 +224,38 @@
   opacity: 0.95;
 }
 
+.landingHeroCtaWrap {
+  margin-top: 22px;
+  display: flex;
+  justify-content: center;
+}
+
+.landingHeroCta {
+  min-width: 220px;
+  border: 0;
+  border-radius: 999px;
+  background: #ff5f92;
+  color: #fff8fb;
+  padding: 14px 24px;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 4px 30px rgba(255, 95, 146, 0.4);
+  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+}
+
+.landingHeroCta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 48px rgba(255, 95, 146, 0.34);
+}
+
+.landingHeroCta:focus-visible {
+  outline: 2px solid rgba(255, 121, 168, 0.95);
+  outline-offset: 4px;
+}
+
 .landingPopular {
   margin-top: 54px;
   font-size: 17px;
@@ -677,14 +709,147 @@
     box-shadow 180ms ease;
 }
 
+.landingLocationIconWrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .landingLocationImage {
   object-fit: cover;
+}
+
+.landingLocationIcon {
+  width: 28px;
+  height: 28px;
+  filter: invert(1);
+  opacity: 0.9;
 }
 
 .landingLocationTitle {
   font-size: 15px;
   font-weight: 700;
   line-height: 1.15;
+}
+
+.landingJourneyModalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(7, 8, 12, 0.56);
+  backdrop-filter: blur(10px);
+}
+
+.landingJourneyModal {
+  position: relative;
+  width: min(100%, 560px);
+  border-radius: 28px;
+  border: 1px solid var(--landing-card-border);
+  background: color-mix(in srgb, var(--landing-bg) 80%, #111 20%);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.32);
+  padding: 28px;
+}
+
+.landingJourneyModalLabel {
+  margin-left: 54px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.landingJourneyModalTitle {
+  margin: 40px 0 0 0;
+  font-size: 40px;
+  line-height: 0.98;
+  font-weight: 600;
+}
+
+.landingJourneyModalBody {
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.landingJourneyModalClose {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid var(--landing-card-border);
+  background: var(--landing-icon-circle-bg);
+  color: inherit;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.landingJourneyModalClose:focus-visible {
+  outline: 2px solid rgba(255, 121, 168, 0.95);
+  outline-offset: 3px;
+}
+
+.landingJourneyModalCloseIcon {
+  width: 18px;
+  height: 18px;
+  filter: var(--landing-icon-filter);
+}
+
+.landingJourneyOption {
+  width: 100%;
+  border: 1px solid var(--landing-card-border);
+  border-radius: 20px;
+  background: var(--landing-card-bg);
+  color: inherit;
+  padding: 18px 20px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--landing-card-shadow);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.landingJourneyOption:hover {
+  transform: translateY(-1px);
+  border-color: var(--landing-card-border-hover);
+}
+
+.landingJourneyOption:disabled {
+  cursor: not-allowed;
+}
+
+.landingJourneyOption:disabled:hover {
+  transform: none;
+  border-color: var(--landing-card-border);
+}
+
+.landingJourneyOption:focus-visible {
+  outline: 2px solid rgba(255, 121, 168, 0.95);
+  outline-offset: 3px;
+}
+
+.landingJourneyOptionMain {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.landingJourneyOption .pickRouteTitle {
+  font-size: 24px;
+}
+
+.landingJourneyOption .pickRouteMeta {
+  margin-top: 4px;
 }
 
 .landingPaidLabel {
@@ -1386,15 +1551,15 @@
   resize: vertical;
   border: 1px solid #34353b;
   border-radius: 18px;
-  background: #0e1015;
-  color: #f4f4f6;
+  background: #f3f3f3;
+  color: #111;
   font: inherit;
   line-height: 1.5;
   padding: 14px 16px;
 }
 
 .customNarratorTextarea::placeholder {
-  color: rgba(244, 244, 246, 0.52);
+  color: rgba(0,0,0, 0.52);
 }
 
 .customNarratorCount {
@@ -2709,6 +2874,15 @@
     font-size: 54px; 
   }
 
+  .landingHeroCtaWrap {
+    margin-top: 18px;
+  }
+
+  .landingHeroCta {
+    width: 100%;
+    max-width: 220px;
+  }
+
   .landingPopular {
     margin-top: 18px;
   }
@@ -2810,6 +2984,34 @@
     font-size: 20px;
   }
 
+  .landingJourneyModalOverlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .landingJourneyModal {
+    width: 100%;
+    border-radius: 26px 26px 0 0;
+    padding: 22px 18px 24px;
+  }
+
+  .landingJourneyModalTitle { 
+    font-size: 32px;
+  }
+
+  .landingJourneyModalBody {
+    gap: 12px;
+  }
+
+  .landingJourneyOption {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .landingJourneyOption .pickRouteTitle {
+    font-size: 20px;
+  }
+
   .landingPaidLabel {
     margin-top: 22px;
   }
@@ -2907,7 +3109,7 @@
   .pickDurationStartWrap {
     margin-top: 24px;
     display: flex;
-    justify-content: center;
+    justify-content: right;
   }
 
   .buildMixStickyCtaWrap {
