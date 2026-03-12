@@ -123,6 +123,7 @@ type CustomRouteResponse = {
     lat: number;
     lng: number;
     image_url: string | null;
+    google_place_id?: string | null;
     stop_kind?: "story" | "arrival" | null;
     distance_along_route_meters?: number | null;
     trigger_radius_meters?: number | null;
@@ -238,6 +239,7 @@ const POLL_INTERVAL_MS = 1500;
 const POLL_REQUEST_TIMEOUT_MS = 8000;
 const POLL_FAILURE_THRESHOLD = 5;
 const START_JOB_TIMEOUT_MS = 15000;
+const BACKGROUND_GENERATION_TIMEOUT_MS = 120000;
 const FOLLOW_ALONG_ORIGIN_PENDING_SUBTITLE = "Finding address...";
 const FOLLOW_ALONG_ORIGIN_FALLBACK_SUBTITLE = "Location detected";
 const PERSONA_KEYS: Array<Exclude<Persona, "custom">> = ["adult", "preteen", "ghost"];
@@ -473,6 +475,20 @@ function mapNearbyStopsToCustomStops(stops: CustomMixStop[]) {
   }));
 }
 
+function buildRouteStopCandidateKey(stop: {
+  title: string;
+  lat: number;
+  lng: number;
+  googlePlaceId?: string | null;
+}) {
+  return buildWalkDiscoveryCandidateKey({
+    title: stop.title,
+    lat: stop.lat,
+    lng: stop.lng,
+    googlePlaceId: stop.googlePlaceId ?? undefined,
+  });
+}
+
 function prioritizeOverviewById<T extends { id: string }>(stops: T[]) {
   const overview = stops.filter((stop) => isPresetOverviewStopId(stop.id));
   if (overview.length === 0) return stops;
@@ -650,6 +666,7 @@ const [isStartingWalkDiscovery, setIsStartingWalkDiscovery] = useState(false);
 const [walkDiscoverySuggestion, setWalkDiscoverySuggestion] = useState<WalkDiscoverySuggestion | null>(null);
 const [isResolvingWalkDiscoverySuggestion, setIsResolvingWalkDiscoverySuggestion] = useState(false);
 const [isAcceptingWalkDiscoverySuggestion, setIsAcceptingWalkDiscoverySuggestion] = useState(false);
+const [isGeneratingWalkDiscoveryAcceptedStopAssets, setIsGeneratingWalkDiscoveryAcceptedStopAssets] = useState(false);
 const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
 const [isEditingStopsFromWalk, setIsEditingStopsFromWalk] = useState(false);
 const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
@@ -1492,6 +1509,7 @@ const walkDiscoveryRequestIdRef = useRef(0);
       title: s.title,
       lat: s.lat,
       lng: s.lng,
+      googlePlaceId: (s.google_place_id || "").trim() || undefined,
       isOverview: Boolean(s.is_overview) || isPresetOverviewStopId(stopId),
       stopKind: s.stop_kind || "story",
       distanceAlongRouteMeters:
@@ -1606,9 +1624,93 @@ async function startStopNarration() {
     [jam?.id]
   );
 
+  const invalidateWalkDiscoverySuggestionRequests = useCallback(() => {
+    walkDiscoveryRequestIdRef.current += 1;
+    setIsResolvingWalkDiscoverySuggestion(false);
+  }, []);
+
+  const generateWalkDiscoveryAcceptedStopAssets = useCallback(async (
+    routeRef: string,
+    routeId: string,
+    stopId: string,
+    initialRoute?: RouteDef | null
+  ) => {
+    const resolveStop = (candidateRoute: RouteDef | null | undefined) =>
+      candidateRoute?.stops.find((stop) => stop.id === stopId) ?? null;
+
+    setIsGeneratingWalkDiscoveryAcceptedStopAssets(true);
+    try {
+      const loadedRoute = initialRoute ?? (await loadResolvedRoute(routeRef));
+      const acceptedStop = resolveStop(loadedRoute);
+      if (!acceptedStop) return;
+
+      const needsScript = !((acceptedStop.text?.[persona] || "").trim());
+      let needsAudio = !((acceptedStop.audio[persona] || "").trim());
+
+      if (!needsScript && !needsAudio) {
+        setPendingAutoplayStopId(stopId);
+        return;
+      }
+
+      const customRouteId = getCustomRouteId(routeRef) || routeId;
+      if (!customRouteId) return;
+
+      if (needsScript) {
+        await fetchJsonWithTimeout<{ script?: string; reused?: boolean; error?: string }>(
+          "/api/custom-scripts/generate",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              routeId: customRouteId,
+              stopId,
+              persona,
+              city: customRouteCity,
+            }),
+          },
+          BACKGROUND_GENERATION_TIMEOUT_MS
+        );
+        needsAudio = true;
+      }
+
+      if (needsAudio) {
+        await fetchJsonWithTimeout<{ audioUrl?: string; reused?: boolean; error?: string }>(
+          "/api/custom-audio/generate",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              routeId: customRouteId,
+              stopId,
+              persona,
+              city: customRouteCity,
+            }),
+          },
+          BACKGROUND_GENERATION_TIMEOUT_MS
+        );
+      }
+
+      const refreshedRoute = await loadResolvedRoute(routeRef);
+      const refreshedStop = resolveStop(refreshedRoute);
+      if ((refreshedStop?.audio[persona] || "").trim()) {
+        setPendingAutoplayStopId(stopId);
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to generate accepted stop audio.");
+    } finally {
+      setIsGeneratingWalkDiscoveryAcceptedStopAssets(false);
+    }
+  }, [customRouteCity, loadResolvedRoute, persona]);
+
   const refreshWalkDiscoverySuggestion = useCallback(async (force = false) => {
     if (!jam?.id || !isWalkDiscoveryRoute) return;
-    if (isResolvingWalkDiscoverySuggestion || isAcceptingWalkDiscoverySuggestion) return;
+    if (
+      isResolvingWalkDiscoverySuggestion ||
+      isAcceptingWalkDiscoverySuggestion ||
+      isGeneratingWalkDiscoveryAcceptedStopAssets
+    ) {
+      return;
+    }
 
     let coords = myPos;
     if (!coords) {
@@ -1647,11 +1749,7 @@ async function startStopNarration() {
     }
 
     const acceptedCandidateKeys = (route?.stops ?? []).map((stop) =>
-      buildWalkDiscoveryCandidateKey({
-        title: stop.title,
-        lat: stop.lat,
-        lng: stop.lng,
-      })
+      buildRouteStopCandidateKey(stop)
     );
 
     const requestId = walkDiscoveryRequestIdRef.current + 1;
@@ -1693,6 +1791,7 @@ async function startStopNarration() {
     isWalkDiscoveryRoute,
     isResolvingWalkDiscoverySuggestion,
     isAcceptingWalkDiscoverySuggestion,
+    isGeneratingWalkDiscoveryAcceptedStopAssets,
     myPos,
     route,
   ]);
@@ -1770,6 +1869,7 @@ async function startStopNarration() {
   async function acceptWalkDiscoverySuggestion() {
     if (!jam?.id || !walkDiscoverySuggestion || isAcceptingWalkDiscoverySuggestion) return;
 
+    const acceptedSuggestion = walkDiscoverySuggestion;
     setIsAcceptingWalkDiscoverySuggestion(true);
     setErr(null);
 
@@ -1783,26 +1883,31 @@ async function startStopNarration() {
             jamId: jam.id,
             persona,
             candidate: {
-              id: walkDiscoverySuggestion.id,
-              title: walkDiscoverySuggestion.title,
-              lat: walkDiscoverySuggestion.lat,
-              lng: walkDiscoverySuggestion.lng,
-              image: walkDiscoverySuggestion.image,
-              source: walkDiscoverySuggestion.source,
-              distanceMeters: walkDiscoverySuggestion.distanceMeters,
-              googlePlaceId: walkDiscoverySuggestion.googlePlaceId ?? undefined,
+              id: acceptedSuggestion.id,
+              title: acceptedSuggestion.title,
+              lat: acceptedSuggestion.lat,
+              lng: acceptedSuggestion.lng,
+              image: acceptedSuggestion.image,
+              source: acceptedSuggestion.source,
+              distanceMeters: acceptedSuggestion.distanceMeters,
+              googlePlaceId: acceptedSuggestion.googlePlaceId ?? undefined,
             },
           }),
         },
         START_JOB_TIMEOUT_MS
       );
 
-      setWalkDiscoverySuggestion((current) =>
-        current ? { ...current, status: "accepted" } : current
-      );
-      await loadJamById(body.jamId);
-      setPendingAutoplayStopId(body.insertedStopId);
+      persistWalkDiscoveryCooldown(acceptedSuggestion.candidateKey);
+      invalidateWalkDiscoverySuggestionRequests();
       setWalkDiscoverySuggestion(null);
+      await loadJamById(body.jamId);
+      const nextRoute = await loadResolvedRoute(body.routeRef);
+      await generateWalkDiscoveryAcceptedStopAssets(
+        body.routeRef,
+        body.routeId,
+        body.insertedStopId,
+        nextRoute
+      );
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to accept nearby stop.");
     } finally {
@@ -2718,6 +2823,15 @@ async function startStopNarration() {
     if (step === "walk" && isWalkDiscoveryRoute) return;
     setWalkDiscoverySuggestion(null);
   }, [step, isWalkDiscoveryRoute]);
+
+  useEffect(() => {
+    if (!walkDiscoverySuggestion || !route) return;
+    const acceptedCandidateKeys = new Set(
+      route.stops.map((stop) => buildRouteStopCandidateKey(stop))
+    );
+    if (!acceptedCandidateKeys.has(walkDiscoverySuggestion.candidateKey)) return;
+    setWalkDiscoverySuggestion(null);
+  }, [walkDiscoverySuggestion, route]);
 
 // ---------- watchPosition ----------
   useEffect(() => {

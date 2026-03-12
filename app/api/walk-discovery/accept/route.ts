@@ -54,6 +54,7 @@ export async function POST(req: Request) {
       persona: (body.persona || "adult") as Persona,
       candidate: body.candidate,
       experienceKind: "walk_discovery",
+      generateAssets: false,
     });
 
     return NextResponse.json({

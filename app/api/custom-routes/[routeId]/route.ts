@@ -26,6 +26,7 @@ type CanonicalImageRow = {
   image_url: string | null;
   fallback_image_url: string | null;
   image_source: "places" | "curated" | "placeholder" | "link_seed" | null;
+  google_place_id: string | null;
 };
 
 type AssetRow = {
@@ -41,6 +42,7 @@ type StopRow = {
   lat: number;
   lng: number;
   image_url: string | null;
+  google_place_id?: string | null;
   stop_kind?: "story" | "arrival" | null;
   distance_along_route_meters?: number | null;
   trigger_radius_meters?: number | null;
@@ -306,7 +308,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
 
       const { data: imageRows, error: imagesErr } = await admin
         .from("canonical_stops")
-        .select("id,image_url,fallback_image_url,image_source")
+        .select("id,image_url,fallback_image_url,image_source,google_place_id")
         .in("id", Array.from(canonicalIds));
       if (imagesErr) return NextResponse.json({ error: imagesErr.message }, { status: 500 });
       canonicalImages = (imageRows ?? []) as CanonicalImageRow[];
@@ -387,6 +389,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       return {
         ...stop,
         image_url: proxyGoogleImageUrl(imageUrl) || imageUrl,
+        google_place_id: toNullableTrimmed(canonicalImage?.google_place_id),
         script_adult: scriptAdult,
         script_preteen: scriptPreteen,
         script_ghost: scriptGhost,

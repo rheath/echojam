@@ -62,6 +62,11 @@ type RouteContext = {
   experienceKind: DiscoveryExperienceKind;
 };
 
+type CanonicalPersonaAssets = {
+  script: string | null;
+  audio: string | null;
+};
+
 export type AcceptedNearbyStopResult = {
   routeId: string;
   routeRef: string;
@@ -129,6 +134,41 @@ function mapAssetsByCanonical(rows: CanonicalAssetRow[]) {
   }
 
   return byCanonical;
+}
+
+function getCanonicalAssetsForPersona(
+  persona: Persona,
+  canonicalAssets: {
+    scriptAdult: string | null;
+    scriptPreteen: string | null;
+    scriptGhost: string | null;
+    audioAdult: string | null;
+    audioPreteen: string | null;
+    audioGhost: string | null;
+  }
+): CanonicalPersonaAssets {
+  if (persona === "adult") {
+    return {
+      script: canonicalAssets.scriptAdult,
+      audio: canonicalAssets.audioAdult,
+    };
+  }
+  if (persona === "preteen") {
+    return {
+      script: canonicalAssets.scriptPreteen,
+      audio: canonicalAssets.audioPreteen,
+    };
+  }
+  if (persona === "ghost") {
+    return {
+      script: canonicalAssets.scriptGhost,
+      audio: canonicalAssets.audioGhost,
+    };
+  }
+  return {
+    script: null,
+    audio: null,
+  };
 }
 
 async function loadCustomRouteStops(
@@ -405,6 +445,7 @@ export async function appendAcceptedNearbyStop(args: {
   insertAfterStopIndex?: number | null;
   routeTitle?: string | null;
   experienceKind?: DiscoveryExperienceKind;
+  generateAssets?: boolean;
 }) {
   const context = await resolveRouteContext(args.admin, args.jamId, args.city);
   const city = context.city;
@@ -451,23 +492,16 @@ export async function appendAcceptedNearbyStop(args: {
 
   let selectedScript: string | null = null;
   let selectedAudio: string | null = null;
-  let reusedScript = false;
-  let reusedAudio = false;
-
-  if (args.persona === "adult") {
-    selectedScript = canonicalAssets.scriptAdult;
-    selectedAudio = canonicalAssets.audioAdult;
-  } else if (args.persona === "preteen") {
-    selectedScript = canonicalAssets.scriptPreteen;
-    selectedAudio = canonicalAssets.audioPreteen;
-  } else if (args.persona === "ghost") {
-    selectedScript = canonicalAssets.scriptGhost;
-    selectedAudio = canonicalAssets.audioGhost;
-  }
+  const personaAssets = getCanonicalAssetsForPersona(args.persona, canonicalAssets);
+  selectedScript = personaAssets.script;
+  selectedAudio = personaAssets.audio;
+  let reusedScript = Boolean(selectedScript);
+  let reusedAudio = Boolean(selectedAudio);
   reusedScript = Boolean(selectedScript);
   reusedAudio = Boolean(selectedAudio);
 
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const shouldGenerateAssets = args.generateAssets !== false;
+  const apiKey = shouldGenerateAssets ? process.env.OPENAI_API_KEY?.trim() : null;
   const insertedStopIndex =
     typeof args.insertAfterStopIndex === "number" &&
     Number.isFinite(args.insertAfterStopIndex)
@@ -477,7 +511,7 @@ export async function appendAcceptedNearbyStop(args: {
         )
       : context.currentStops.length;
 
-  if (!selectedScript) {
+  if (shouldGenerateAssets && !selectedScript) {
     if (!apiKey) {
       throw new Error("OPENAI_API_KEY is required to generate narration.");
     }
@@ -507,9 +541,12 @@ export async function appendAcceptedNearbyStop(args: {
     }
   }
 
-  if (!selectedAudio) {
+  if (shouldGenerateAssets && !selectedAudio) {
     if (!apiKey) {
       throw new Error("OPENAI_API_KEY is required to generate narration audio.");
+    }
+    if (!selectedScript) {
+      throw new Error("Narration script is required before audio generation.");
     }
     const audioBytes = await synthesizeSpeechWithOpenAI(
       apiKey,
@@ -530,7 +567,7 @@ export async function appendAcceptedNearbyStop(args: {
     }
   }
 
-  if (args.persona !== "custom") {
+  if (shouldGenerateAssets && args.persona !== "custom") {
     await args.admin.from("canonical_stop_assets").upsert(
       {
         canonical_stop_id: canonical.id,
