@@ -4,17 +4,17 @@ import {
   isInstagramCreatorAccessAuthorizedFromCookieStore,
   isInstagramImportEnabled,
 } from "@/lib/server/instagramCreatorAccess";
-import InstagramImportClient from "./InstagramImportClient";
+import InstagramCreatorAccessClient from "./InstagramCreatorAccessClient";
 
-export default async function InstagramImportPage() {
+export default async function InstagramImportAccessPage() {
   if (!isInstagramImportEnabled()) {
     notFound();
   }
 
   const cookieStore = await cookies();
-  if (!isInstagramCreatorAccessAuthorizedFromCookieStore(cookieStore)) {
-    redirect("/import/instagram/access");
+  if (isInstagramCreatorAccessAuthorizedFromCookieStore(cookieStore)) {
+    redirect("/import/instagram");
   }
 
-  return <InstagramImportClient />;
+  return <InstagramCreatorAccessClient />;
 }

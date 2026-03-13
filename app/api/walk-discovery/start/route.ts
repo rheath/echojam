@@ -45,7 +45,7 @@ export async function POST(req: Request) {
 
     if (!candidate) {
       return NextResponse.json(
-        { error: "No nearby place found to start On the Move." },
+        { error: "No nearby place found to start Wander." },
         { status: 404 }
       );
     }
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
       jamId,
       persona,
       candidate,
-      routeTitle: "On the Move",
+      routeTitle: "Wander",
       experienceKind: "walk_discovery",
     });
 
@@ -72,7 +72,7 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json(
       {
-        error: e instanceof Error ? e.message : "Failed to start On the Move.",
+        error: e instanceof Error ? e.message : "Failed to start Wander.",
       },
       { status: 500 }
     );

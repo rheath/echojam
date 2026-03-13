@@ -5,6 +5,7 @@ import {
   normalizeInstagramCollectionDraftIds,
   toNullableTrimmed,
 } from "@/lib/instagramImport";
+import { getInstagramImportRequestAuthorizationState } from "@/lib/server/instagramCreatorAccess";
 import {
   createInstagramImportJob,
   getInstagramDraftIdsMigrationError,
@@ -25,6 +26,17 @@ function sameOrderedIds(left: string[] | null | undefined, right: string[]) {
 }
 
 export async function POST(req: Request) {
+  const access = getInstagramImportRequestAuthorizationState(req);
+  if (!access.enabled) {
+    return NextResponse.json({ error: "Instagram import is unavailable." }, { status: 404 });
+  }
+  if (!access.authorized) {
+    return NextResponse.json(
+      { error: "Enter a valid creator code to use the Instagram uploader." },
+      { status: 401 }
+    );
+  }
+
   try {
     const body = (await req.json().catch(() => ({}))) as Body;
     const requestedDraftIds = Array.isArray(body.draftIds)
@@ -48,6 +60,14 @@ export async function POST(req: Request) {
     if (normalizedDraftIds.length !== requestedDraftIds.length) {
       return NextResponse.json(
         { error: "Duplicate or invalid Instagram drafts were provided." },
+        { status: 400 }
+      );
+    }
+
+    const routeTitle = toNullableTrimmed(body.routeTitle);
+    if (!routeTitle) {
+      return NextResponse.json(
+        { error: "Enter a route title before master publish." },
         { status: 400 }
       );
     }
@@ -108,10 +128,7 @@ export async function POST(req: Request) {
       throw new Error(activeJobsErr.message);
     }
 
-    const routeTitle = toNullableTrimmed(body.routeTitle);
-    const message = routeTitle
-      ? `Queued for master publish: ${routeTitle}`
-      : "Queued for master publish";
+    const message = `Queued for master publish: ${routeTitle}`;
 
     const existingJob = (activeJobs ?? []).find((job) =>
       sameOrderedIds((job as { draft_ids?: string[] | null }).draft_ids, normalizedDraftIds)

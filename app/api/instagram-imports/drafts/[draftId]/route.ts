@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getInstagramImportRequestAuthorizationState } from "@/lib/server/instagramCreatorAccess";
 import { getInstagramDraftResponseById } from "@/lib/server/instagramImportWorker";
 import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 
@@ -21,7 +22,18 @@ function isFiniteCoord(value: number) {
   return Number.isFinite(value) && Math.abs(value) <= 180;
 }
 
-export async function GET(_: Request, ctx: { params: Promise<{ draftId: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ draftId: string }> }) {
+  const access = getInstagramImportRequestAuthorizationState(req);
+  if (!access.enabled) {
+    return NextResponse.json({ error: "Instagram import is unavailable." }, { status: 404 });
+  }
+  if (!access.authorized) {
+    return NextResponse.json(
+      { error: "Enter a valid creator code to use the Instagram uploader." },
+      { status: 401 }
+    );
+  }
+
   try {
     const { draftId } = await ctx.params;
     return NextResponse.json(await getInstagramDraftResponseById(draftId));
@@ -34,6 +46,17 @@ export async function GET(_: Request, ctx: { params: Promise<{ draftId: string }
 }
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ draftId: string }> }) {
+  const access = getInstagramImportRequestAuthorizationState(req);
+  if (!access.enabled) {
+    return NextResponse.json({ error: "Instagram import is unavailable." }, { status: 404 });
+  }
+  if (!access.authorized) {
+    return NextResponse.json(
+      { error: "Enter a valid creator code to use the Instagram uploader." },
+      { status: 401 }
+    );
+  }
+
   try {
     const { draftId } = await ctx.params;
     const body = (await req.json()) as PatchBody;

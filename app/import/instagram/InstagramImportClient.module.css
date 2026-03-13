@@ -1,10 +1,7 @@
 .page {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at top left, rgba(255, 124, 88, 0.18), transparent 30%),
-    radial-gradient(circle at top right, rgba(217, 84, 132, 0.18), transparent 24%),
-    linear-gradient(180deg, #fff8f4 0%, #f5eee8 100%);
-  color: #1f1714;
+  background:#ddd;
+  color: #000;
 }
 
 .shell {
@@ -22,8 +19,7 @@
 }
 
 .backLink,
-.openLink {
-  color: #8d4326;
+.openLink { 
   text-decoration: none;
 }
 
@@ -43,8 +39,7 @@
   max-width: 720px;
   margin: 12px 0 0;
   font-size: 17px;
-  line-height: 1.5;
-  color: #5d4b43;
+  line-height: 1.5; 
 }
 
 .badge {
@@ -66,14 +61,17 @@
   grid-column: 1 / -1;
 }
 
-.card,
-.statusCard {
+.titleCard {
   border: 1px solid rgba(31, 23, 20, 0.08);
-  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, rgba(240, 146, 76, 0.16) 100%);
+}
+
+.card,
+.statusCard { 
+  border-radius: 16px;
   padding: 22px;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 18px 70px rgba(92, 63, 43, 0.08);
-  backdrop-filter: blur(16px);
+  background: rgba(255, 255, 255, 0.88); 
+  margin-bottom: 8px;
 }
 
 .statusCard {
@@ -90,6 +88,11 @@
   gap: 12px;
 }
 
+.importRow {
+  align-items: flex-end;
+  gap: 10px;
+}
+
 .sectionTitle {
   margin: 0;
   font-size: 24px;
@@ -99,37 +102,41 @@
 .publishNote,
 .statusMessage,
 .placeAddress,
-.placeAction {
-  color: #715f56;
+.placeAction { 
 }
 
 .metaLabel {
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+
+  font-weight: normal;
 }
 
 .copyBlock,
 .captionBlock,
 .fieldLabel {
   margin-top: 16px;
+  font-weight: 700;
+}
+.fieldLabel span{ 
+  font-weight: normal;
+  color: #666;
 }
 
 .collectionJobCard,
 .collectionList,
 .collectionFooter {
-  margin-top: 18px;
+  margin: 0 0 10px 0;
 }
 
 .textInput,
 .textarea {
   width: 100%;
   margin-top: 8px;
-  border: 1px solid rgba(31, 23, 20, 0.12);
+  border: 1px solid rgba(31, 23, 20, 0.6);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.96);
   color: #1f1714;
   font-size: 16px;
+  font-weight: normal;
 }
 
 .textInput {
@@ -166,13 +173,19 @@
 }
 
 .primaryButton {
-  background: linear-gradient(135deg, #ec6551 0%, #f0924c 100%);
+  background: #ff5f92;
+  color: #fff;
+}
+
+.importButton {
+  background: #111;
   color: #fff;
 }
 
 .secondaryButton {
-  background: rgba(31, 23, 20, 0.08);
-  color: #241b17;
+  color: #111;
+  background: #fff;
+  border:2px solid #111;
 }
 
 .suggestedButton {
@@ -194,7 +207,7 @@
 .primaryButton:disabled,
 .secondaryButton:disabled {
   cursor: default;
-  opacity: 0.58;
+  opacity: 0.25;
   transform: none;
 }
 
@@ -218,6 +231,7 @@
 
 .preview {
   position: relative;
+  width: 100px;
   margin-top: 18px;
   aspect-ratio: 4 / 5;
   border-radius: 20px;
@@ -359,13 +373,13 @@
 }
 
 .statusready {
-  background: rgba(43, 120, 84, 0.12);
-  color: #1f6b48;
+  background: rgba(43, 120, 84, 1);
+  color: #fff;
 }
 
 .statusneeds_location {
-  background: rgba(233, 181, 39, 0.18);
-  color: #876114;
+  background: rgba(233, 181, 39, 1);
+  color: #000;
 }
 
 .statuspublished {

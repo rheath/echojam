@@ -341,7 +341,7 @@ async function resolveRouteContext(
   const jamRow = jam as JamRow;
   let city = normalizePresetCity(cityHint);
   let currentStops: JourneyRouteStop[] = [];
-  let routeTitle = "On the Move";
+  let routeTitle = "Wander";
   let lengthMinutes = 30;
   let customRouteId: string | null = null;
   let narratorGuidance: string | null = null;

@@ -25,14 +25,6 @@ type CreateResponse = {
   error?: string;
 };
 
-type PublishResponse = {
-  draftId?: string;
-  jobId?: string | null;
-  publishedJamId?: string | null;
-  publishedRouteId?: string | null;
-  error?: string;
-};
-
 type PublishCollectionResponse = {
   draftId?: string;
   jobId?: string | null;
@@ -54,6 +46,11 @@ type StoredInstagramCollectionSession = {
 };
 
 const SESSION_STORAGE_KEY = "instagram-import-session:v1";
+const COLLECTION_TITLE_MAX_LENGTH = 30;
+
+function clampCollectionTitle(value: string) {
+  return value.slice(0, COLLECTION_TITLE_MAX_LENGTH);
+}
 
 function isActiveJob(job: InstagramImportJobResponse | null) {
   return job?.status === "queued" || job?.status === "processing";
@@ -171,7 +168,6 @@ export default function InstagramImportClient() {
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
-  const [isPublishing, setIsPublishing] = useState(false);
   const [isMasterPublishing, setIsMasterPublishing] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
   const [shouldPersistSession, setShouldPersistSession] = useState(false);
@@ -184,7 +180,6 @@ export default function InstagramImportClient() {
   );
   const confirmedPlace = draft?.location.confirmedPlace || null;
   const suggestedPlace = draft?.location.suggestedPlace || null;
-  const publishedJamId = draft?.publish.publishedJamId || null;
   const collectionEntries = useMemo(
     () =>
       collectionDraftIds.map((draftId) =>
@@ -197,6 +192,7 @@ export default function InstagramImportClient() {
     collectionEntries,
     INSTAGRAM_COLLECTION_MAX_STOPS
   );
+  const normalizedCollectionTitle = toNullableTrimmed(collectionTitle);
 
   const storeDraft = useCallback((nextDraft: InstagramDraftResponse) => {
     setCollectionDrafts((current) => ({
@@ -251,7 +247,6 @@ export default function InstagramImportClient() {
       if (shouldSetActive) {
         setDraft(nextDraft);
         setJob(nextDraft.latestJob);
-        setUrlInput(nextDraft.source.url);
         setError(null);
         if (opts?.updateUrl !== false) {
           router.replace(`/import/instagram?draft=${encodeURIComponent(draftId)}`);
@@ -320,7 +315,9 @@ export default function InstagramImportClient() {
 
     restoredCollectionDraftIdsRef.current = normalizedDraftIds;
     setCollectionDraftIds(shouldResumeStoredCollection ? normalizedDraftIds : []);
-    setCollectionTitle(shouldResumeStoredCollection ? toNullableTrimmed(stored.routeTitle) || "" : "");
+    setCollectionTitle(
+      shouldResumeStoredCollection ? clampCollectionTitle(toNullableTrimmed(stored.routeTitle) || "") : ""
+    );
     setCollectionJobId(normalizedMasterPublishJobId);
     setShouldPersistSession(Boolean(draftIdFromUrl));
     setSessionReady(true);
@@ -558,6 +555,7 @@ export default function InstagramImportClient() {
       setCollectionDraftIds((current) =>
         addInstagramCollectionDraftId(current, response.draftId, INSTAGRAM_COLLECTION_MAX_STOPS)
       );
+      setUrlInput("");
       await loadDraft(response.draftId);
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Failed to start import");
@@ -639,27 +637,6 @@ export default function InstagramImportClient() {
     }
   }
 
-  async function handleAddAnotherStop() {
-    if (!canAddMoreStops) {
-      setError(`You can add up to ${INSTAGRAM_COLLECTION_MAX_STOPS} stops per collection.`);
-      return;
-    }
-    try {
-      await persistActiveDraftEdits();
-      setDraft(null);
-      setJob(null);
-      setUrlInput("");
-      setTitleInput("");
-      setScriptInput("");
-      setPlaceQueryInput("");
-      setSearchResults([]);
-      setError(null);
-      router.replace("/import/instagram");
-    } catch (nextStopError) {
-      setError(nextStopError instanceof Error ? nextStopError.message : "Failed to prepare the next stop");
-    }
-  }
-
   async function handleRemoveCollectionDraft(removedDraftId: string) {
     try {
       if (draft?.id === removedDraftId) {
@@ -685,49 +662,13 @@ export default function InstagramImportClient() {
     }
   }
 
-  async function handlePublish() {
-    if (!draft) return;
-    setIsPublishing(true);
-    setError(null);
-    try {
-      await patchDraft({
-        editedTitle: titleInput,
-        editedScript: scriptInput,
-        placeQuery: placeQueryInput,
-      });
-      const response = await fetchJson<PublishResponse>(
-        `/api/instagram-imports/drafts/${encodeURIComponent(draft.id)}/publish`,
-        { method: "POST" }
-      );
-      if (response.publishedJamId) {
-        setCollectionDraftIds((current) => removeInstagramCollectionDraftId(current, draft.id));
-        router.push(`/?jam=${encodeURIComponent(response.publishedJamId)}`);
-        return;
-      }
-      if (!response.jobId) {
-        throw new Error("Publish job metadata was missing.");
-      }
-      setJob({
-        id: response.jobId,
-        draftId: draft.id,
-        phase: "publish",
-        status: "queued",
-        progress: 0,
-        message: "Queued for publish",
-        error: null,
-        attempts: job?.attempts || 0,
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (publishError) {
-      setError(publishError instanceof Error ? publishError.message : "Failed to publish draft");
-    } finally {
-      setIsPublishing(false);
-    }
-  }
-
   async function handleMasterPublish() {
     if (collectionDraftIds.length === 0) {
       setError("Add at least one Instagram stop before master publish.");
+      return;
+    }
+    if (!normalizedCollectionTitle) {
+      setError("Enter a route title before master publish.");
       return;
     }
 
@@ -752,7 +693,7 @@ export default function InstagramImportClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             draftIds: collectionDraftIds,
-            routeTitle: collectionTitle,
+            routeTitle: normalizedCollectionTitle,
           }),
         }
       );
@@ -796,38 +737,55 @@ export default function InstagramImportClient() {
         <header className={styles.header}>
           <div>
             <Link href="/" className={styles.backLink}>
-              Back to EchoJam
+              Back 
             </Link>
             <h1 className={styles.title}>Import from Instagram</h1>
             <p className={styles.subtitle}>
-              Build a multi-stop route from public Instagram reels and posts. Add up to {INSTAGRAM_COLLECTION_MAX_STOPS} stops in one session, then master publish the full collection as a single custom route.
+              Build a multi-stop route from public Instagram reels and posts. Add up to {INSTAGRAM_COLLECTION_MAX_STOPS} stops in one session, then master publish the full journey as a single custom route.
             </p>
           </div>
-          <div className={styles.badge}>Session collection flow</div>
+          <div className={styles.badge}>Session journey flow</div>
         </header>
 
-        <section className={styles.card}>
-          <div className={styles.formRow}>
+        <section className={`${styles.card} ${styles.titleCard}`}>
+          <label className={styles.fieldLabel}>
+            Enter journey&apos;s title <span> (30 charcter max)</span>
             <input
-              type="url"
-              value={urlInput}
-              onChange={(event) => setUrlInput(event.target.value)}
+              type="text"
+              value={collectionTitle}
+              onChange={(event) => setCollectionTitle(clampCollectionTitle(event.target.value))}
               className={styles.textInput}
-              placeholder="https://www.instagram.com/reels/..."
-              aria-label="Instagram URL"
+              placeholder=""
+              maxLength={COLLECTION_TITLE_MAX_LENGTH}
+              aria-required="true"
             />
+          </label>
+
+          <div className={`${styles.formRow} ${styles.importRow}`}>
+            <label className={styles.fieldLabel}>
+              Enter 1 Instagram link at a time: <span> https://www.instagram.com/reels/...</span>
+
+              <input
+                type="url"
+                value={urlInput}
+                onChange={(event) => setUrlInput(event.target.value)}
+                className={styles.textInput}
+                placeholder=""
+                aria-label="Instagram URL"
+              />
+            </label>
             <button
               type="button"
               onClick={() => void handleCreateImport()}
               disabled={isCreating || !canAddMoreStops}
-              className={styles.primaryButton}
+              className={`${styles.primaryButton} ${styles.importButton}`}
             >
-              {isCreating ? "Starting..." : "Start import"}
+              {isCreating ? "Starting..." : "Add stop"}
             </button>
           </div>
           {!canAddMoreStops ? (
             <div className={styles.warningBanner}>
-              This collection is full. Master publish it or remove a stop to add another.
+              This journey is full. Publish it or remove a stop to add another.
             </div>
           ) : null}
           {error ? <div className={styles.errorBanner}>{error}</div> : null}
@@ -835,32 +793,34 @@ export default function InstagramImportClient() {
 
         <section className={`${styles.card} ${styles.collectionCard}`}>
           <div className={styles.sectionHeader}>
-            <div>
-              <div className={styles.metaLabel}>Collection</div>
+            <div> 
               <h2 className={styles.sectionTitle}>
-                {collectionDraftIds.length}/{INSTAGRAM_COLLECTION_MAX_STOPS} stops
+                Journey: {collectionDraftIds.length}/{INSTAGRAM_COLLECTION_MAX_STOPS} stops
               </h2>
+              <div className={styles.collectionFooter}>
+                <div className={styles.publishNote}>
+                  {!normalizedCollectionTitle
+                    ? "Add a route title to enable Master Publish."
+                    : canMasterPublish
+                      ? "All stops are ready for Master Publish."
+                      : "Each stop must finish importing and have a confirmed location before Master Publish."}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleMasterPublish()}
+                  disabled={
+                    isMasterPublishing ||
+                    Boolean(activeCollectionJob) ||
+                    !canMasterPublish ||
+                    !normalizedCollectionTitle
+                  }
+                  className={styles.primaryButton}
+                >
+                  {isMasterPublishing ? "Queueing..." : "Publish journey"}
+                </button>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => void handleAddAnotherStop()}
-              disabled={!canAddMoreStops || Boolean(activeJob)}
-              className={styles.secondaryButton}
-            >
-              Add another stop
-            </button>
           </div>
-
-          <label className={styles.fieldLabel}>
-            Route title
-            <input
-              type="text"
-              value={collectionTitle}
-              onChange={(event) => setCollectionTitle(event.target.value)}
-              className={styles.textInput}
-              placeholder="Optional master route title"
-            />
-          </label>
 
           {activeCollectionJob || collectionJob?.status === "failed" ? (
             <div className={styles.collectionJobCard}>
@@ -883,7 +843,7 @@ export default function InstagramImportClient() {
           <div className={styles.collectionList}>
             {collectionDraftIds.length === 0 ? (
               <div className={styles.emptyState}>
-                Import your first Instagram stop to start a collection.
+                Import your first Instagram stop to start a journey.
               </div>
             ) : (
               collectionDraftIds.map((draftId, index) => {
@@ -933,21 +893,6 @@ export default function InstagramImportClient() {
             )}
           </div>
 
-          <div className={styles.collectionFooter}>
-            <div className={styles.publishNote}>
-              {canMasterPublish
-                ? "All stops are ready for Master Publish."
-                : "Each stop must finish importing and have a confirmed location before Master Publish."}
-            </div>
-            <button
-              type="button"
-              onClick={() => void handleMasterPublish()}
-              disabled={isMasterPublishing || Boolean(activeCollectionJob) || !canMasterPublish}
-              className={styles.primaryButton}
-            >
-              {isMasterPublishing ? "Queueing..." : "Master Publish"}
-            </button>
-          </div>
         </section>
 
         {activeJob ? (
@@ -970,7 +915,7 @@ export default function InstagramImportClient() {
           <div className={styles.grid}>
             <section className={styles.card}>
               <div className={styles.sectionHeader}>
-                <h2 className={styles.sectionTitle}>Source</h2>
+                <h2 className={styles.sectionTitle}>Instagram Source</h2>
                 <span className={styles.metaLabel}>{draft.source.kind === "reel" ? "Reel" : "Post"}</span>
               </div>
               {draft.source.thumbnailUrl ? (
@@ -986,7 +931,17 @@ export default function InstagramImportClient() {
               ) : null}
               <div className={styles.copyBlock}>
                 <div><span className={styles.metaLabel}>Owner</span> {draft.source.ownerTitle || "Unknown creator"}</div>
-                <div><span className={styles.metaLabel}>Shortcode</span> {draft.source.shortcode}</div>
+                <div>
+                  <span className={styles.metaLabel}>Shortcode</span>{" "}
+                  <a
+                    href={draft.source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={styles.openLink}
+                  >
+                    {draft.source.shortcode}
+                  </a>
+                </div>
                 <div><span className={styles.metaLabel}>Extracted text est.</span> {formatTokenEstimate(draft.metrics.extractedTextTokensEstimate)}</div>
                 <div><span className={styles.metaLabel}>Cleaned text est.</span> {formatTokenEstimate(draft.metrics.cleanedTextTokensEstimate)}</div>
               </div>
@@ -1001,11 +956,11 @@ export default function InstagramImportClient() {
 
             <section className={styles.card}>
               <div className={styles.sectionHeader}>
-                <h2 className={styles.sectionTitle}>Draft editor</h2>
+                <h2 className={styles.sectionTitle}>Stop/Story editor</h2>
                 {isLoadingDraft ? <span className={styles.metaLabel}>Refreshing</span> : null}
               </div>
               <label className={styles.fieldLabel}>
-                Title
+                Title of Stop
                 <input
                   type="text"
                   value={titleInput}
@@ -1031,25 +986,7 @@ export default function InstagramImportClient() {
                 >
                   {isSaving ? "Saving..." : "Save changes"}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => void handlePublish()}
-                  disabled={isPublishing || !draft.location.publishReady}
-                  className={styles.primaryButton}
-                >
-                  {isPublishing ? "Publishing..." : "Publish to EchoJam"}
-                </button>
               </div>
-              <div className={styles.publishNote}>
-                {draft.location.publishReady
-                  ? "Ready to publish as a single-stop route."
-                  : "Confirm a location to enable publish."}
-              </div>
-              {publishedJamId ? (
-                <Link href={`/?jam=${encodeURIComponent(publishedJamId)}`} className={styles.openLink}>
-                  Open published tour
-                </Link>
-              ) : null}
               {job?.status === "failed" ? (
                 <div className={styles.errorBanner}>{job.error || "The last job failed."}</div>
               ) : null}
@@ -1123,7 +1060,7 @@ export default function InstagramImportClient() {
         ) : (
           <div className={styles.footerActions}>
             <div className={styles.emptyState}>
-              Select a stop from the collection or start a new Instagram import.
+              Wandrful
             </div>
           </div>
         )}

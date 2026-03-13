@@ -7,6 +7,7 @@ import {
 } from "@/lib/instagramImport";
 import { toNullableAudioUrl, toNullableTrimmed } from "@/lib/mixGeneration";
 import { cityPlaceholderImage, proxyGoogleImageUrl } from "@/lib/placesImages";
+import { isPresetOverviewStopId } from "@/lib/presetOverview";
 
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -85,6 +86,22 @@ type RouteRow = {
 
 type InstagramDraftAttributionRow = {
   source_owner_title: string | null;
+};
+
+type PatchBody = {
+  stopIds?: string[];
+};
+
+type RouteStopPositionRow = {
+  stop_id: string;
+  position: number;
+};
+
+type RouteStopMappingRow = {
+  route_id: string;
+  stop_id: string;
+  canonical_stop_id: string;
+  position: number;
 };
 
 const INSTAGRAM_FETCH_TIMEOUT_MS = 4_000;
@@ -215,6 +232,13 @@ async function hydrateInstagramRouteAttribution(
     story_by_avatar_url: storyByAvatarUrl,
     story_by_source: attribution.storyBySource,
   };
+}
+
+function prioritizeOverviewStopIds(stopIds: string[]) {
+  const overview = stopIds.filter((stopId) => isPresetOverviewStopId(stopId));
+  if (overview.length === 0) return stopIds;
+  const rest = stopIds.filter((stopId) => !isPresetOverviewStopId(stopId));
+  return [...overview, ...rest];
 }
 
 export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }> }) {
@@ -404,5 +428,137 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
     return NextResponse.json({ route, stops: normalizedStops });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to load custom route" }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: Request, ctx: { params: Promise<{ routeId: string }> }) {
+  try {
+    const { routeId } = await ctx.params;
+    const admin = getAdmin();
+    const body = (await req.json().catch(() => ({}))) as PatchBody;
+    const rawStopIds = Array.isArray(body.stopIds)
+      ? body.stopIds
+          .map((value) => toNullableTrimmed(value))
+          .filter((value): value is string => Boolean(value))
+      : [];
+
+    if (rawStopIds.length === 0) {
+      return NextResponse.json({ error: "Choose at least 1 stop." }, { status: 400 });
+    }
+
+    const dedupedStopIds: string[] = [];
+    const seenStopIds = new Set<string>();
+    for (const stopId of rawStopIds) {
+      if (seenStopIds.has(stopId)) {
+        return NextResponse.json({ error: "Duplicate stop IDs are not allowed." }, { status: 400 });
+      }
+      seenStopIds.add(stopId);
+      dedupedStopIds.push(stopId);
+    }
+
+    const nextStopIds = prioritizeOverviewStopIds(dedupedStopIds);
+
+    const { data: route, error: routeErr } = await admin
+      .from("custom_routes")
+      .select("id")
+      .eq("id", routeId)
+      .single();
+    if (routeErr || !route?.id) {
+      return NextResponse.json({ error: routeErr?.message || "Route not found" }, { status: 404 });
+    }
+
+    const { data: currentStops, error: currentStopsErr } = await admin
+      .from("custom_route_stops")
+      .select("stop_id,position")
+      .eq("route_id", routeId)
+      .order("position", { ascending: true });
+    if (currentStopsErr) {
+      return NextResponse.json({ error: currentStopsErr.message }, { status: 500 });
+    }
+
+    const currentStopRows = (currentStops ?? []) as RouteStopPositionRow[];
+    const currentStopIds = new Set(currentStopRows.map((stop) => stop.stop_id));
+    if (currentStopRows.length === 0) {
+      return NextResponse.json({ error: "Route has no stops to update." }, { status: 400 });
+    }
+    if (nextStopIds.some((stopId) => !currentStopIds.has(stopId))) {
+      return NextResponse.json({ error: "One or more stops do not belong to this route." }, { status: 400 });
+    }
+
+    const removedStopIds = currentStopRows
+      .map((stop) => stop.stop_id)
+      .filter((stopId) => !seenStopIds.has(stopId));
+
+    if (removedStopIds.length > 0) {
+      const { error: deleteStopsErr } = await admin
+        .from("custom_route_stops")
+        .delete()
+        .eq("route_id", routeId)
+        .in("stop_id", removedStopIds);
+      if (deleteStopsErr) {
+        return NextResponse.json({ error: deleteStopsErr.message }, { status: 500 });
+      }
+
+      const { error: deleteMappingsErr } = await admin
+        .from("route_stop_mappings")
+        .delete()
+        .eq("route_kind", "custom")
+        .in("route_id", [routeId, `custom:${routeId}`])
+        .in("stop_id", removedStopIds);
+      if (deleteMappingsErr) {
+        return NextResponse.json({ error: deleteMappingsErr.message }, { status: 500 });
+      }
+    }
+
+    const positionByStopId = new Map(nextStopIds.map((stopId, index) => [stopId, index]));
+    const stopUpdateResults = await Promise.all(
+      nextStopIds.map(async (stopId, index) => {
+        const result = await admin
+          .from("custom_route_stops")
+          .update({ position: index })
+          .eq("route_id", routeId)
+          .eq("stop_id", stopId);
+        return result.error;
+      })
+    );
+    const stopUpdateErr = stopUpdateResults.find(Boolean);
+    if (stopUpdateErr) {
+      return NextResponse.json({ error: stopUpdateErr.message }, { status: 500 });
+    }
+
+    const { data: mappings, error: mappingsErr } = await admin
+      .from("route_stop_mappings")
+      .select("route_id,stop_id,canonical_stop_id,position")
+      .eq("route_kind", "custom")
+      .in("route_id", [routeId, `custom:${routeId}`])
+      .in("stop_id", nextStopIds);
+    if (mappingsErr) {
+      return NextResponse.json({ error: mappingsErr.message }, { status: 500 });
+    }
+
+    const mappingUpdateResults = await Promise.all(
+      ((mappings ?? []) as RouteStopMappingRow[]).map(async (mapping) => {
+        const nextPosition = positionByStopId.get(mapping.stop_id);
+        if (typeof nextPosition !== "number") return null;
+        const result = await admin
+          .from("route_stop_mappings")
+          .update({ position: nextPosition })
+          .eq("route_kind", "custom")
+          .eq("route_id", mapping.route_id)
+          .eq("stop_id", mapping.stop_id);
+        return result.error;
+      })
+    );
+    const mappingUpdateErr = mappingUpdateResults.find(Boolean);
+    if (mappingUpdateErr) {
+      return NextResponse.json({ error: mappingUpdateErr.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true, routeId, stopIds: nextStopIds });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "Failed to update custom route stops" },
+      { status: 500 }
+    );
   }
 }

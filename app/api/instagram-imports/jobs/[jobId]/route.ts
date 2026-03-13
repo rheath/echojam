@@ -1,8 +1,20 @@
 import { NextResponse } from "next/server";
+import { getInstagramImportRequestAuthorizationState } from "@/lib/server/instagramCreatorAccess";
 import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 import { getInstagramDraftIdsMigrationError, serializeInstagramJob } from "@/lib/server/instagramImportWorker";
 
-export async function GET(_: Request, ctx: { params: Promise<{ jobId: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ jobId: string }> }) {
+  const access = getInstagramImportRequestAuthorizationState(req);
+  if (!access.enabled) {
+    return NextResponse.json({ error: "Instagram import is unavailable." }, { status: 404 });
+  }
+  if (!access.authorized) {
+    return NextResponse.json(
+      { error: "Enter a valid creator code to use the Instagram uploader." },
+      { status: 401 }
+    );
+  }
+
   try {
     const { jobId } = await ctx.params;
     const admin = getSupabaseAdminClient();

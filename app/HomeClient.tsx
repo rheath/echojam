@@ -671,6 +671,7 @@ const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
 const [isEditingStopsFromWalk, setIsEditingStopsFromWalk] = useState(false);
 const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
 const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null>(null);
+const jamCurrentStopRef = useRef<number | null>(null);
 const previousStepRef = useRef<FlowStep>("landing");
 const scriptModalCloseTimeoutRef = useRef<number | null>(null);
 const followAlongSessionRef = useRef(0);
@@ -1847,7 +1848,7 @@ async function startStopNarration() {
       setGenerationJobKind(null);
       setGenerationProgress(0);
       setStep("landing");
-      setErr(e instanceof Error ? e.message : "Failed to start On the Move.");
+      setErr(e instanceof Error ? e.message : "Failed to start Wander.");
     } finally {
       setIsResolvingNearbyGeo(false);
       setIsStartingWalkDiscovery(false);
@@ -1988,89 +1989,11 @@ async function startStopNarration() {
     }
   }
 
-  async function handleFindMoreAroundLocation() {
-    if (!route || route.stops.length === 0 || isGeneratingNearbyStory || isResolvingNearbyGeo) return;
-
-    const fallbackStop = currentStop ?? route.stops[0];
-    const baseRouteStops: CustomMixStop[] = route.stops.map((stop) => ({
-      id: stop.id,
-      title: stop.title,
-      lat: stop.lat,
-      lng: stop.lng,
-      image: toSafeStopImage(stop.images[0]),
-    }));
-    let lookupCoords = myPos;
-
-    try {
-      setErr(null);
-      setIsGeneratingNearbyStory(true);
-
-      if (!lookupCoords) {
-        setIsResolvingNearbyGeo(true);
-        try {
-          lookupCoords = await requestCurrentGeoPosition();
-          setMyPos(lookupCoords);
-          setGeoAllowed(true);
-        } catch {
-          setGeoAllowed(false);
-        } finally {
-          setIsResolvingNearbyGeo(false);
-        }
-      }
-
-      const anchorCoords = lookupCoords ?? (fallbackStop ? { lat: fallbackStop.lat, lng: fallbackStop.lng } : null);
-      if (!anchorCoords) {
-        throw new Error("No location is available for nearby search.");
-      }
-
-      const nearby = await fetchJsonWithTimeout<NearbyPlacesResponse>(
-        "/api/nearby-story/places",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            city: instantDiscoveryCity ?? selectedCity,
-            lat: anchorCoords.lat,
-            lng: anchorCoords.lng,
-            minStops: 1,
-            maxStops: maxStopsForSelection,
-            minSpreadMeters: 100,
-          }),
-        },
-        START_JOB_TIMEOUT_MS
-      );
-
-      if (!Array.isArray(nearby.stops) || nearby.stops.length < 1) {
-        throw new Error("No nearby places were returned.");
-      }
-
-      const nearbyStops = mapNearbyStopsToCustomStops(nearby.stops);
-      const mergedStops = mergeUniqueStops(baseRouteStops, nearbyStops).slice(0, maxStopsForSelection);
-
-      setBuilderSelectedStops(mergedStops);
-      setBuildMixOrderedStops(mergedStops);
-      setInstantDiscoveryCity((nearby.cityUsed || "").trim() || instantDiscoveryCity);
-      setSearchInput("");
-      setSearchCandidates([]);
-      setSearchError(null);
-      setSelectedPersona((jam?.persona ?? "adult") as Persona);
-      setNarratorFlowSource(null);
-      setIsEditingStopsFromWalk(true);
-      setReturnToWalkOnClose(true);
-      setStep("buildMix");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to find more nearby places");
-    } finally {
-      setIsGeneratingNearbyStory(false);
-      setIsResolvingNearbyGeo(false);
-    }
-  }
-
-  async function handleStopSelect(idx: number) {
+  async function handleStopSelect(idx: number, opts?: { autoPlay?: boolean }) {
     if (!route) return;
     const stop = route.stops[idx];
     setActiveStopIndex(idx);
-    setPendingAutoplayStopId(stop?.id ?? null);
+    setPendingAutoplayStopId(opts?.autoPlay ? stop?.id ?? null : null);
     await updateJam({ current_stop: idx });
   }
 
@@ -2088,7 +2011,7 @@ async function startStopNarration() {
   async function playPauseFromWalkAction() {
     if (!route || route.stops.length === 0) return;
     if (currentStopIndex === null) {
-      await handleStopSelect(0);
+      await handleStopSelect(0, { autoPlay: true });
       return;
     }
     await toggleAudio();
@@ -2550,6 +2473,34 @@ async function startStopNarration() {
       return;
     }
 
+    const customRouteId = getCustomRouteId(route.id);
+    if (customRouteId) {
+      try {
+        setErr(null);
+        const response = await fetch(`/api/custom-routes/${encodeURIComponent(customRouteId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stopIds: nextStops.map((stop) => stop.id),
+          }),
+        });
+
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error || "Failed to save route changes");
+        }
+
+        await loadResolvedRoute(route.id);
+        setActiveStopIndex(null);
+        setIsEditingStopsFromWalk(false);
+        setReturnToWalkOnClose(false);
+        setStep("walk");
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Failed to save route changes");
+      }
+      return;
+    }
+
     const nextDescription =
       /\d+\s+stops?/.test(route.description)
         ? route.description.replace(/\d+\s+stops?/, formatStopCount(nextStops.length))
@@ -2786,6 +2737,13 @@ async function startStopNarration() {
       setStep("walk");
     }
   }, [route, step]);
+
+  useEffect(() => {
+    jamCurrentStopRef.current =
+      typeof jam?.current_stop === "number" && jam.current_stop >= 0
+        ? jam.current_stop
+        : null;
+  }, [jam?.current_stop]);
 
   useEffect(() => {
     if (!route || route.experienceKind !== "follow_along") return;
@@ -3127,11 +3085,7 @@ async function startStopNarration() {
   useEffect(() => {
     if (step !== "walk" && step !== "followAlongDrive") return;
     if (route?.experienceKind === "follow_along" || route?.experienceKind === "walk_discovery") {
-      setActiveStopIndex(
-        typeof jam?.current_stop === "number" && jam.current_stop >= 0
-          ? jam.current_stop
-          : null
-      );
+      setActiveStopIndex(jamCurrentStopRef.current);
     } else {
       setActiveStopIndex(null);
     }
@@ -3144,7 +3098,7 @@ async function startStopNarration() {
     setIsPlaying(false);
     setAudioTime(0);
     setAudioDuration(0);
-  }, [step, route?.id, route?.experienceKind, jam?.current_stop]);
+  }, [step, route?.id, route?.experienceKind]);
 
   useEffect(() => {
     if (step !== "pickDuration") return;
@@ -3569,6 +3523,25 @@ async function startStopNarration() {
               </div>
             )}
 
+            {INSTAGRAM_IMPORT_ENABLED ? (
+              <section className={styles.creatorAccessCallout}>
+                <div className={styles.creatorAccessCalloutCopy}>
+                  <div className={styles.creatorAccessCalloutTitle}>
+                    Mix your Instagram stories into real-world journeys others can explore.
+                  </div> 
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    router.push("/import/instagram/access");
+                  }}
+                  className={styles.landingHeroCta}
+                >
+                Unlock Creator Mix Studio
+                </button>
+              </section>
+            ) : null}
+
             {showLandingThemeToggle && (
               <div className={styles.landingFooter}>
                 <button
@@ -3619,7 +3592,7 @@ async function startStopNarration() {
                       aria-hidden="true"
                     />
                   </button> 
-                  <h2 className={styles.landingJourneyModalTitle}>Mix your journey</h2>
+                  <h2 className={styles.landingJourneyModalTitle}>Start exploring</h2>
                   <div className={styles.landingJourneyModalBody}>
                     
 
@@ -3649,7 +3622,7 @@ async function startStopNarration() {
                           <div className={styles.pickRouteMeta}>
                             {isStartingWalkDiscovery
                               ? "Starting your walk..."
-                              : "Stories unfold around you as you move."}
+                              : "Stories unfold as you move."}
                           </div>
                         </div>
                       </div>
@@ -3672,8 +3645,8 @@ async function startStopNarration() {
                           />
                         </div>
                         <div className={styles.pickRouteMain}>
-                          <div className={styles.pickRouteTitle}>Mix Studio</div>
-                          <div className={styles.pickRouteMeta}>Choose stops. Shape the story.</div>
+                          <div className={styles.pickRouteTitle}>Follow</div>
+                          <div className={styles.pickRouteMeta}>Choose your stops. Shape the story.</div>
                         </div>
                       </div>
                     </button>
@@ -4094,7 +4067,7 @@ async function startStopNarration() {
               <button
                 type="button"
                 onClick={() => {
-                  router.push("/import/instagram");
+                  router.push("/import/instagram/access");
                 }}
                 className={`${styles.pickRouteRow} ${styles.buildMixEntryRow}`}
               >
@@ -4111,7 +4084,7 @@ async function startStopNarration() {
                   </div>
                   <div className={styles.pickRouteMain}>
                     <div className={styles.pickRouteTitle}>Start with Instagram</div>
-                    <div className={styles.pickRouteMeta}>Turn your posts into a journey.</div>
+                    <div className={styles.pickRouteMeta}>Mix your posts into a journey.</div>
                   </div>
                 </div>
               </button>
@@ -4360,7 +4333,7 @@ async function startStopNarration() {
             </button>
 
             <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>Along the Way</h2>
+              <h2 className={styles.pickHeading}>Wander</h2>
               <p className={styles.followAlongLead}>
                 Stories appear as you travel to your destination.
               </p>
@@ -5101,72 +5074,13 @@ async function startStopNarration() {
                 </button>
               </div>
 
-              {isWalkDiscoveryRoute && (walkDiscoverySuggestion || isResolvingWalkDiscoverySuggestion) && (
-                <div className={styles.walkDiscoveryPanel}>
-                  <div className={styles.walkDiscoveryCard}>
-                    <div className={styles.walkDiscoveryEyebrow}>Along the way</div>
-                    {walkDiscoverySuggestion ? (
-                      <>
-                        <div className={styles.walkDiscoveryContent}>
-                          <div className={styles.walkDiscoveryImageWrap}>
-                            <Image
-                              src={toSafeStopImage(walkDiscoverySuggestion.image)}
-                              alt={walkDiscoverySuggestion.title}
-                              fill
-                              className={styles.walkDiscoveryImage}
-                              unoptimized
-                            />
-                          </div>
-                          <div className={styles.walkDiscoveryBody}>
-                            <div className={styles.walkDiscoveryTitle}>
-                              {walkDiscoverySuggestion.title}
-                            </div>
-                            <div className={styles.walkDiscoveryMeta}>
-                              {typeof walkDiscoverySuggestion.distanceMeters === "number" &&
-                              walkDiscoverySuggestion.distanceMeters > 0
-                                ? `${estimateWalkMinutes(walkDiscoverySuggestion.distanceMeters)} min away`
-                                : "Nearby now"}
-                            </div>
-                            <div className={styles.walkDiscoveryQuestion}>
-                              Add this stop to your journey?
-                            </div>
-                          </div>
-                        </div>
-                        <div className={styles.walkDiscoveryActions}>
-                          <button
-                            type="button"
-                            className={styles.walkDiscoveryNoButton}
-                            onClick={() => void rejectWalkDiscoverySuggestion()}
-                            disabled={isAcceptingWalkDiscoverySuggestion}
-                          >
-                            No
-                          </button>
-                          <button
-                            type="button"
-                            className={styles.walkDiscoveryYesButton}
-                            onClick={() => void acceptWalkDiscoverySuggestion()}
-                            disabled={isAcceptingWalkDiscoverySuggestion}
-                          >
-                            {isAcceptingWalkDiscoverySuggestion ? "Adding..." : "Yes"}
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <div className={styles.walkDiscoveryLoading}>
-                        Looking for your next nearby story...
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
               <div className={styles.stopList}>
                 {stopList.map((stop, idx) => {
                   const displayNumber = idx + 1;
                   return (
                   <button
                     key={stop.id}
-                    onClick={() => void handleStopSelect(idx)}
+                    onClick={() => void handleStopSelect(idx, { autoPlay: isPlaying })}
                     className={`${styles.stopItem} ${stop.isActive ? styles.stopItemActive : ""}`}
                     type="button"
                   >
@@ -5190,34 +5104,71 @@ async function startStopNarration() {
                 })}
               </div>
 
-              <div className={styles.pickDurationStartWrap}>
-                <button
-                  type="button"
-                  className={styles.walkFindMoreButton}
-                  onClick={() => void handleFindMoreAroundLocation()}
-                  disabled={isSurpriseMixDisabled}
-                >
-                  <span className={styles.walkFindMoreIconCircle} aria-hidden="true">
-                    <Image
-                      src="/icons/plus.svg"
-                      alt=""
-                      width={20}
-                      height={20}
-                      className={styles.walkFindMoreIcon}
-                      aria-hidden="true"
-                    />
-                  </span>
-                  <span className={styles.walkFindMoreLabel}>
-                    {isResolvingNearbyGeo
-                      ? "Locating you..."
-                      : isGeneratingNearbyStory
-                        ? "Finding nearby stops..."
-                        : isSurpriseMixUnavailable
-                          ? "Add more stops near you (coming soon)"
-                          : "Add more stops near you"}
-                  </span>
-                </button>
-              </div>
+              {isWalkDiscoveryRoute && (walkDiscoverySuggestion || isResolvingWalkDiscoverySuggestion) && (
+                <div className={styles.walkDiscoveryPanel}>
+                  <div className={styles.walkDiscoveryCard}>
+                    {walkDiscoverySuggestion ? (
+                      <>
+                        <div className={styles.walkDiscoveryContent}>
+                          <div className={styles.walkDiscoveryImageWrap}>
+                            <Image
+                              src={toSafeStopImage(walkDiscoverySuggestion.image)}
+                              alt={walkDiscoverySuggestion.title}
+                              fill
+                              className={styles.walkDiscoveryImage}
+                              unoptimized
+                            />
+                          </div>
+                          <div className={styles.walkDiscoveryBody}>
+                            <div className={styles.walkDiscoveryEyebrow}>Suggested Stop</div>
+                            <div className={styles.walkDiscoveryTitle}>
+                              {walkDiscoverySuggestion.title}
+                            </div>
+                          </div>
+                          <div className={styles.walkDiscoveryActions}>
+                            <button
+                              type="button"
+                              className={styles.walkDiscoverySkipButton}
+                              onClick={() => void rejectWalkDiscoverySuggestion()}
+                              disabled={isAcceptingWalkDiscoverySuggestion}
+                              aria-label="Skip suggested stop"
+                            >
+                              <Image
+                                src="/icons/x.svg"
+                                alt=""
+                                width={18}
+                                height={18}
+                                className={styles.walkDiscoverySkipIcon}
+                                aria-hidden="true"
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.walkDiscoveryAddButton}
+                              onClick={() => void acceptWalkDiscoverySuggestion()}
+                              disabled={isAcceptingWalkDiscoverySuggestion}
+                              aria-label={isAcceptingWalkDiscoverySuggestion ? "Adding suggested stop" : "Add suggested stop"}
+                            >
+                              <Image
+                                src="/icons/plus-circle.svg"
+                                alt=""
+                                width={28}
+                                height={28}
+                                className={styles.walkDiscoveryAddIcon}
+                                aria-hidden="true"
+                              />
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className={styles.walkDiscoveryLoading}>
+                        Looking for your next nearby story...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               
             </div>
 

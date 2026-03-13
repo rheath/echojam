@@ -218,8 +218,7 @@
 
 .landingCopy {
   margin: 10px 0 0;
-  font-size: 17px;
-  line-height: 1.45;
+  font-size: 18px; 
   max-width: 520px;
   opacity: 0.95;
 }
@@ -258,13 +257,13 @@
 
 .landingPopular {
   margin-top: 54px;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
 }
 
 .landingSecondaryLabel {
   margin-top: 24px;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   opacity: 1;
 }
@@ -1078,7 +1077,7 @@
 
 .pickCopy {
   margin: 10px 0 0;
-  font-size: 17px;
+  font-size: 16px;
   line-height: 1.45;
   max-width: 560px;
   opacity: 0.95;
@@ -1092,7 +1091,7 @@
 
 .pickSectionLabel {
   margin-top: 30px;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
 }
 
@@ -1665,7 +1664,7 @@
 
 .generatingCopy {
   margin: 10px 0 0;
-  font-size: 17px;
+  font-size: 16px;
   line-height: 1.45;
   opacity: 0.95;
 }
@@ -2120,19 +2119,16 @@
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.05);
-  padding: 16px;
+  padding: 8px;
 }
 
 .walkDiscoveryEyebrow {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #ff9dbb;
+  font-size: 14px;
+  font-weight: normal; 
+  color: #fff;
 }
 
 .walkDiscoveryContent {
-  margin-top: 10px;
   display: flex;
   gap: 14px;
   align-items: center;
@@ -2140,8 +2136,8 @@
 
 .walkDiscoveryImageWrap {
   position: relative;
-  width: 76px;
-  height: 76px;
+  width: 44px;
+  height: 44px;
   border-radius: 14px;
   overflow: hidden;
   flex-shrink: 0;
@@ -2153,107 +2149,63 @@
 
 .walkDiscoveryBody {
   min-width: 0;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
 .walkDiscoveryTitle {
-  font-size: 22px;
+  font-size: 16px;
   line-height: 1;
-}
-
-.walkDiscoveryMeta {
-  font-size: 14px;
-  opacity: 0.8;
-}
-
-.walkDiscoveryQuestion {
-  font-size: 15px;
-  opacity: 0.95;
+  font-weight: 700;
 }
 
 .walkDiscoveryActions {
-  margin-top: 14px;
   display: flex;
   gap: 10px;
+  margin-left: auto;
+  align-items: center;
+  flex-shrink: 0;
 }
 
-.walkDiscoveryNoButton,
-.walkDiscoveryYesButton {
-  flex: 1 1 0;
+.walkDiscoverySkipButton,
+.walkDiscoveryAddButton {
+  width: 56px;
+  height: 56px;
+  border: 0;
   border-radius: 999px;
-  padding: 10px 14px;
-  font-size: 15px;
-  font-weight: 700;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
-.walkDiscoveryNoButton {
-  border: 1px solid rgba(255, 255, 255, 0.14);
+.walkDiscoverySkipButton {
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.walkDiscoveryAddButton {
   background: transparent;
-  color: #fff;
 }
 
-.walkDiscoveryYesButton {
-  border: 0;
-  background: #ff5f92;
-  color: #11111a;
-}
-
-.walkDiscoveryNoButton:disabled,
-.walkDiscoveryYesButton:disabled {
+.walkDiscoverySkipButton:disabled,
+.walkDiscoveryAddButton:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
-.walkDiscoveryLoading {
-  margin-top: 10px;
-  font-size: 15px;
-  opacity: 0.82;
-}
-
-.walkFindMoreButton {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: #fff;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-  text-align: left;
-  justify-content: flex-start;
-  cursor: pointer;
-}
-
-.walkFindMoreButton:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.walkFindMoreIconCircle {
-  width: 84px;
-  padding: 8px 0;
-  border-radius: 999px;
-  background: #4a4a52;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.walkFindMoreIcon {
-  width: 20px;
-  height: 20px;
+.walkDiscoverySkipIcon,
+.walkDiscoveryAddIcon {
   filter: invert(1);
 }
 
-.walkFindMoreLabel {
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.1;
-  opacity: 0.9;
+.walkDiscoveryLoading {
+  font-size: 15px;
+  opacity: 0.82;
 }
 
 .pillButton {
@@ -2886,7 +2838,71 @@
   justify-content: flex-start;
 }
 
+.creatorAccessCallout {
+  margin-top: 24px;
+  padding: 22px 24px;
+  border: 1px solid var(--landing-card-border);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.creatorAccessCalloutCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.creatorAccessCalloutEyebrow {
+  font-size: 12px;
+  font-weight: 700; 
+  color: var(--landing-muted);
+}
+
+.creatorAccessCalloutTitle {
+  font-size: 22px;
+  font-weight: normal; 
+}
+
+.creatorAccessCalloutText {
+  margin: 0;
+  max-width: 480px;
+  color: var(--landing-muted);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.creatorAccessCalloutCta {
+  min-height: 48px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ec6551 0%, #f0924c 100%);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.creatorAccessCalloutCta:hover {
+  transform: translateY(-1px);
+}
+
+.creatorAccessCalloutCta:focus-visible {
+  outline: 2px solid rgba(255, 121, 168, 0.95);
+  outline-offset: 3px;
+}
+
 .landingThemeToggle {
+
   width: 100%;
   max-width: 250px;
   border: 1px solid var(--landing-toggle-border);
@@ -3009,7 +3025,7 @@
 
   .landingHeroCta {
     width: 100%;
-    max-width: 220px;
+    max-width: 260px;
   }
 
   .landingPopular {
@@ -3168,8 +3184,25 @@
     padding-right: 16px;
   }
 
+  .creatorAccessCallout {
+    margin-top: 18px;
+    margin-right: 16px;
+    padding: 18px;
+    border-radius: 22px;
+    align-items: center;
+  }
+
+  .creatorAccessCalloutTitle {
+    font-size: 18px; 
+  }
+
+  .creatorAccessCalloutCta {
+    width: 100%;
+  }
+
   .landingThemeToggle {
     max-width: none;
+      display: none;
   }
 
   .pickLayout {

@@ -1,5 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { normalizeInstagramUrl } from "@/lib/instagramImport";
+import { getInstagramImportRequestAuthorizationState } from "@/lib/server/instagramCreatorAccess";
 import { createInstagramImportJob, processQueuedInstagramImportJobs } from "@/lib/server/instagramImportWorker";
 import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 
@@ -8,6 +9,17 @@ type Body = {
 };
 
 export async function POST(req: Request) {
+  const access = getInstagramImportRequestAuthorizationState(req);
+  if (!access.enabled) {
+    return NextResponse.json({ error: "Instagram import is unavailable." }, { status: 404 });
+  }
+  if (!access.authorized) {
+    return NextResponse.json(
+      { error: "Enter a valid creator code to use the Instagram uploader." },
+      { status: 401 }
+    );
+  }
+
   try {
     const body = (await req.json()) as Body;
     const normalized = normalizeInstagramUrl(body.url || "");
