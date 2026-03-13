@@ -3350,7 +3350,7 @@ async function startStopNarration() {
               <div className={`${styles.landingCopyBlock} ${styles.landingCopyBlockMobile}`}>
                 <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets</h1>
                 <p className={styles.landingCopy}>
-                  Experience places through story. <br/> <strong>More story. Less directions.</strong>
+                  Turn the real world into story-driven journeys.
                 </p>
                 <div className={styles.landingHeroCtaWrap}>
                   <button
@@ -3358,7 +3358,14 @@ async function startStopNarration() {
                     onClick={openLandingJourneyModal}
                     className={styles.landingHeroCta}
                   >
-                    Mix your journey
+                    Discover nearby
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openLandingJourneyModal}
+                    className={`${styles.landingHeroCta} ${styles.landingHeroCtaOutline}`}
+                  >
+                    Create
                   </button>
                 </div>
               </div>
