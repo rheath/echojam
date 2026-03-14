@@ -143,6 +143,10 @@ export type InstagramCollectionDraftSnapshot = {
 
 export const INSTAGRAM_COLLECTION_MAX_STOPS = 10;
 
+export function instagramRouteStopIdForDraft(draftId: string) {
+  return `ig-${draftId.slice(0, 12)}`;
+}
+
 function normalizeWhitespace(value: string | null | undefined) {
   return (value || "").replace(/\r\n/g, "\n").trim();
 }
@@ -248,6 +252,35 @@ export function buildInstagramProfileUrl(ownerTitle: string | null | undefined) 
   return `https://www.instagram.com/${encodeURIComponent(normalizedHandle.slice(1))}/`;
 }
 
+export function extractInstagramUsernameFromProfileUrl(profileUrl: string | null | undefined) {
+  const normalized = toNullableTrimmed(profileUrl);
+  if (!normalized) return null;
+  try {
+    const parsed = new URL(normalized);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const username = segments[0]?.trim();
+    if (!username || username.startsWith("accounts")) return null;
+    return username;
+  } catch {
+    return null;
+  }
+}
+
+export function proxyInstagramImageUrl(value: string | null | undefined) {
+  const normalized = toNullableTrimmed(value);
+  if (!normalized) return normalized;
+  if (normalized.startsWith("/")) return normalized;
+
+  try {
+    const parsed = new URL(normalized);
+    if (!parsed.protocol.startsWith("http")) return normalized;
+    if (!parsed.hostname.toLowerCase().endsWith("cdninstagram.com")) return normalized;
+    return `/api/instagram-image?url=${encodeURIComponent(normalized)}`;
+  } catch {
+    return normalized;
+  }
+}
+
 function extractCaptionFromMeta(description: string | null, ogTitle: string | null) {
   const candidates = [description, ogTitle].filter((value): value is string => Boolean(value));
   for (const candidate of candidates) {
@@ -295,10 +328,25 @@ export function parseInstagramPublicMetadataFromHtml(html: string): InstagramPub
 
 export function parseInstagramProfileImageUrlFromHtml(html: string) {
   const metaByAttr = parseMetaTags(html);
-  return (
+  const metaImage =
     extractMetaContent(metaByAttr, "name", "twitter:image") ||
-    extractMetaContent(metaByAttr, "property", "og:image")
-  );
+    extractMetaContent(metaByAttr, "property", "og:image");
+  if (metaImage) return metaImage;
+
+  const scriptPatterns = [
+    /"profile_pic_url_hd":"([^"]+)"/,
+    /"profile_pic_url":"([^"]+)"/,
+    /"hd_profile_pic_url_info"\s*:\s*\{\s*"url"\s*:\s*"([^"]+)"/,
+    /"profilePictureUrl"\s*:\s*"([^"]+)"/,
+  ];
+
+  for (const pattern of scriptPatterns) {
+    const match = html.match(pattern);
+    const candidate = toNullableTrimmed(match?.[1]?.replaceAll("\\u0026", "&").replaceAll("\\/", "/"));
+    if (candidate) return candidate;
+  }
+
+  return null;
 }
 
 export function deriveInstagramRouteAttribution(
@@ -503,7 +551,8 @@ export function canMasterPublishInstagramDrafts(
   if (drafts.length === 0 || drafts.length > maxStops) return false;
   return drafts.every((draft) => {
     if (!draft) return false;
-    return getInstagramCollectionDraftStatus(draft) === "ready";
+    const status = getInstagramCollectionDraftStatus(draft);
+    return status === "ready" || status === "published";
   });
 }
 

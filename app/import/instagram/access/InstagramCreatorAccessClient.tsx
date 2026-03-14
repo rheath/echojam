@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import styles from "./InstagramCreatorAccessClient.module.css";
 
 type AccessResponse = {
@@ -29,9 +29,17 @@ async function submitCreatorCode(code: string) {
 
 export default function InstagramCreatorAccessClient() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const nextPath = (() => {
+    const candidate = searchParams.get("next");
+    if (!candidate || !candidate.startsWith("/import/instagram")) {
+      return "/import/instagram";
+    }
+    return candidate;
+  })();
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -40,7 +48,7 @@ export default function InstagramCreatorAccessClient() {
 
     try {
       await submitCreatorCode(code);
-      router.replace("/import/instagram");
+      router.replace(nextPath);
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -89,7 +97,7 @@ export default function InstagramCreatorAccessClient() {
           {error ? <div className={styles.errorBanner}>{error}</div> : null}
 
           <p className={styles.helperCopy}>
-            This unlock stays active on this browser for 30 days. Don't have a code? Reach out
+            This unlock stays active on this browser for 30 days. Don&apos;t have a code? Reach out
           </p>
         </section>
       </div>

@@ -3,11 +3,15 @@ import { createClient } from "@supabase/supabase-js";
 import {
   buildInstagramProfileUrl,
   deriveInstagramRouteAttribution,
-  parseInstagramProfileImageUrlFromHtml,
+  proxyInstagramImageUrl,
 } from "@/lib/instagramImport";
 import { toNullableAudioUrl, toNullableTrimmed } from "@/lib/mixGeneration";
 import { cityPlaceholderImage, proxyGoogleImageUrl } from "@/lib/placesImages";
 import { isPresetOverviewStopId } from "@/lib/presetOverview";
+import { fetchInstagramProfileImageUrl } from "@/lib/server/instagramProfileImage";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -105,12 +109,6 @@ type RouteStopMappingRow = {
 };
 
 const INSTAGRAM_FETCH_TIMEOUT_MS = 4_000;
-const INSTAGRAM_FETCH_USER_AGENTS = [
-  "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
-  "Twitterbot/1.0",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
-];
-
 function isNonPlaceholderImage(value: string | null | undefined) {
   const normalized = toNullableTrimmed(value);
   if (!normalized) return false;
@@ -165,34 +163,79 @@ function pickStopImage(
   return toNullableTrimmed(stopImage) || placeholder;
 }
 
-async function fetchInstagramProfileImageUrl(profileUrl: string) {
-  for (const userAgent of INSTAGRAM_FETCH_USER_AGENTS) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), INSTAGRAM_FETCH_TIMEOUT_MS);
-    try {
-      const response = await fetch(profileUrl, {
-        method: "GET",
-        redirect: "follow",
-        signal: controller.signal,
-        headers: {
-          "User-Agent": userAgent,
-          Accept: "text/html,application/xhtml+xml",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
-        cache: "no-store",
-      });
-      if (!response.ok) continue;
-      const html = await response.text();
-      const imageUrl = parseInstagramProfileImageUrlFromHtml(html);
-      if (imageUrl) return imageUrl;
-    } catch {
-      continue;
-    } finally {
-      clearTimeout(timeoutId);
-    }
+async function isUsableImageUrl(url: string) {
+  const normalized = toNullableTrimmed(url);
+  if (!normalized) return false;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), INSTAGRAM_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(normalized, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        Accept: "image/*",
+      },
+      cache: "no-store",
+    });
+    const contentType = response.headers.get("content-type") || "";
+    response.body?.cancel().catch(() => {
+      // ignore body cancellation failures
+    });
+    return response.ok && contentType.toLowerCase().startsWith("image/");
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function resolveInstagramAvatarUrl(params: {
+  storyBy: string | null;
+  storyByUrl: string | null;
+  storedAvatarUrl: string | null;
+}) {
+  const storyBy = toNullableTrimmed(params.storyBy);
+  const storyByUrl =
+    toNullableTrimmed(params.storyByUrl) ||
+    (storyBy ? buildInstagramProfileUrl(storyBy) : null);
+  const storedAvatarUrl = toNullableTrimmed(params.storedAvatarUrl);
+
+  if (storedAvatarUrl && await isUsableImageUrl(storedAvatarUrl)) {
+    return {
+      storyByUrl,
+      storyByAvatarUrl: storedAvatarUrl,
+    };
   }
 
-  return null;
+  const storyByAvatarUrl =
+    storyByUrl ? await fetchInstagramProfileImageUrl(storyByUrl).catch(() => null) : null;
+  return {
+    storyByUrl,
+    storyByAvatarUrl: toNullableTrimmed(storyByAvatarUrl),
+  };
+}
+
+async function persistInstagramAvatarUrl(
+  admin: ReturnType<typeof getAdmin>,
+  route: Pick<RouteRow, "id" | "story_by_url" | "story_by_avatar_url">,
+  next: { storyByUrl: string | null; storyByAvatarUrl: string | null }
+) {
+  const storyByUrlChanged = (toNullableTrimmed(route.story_by_url) || null) !== next.storyByUrl;
+  const storyByAvatarChanged =
+    (toNullableTrimmed(route.story_by_avatar_url) || null) !== next.storyByAvatarUrl;
+  if (!storyByUrlChanged && !storyByAvatarChanged) return;
+
+  const { error } = await admin
+    .from("custom_routes")
+    .update({
+      story_by_url: next.storyByUrl,
+      story_by_avatar_url: next.storyByAvatarUrl,
+    })
+    .eq("id", route.id);
+  if (!error || isMissingStoryByColumnError(error.message)) return;
+  console.error("Failed to persist refreshed Instagram avatar URL.", error);
 }
 
 async function hydrateInstagramRouteAttribution(
@@ -200,7 +243,17 @@ async function hydrateInstagramRouteAttribution(
   route: RouteRow
 ) {
   if (route.story_by_source === "instagram" && toNullableTrimmed(route.story_by)) {
-    return route;
+    const resolvedAvatar = await resolveInstagramAvatarUrl({
+      storyBy: route.story_by,
+      storyByUrl: route.story_by_url,
+      storedAvatarUrl: route.story_by_avatar_url,
+    });
+    await persistInstagramAvatarUrl(admin, route, resolvedAvatar);
+    return {
+      ...route,
+      story_by_url: resolvedAvatar.storyByUrl,
+      story_by_avatar_url: resolvedAvatar.storyByAvatarUrl,
+    };
   }
 
   const { data: instagramDrafts, error: instagramDraftsErr } = await admin
@@ -219,17 +272,26 @@ async function hydrateInstagramRouteAttribution(
   if (!attribution.storyBy || attribution.storyBySource !== "instagram") {
     return route;
   }
-  const storyByUrl = attribution.storyByUrl || buildInstagramProfileUrl(attribution.storyBy);
-  const storyByAvatarUrl =
-    route.story_by_avatar_url ||
-    attribution.storyByAvatarUrl ||
-    (storyByUrl ? await fetchInstagramProfileImageUrl(storyByUrl).catch(() => null) : null);
+  const resolvedAvatar = await resolveInstagramAvatarUrl({
+    storyBy: attribution.storyBy,
+    storyByUrl: attribution.storyByUrl || buildInstagramProfileUrl(attribution.storyBy),
+    storedAvatarUrl: route.story_by_avatar_url || attribution.storyByAvatarUrl,
+  });
+  await persistInstagramAvatarUrl(
+    admin,
+    {
+      id: route.id,
+      story_by_url: route.story_by_url,
+      story_by_avatar_url: route.story_by_avatar_url,
+    },
+    resolvedAvatar
+  );
 
   return {
     ...route,
     story_by: attribution.storyBy,
-    story_by_url: storyByUrl,
-    story_by_avatar_url: storyByAvatarUrl,
+    story_by_url: resolvedAvatar.storyByUrl,
+    story_by_avatar_url: resolvedAvatar.storyByAvatarUrl,
     story_by_source: attribution.storyBySource,
   };
 }
@@ -425,7 +487,12 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       };
     });
 
-    return NextResponse.json({ route, stops: normalizedStops });
+    const responseRoute = {
+      ...route,
+      story_by_avatar_url: proxyInstagramImageUrl(route.story_by_avatar_url) || null,
+    };
+
+    return NextResponse.json({ route: responseRoute, stops: normalizedStops });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to load custom route" }, { status: 500 });
   }

@@ -308,6 +308,57 @@
   background: rgba(236, 101, 81, 0.08);
 }
 
+.collectionMain {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.collectionReorderButtons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.collectionReorderButton {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(31, 23, 20, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #1f1714;
+  cursor: pointer;
+  transition: transform 160ms ease, opacity 160ms ease, background 160ms ease;
+}
+
+.collectionReorderButton:hover {
+  transform: translateY(-1px);
+}
+
+.collectionReorderButton:disabled {
+  opacity: 0.3;
+  cursor: default;
+  transform: none;
+}
+
+.collectionReorderIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.collectionReorderIconUp {
+  transform: rotate(-90deg);
+}
+
+.collectionReorderIconDown {
+  transform: rotate(90deg);
+}
+
 .collectionSelect {
   display: flex;
   align-items: center;
@@ -457,6 +508,10 @@
   .collectionRow,
   .collectionActions {
     display: grid;
+  }
+
+  .collectionMain {
+    width: 100%;
   }
 
   .placeList {

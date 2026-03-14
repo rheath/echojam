@@ -18,7 +18,9 @@ import {
   deriveInstagramRouteAttribution,
   deriveInstagramCollectionRouteTitle,
   estimateTextTokenCount,
+  instagramRouteStopIdForDraft,
   INSTAGRAM_COLLECTION_MAX_STOPS,
+  isInstagramDraftPublishable,
   type InstagramDraftContent,
   type InstagramImportDraftStatus,
   type InstagramImportJobPhase,
@@ -26,7 +28,6 @@ import {
   normalizeInstagramCollectionDraftIds,
   nextInstagramDraftStatus,
   parseInstagramPublicMetadataFromHtml,
-  parseInstagramProfileImageUrlFromHtml,
   resolveInstagramDraftScript,
   resolveInstagramDraftTitle,
   successJobStatusForPhase,
@@ -35,10 +36,12 @@ import {
 } from "@/lib/instagramImport";
 import { ensureCanonicalStopForCustom, upsertRouteStopMapping } from "@/lib/canonicalStops";
 import {
+  isUsableGeneratedAudioUrl,
   synthesizeSpeechWithOpenAI,
   toNullableAudioUrl,
   uploadNarrationAudio,
 } from "@/lib/mixGeneration";
+import { fetchInstagramProfileImageUrl } from "@/lib/server/instagramProfileImage";
 import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 
 type InstagramImportDraftRow = {
@@ -191,7 +194,6 @@ const JOB_SELECT_LEGACY = `
 
 const GOOGLE_TEXT_SEARCH_NEW_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const INSTAGRAM_FETCH_TIMEOUT_MS = 12_000;
-const INSTAGRAM_PROFILE_FETCH_TIMEOUT_MS = 4_000;
 const YT_DLP_TIMEOUT_MS = 90_000;
 const FFMPEG_TIMEOUT_MS = 45_000;
 const JOB_STALE_MS = 10 * 60 * 1000;
@@ -230,36 +232,6 @@ function isMissingCustomRouteStoryByColumnError(message: string | null | undefin
     ((normalized.includes("column") && normalized.includes("does not exist")) ||
       (normalized.includes("could not find") && normalized.includes("schema cache")))
   );
-}
-
-async function fetchInstagramProfileImageUrl(profileUrl: string) {
-  for (const userAgent of INSTAGRAM_FETCH_USER_AGENTS) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), INSTAGRAM_PROFILE_FETCH_TIMEOUT_MS);
-    try {
-      const response = await fetch(profileUrl, {
-        method: "GET",
-        redirect: "follow",
-        signal: controller.signal,
-        headers: {
-          "User-Agent": userAgent,
-          "Accept": "text/html,application/xhtml+xml",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
-        cache: "no-store",
-      });
-      if (!response.ok) continue;
-      const html = await response.text();
-      const imageUrl = parseInstagramProfileImageUrlFromHtml(html);
-      if (imageUrl) return imageUrl;
-    } catch {
-      continue;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  return null;
 }
 
 async function resolveInstagramRouteAttributionForDrafts(drafts: InstagramImportDraftRow[]) {
@@ -409,10 +381,14 @@ export function serializeInstagramDraft(
 ) {
   const finalScript = resolveInstagramDraftScript(buildDraftContent(row));
   const extractedText = composeInstagramImportSourceText(row.source_caption, row.transcript_raw);
+  const normalizedStatus =
+    row.published_jam_id && row.published_route_id
+      ? "published"
+      : row.status;
 
   return {
     id: row.id,
-    status: row.status,
+    status: normalizedStatus,
     warning: row.warning,
     error: row.error,
     createdAt: row.created_at,
@@ -909,6 +885,29 @@ function extractCollectionRouteTitleFromJobMessage(message: string | null | unde
   return toNullableTrimmed(normalized.slice(prefix.length));
 }
 
+function extractCollectionPublishOptionsFromJobMessage(message: string | null | undefined) {
+  const normalized = toNullableTrimmed(message);
+  if (!normalized) {
+    return {
+      routeTitle: null,
+      existingRouteId: null,
+    };
+  }
+
+  const routeMatch = normalized.match(/^Queued for master publish\s+\[route:([^\]]+)\]\s*:\s*(.+)$/);
+  if (routeMatch) {
+    return {
+      existingRouteId: toNullableTrimmed(routeMatch[1]),
+      routeTitle: toNullableTrimmed(routeMatch[2]),
+    };
+  }
+
+  return {
+    existingRouteId: null,
+    routeTitle: extractCollectionRouteTitleFromJobMessage(normalized),
+  };
+}
+
 function getInstagramImportClaimMessage(job: Pick<InstagramImportJobRow, "phase" | "message">) {
   if (job.phase === "publish_collection") {
     return toNullableTrimmed(job.message) || "Publishing collection";
@@ -1225,6 +1224,19 @@ type PublishableInstagramDraft = {
   routeImage: string;
 };
 
+type ExistingPublishedInstagramStopRow = {
+  stop_id: string;
+  position?: number | null;
+  script_adult: string | null;
+  audio_url_adult: string | null;
+};
+
+type ExistingInstagramRouteRow = {
+  id: string;
+  jam_id: string;
+  story_by_avatar_url: string | null;
+};
+
 function buildPublishableInstagramDraft(draft: InstagramImportDraftRow): PublishableInstagramDraft {
   const finalTitle = resolveInstagramDraftTitle(buildDraftContent(draft));
   const finalScript = resolveInstagramDraftScript(buildDraftContent(draft));
@@ -1252,13 +1264,181 @@ function buildPublishableInstagramDraft(draft: InstagramImportDraftRow): Publish
     cityPlaceholderImage(city);
 
   return {
-    stopId: `ig-${draft.id.slice(0, 12)}`,
+    stopId: instagramRouteStopIdForDraft(draft.id),
     city,
     finalTitle,
     finalScript,
     confirmedPlace,
     routeImage,
   };
+}
+
+async function updateInstagramCustomRouteMetadata(
+  admin: SupabaseClient,
+  routeId: string,
+  payload: {
+    city: string;
+    length_minutes: number;
+    title: string;
+    narrator_default: "adult";
+    narrator_guidance: null;
+    narrator_voice: null;
+    status: "generating" | "ready";
+    experience_kind: "mix";
+    story_by: string | null;
+    story_by_url: string | null;
+    story_by_avatar_url: string | null;
+    story_by_source: "instagram" | null;
+  }
+) {
+  const { error } = await admin
+    .from("custom_routes")
+    .update(payload)
+    .eq("id", routeId);
+  if (!error) return;
+
+  if (!isMissingCustomRouteStoryByColumnError(error.message)) {
+    throw new Error(error.message);
+  }
+
+  const { error: legacyError } = await admin
+    .from("custom_routes")
+    .update({
+      city: payload.city,
+      length_minutes: payload.length_minutes,
+      title: payload.title,
+      narrator_default: payload.narrator_default,
+      narrator_guidance: payload.narrator_guidance,
+      narrator_voice: payload.narrator_voice,
+      status: payload.status,
+      experience_kind: payload.experience_kind,
+    })
+    .eq("id", routeId);
+  if (legacyError) {
+    throw new Error(legacyError.message);
+  }
+}
+
+async function upsertInstagramRouteStop(
+  admin: SupabaseClient,
+  routeId: string,
+  publishableDraft: PublishableInstagramDraft,
+  position: number
+) {
+  const patch = {
+    position,
+    title: publishableDraft.finalTitle,
+    lat: publishableDraft.confirmedPlace.lat,
+    lng: publishableDraft.confirmedPlace.lng,
+    image_url: publishableDraft.routeImage,
+    stop_kind: "story" as const,
+    script_adult: publishableDraft.finalScript,
+    audio_url_adult: null,
+  };
+
+  const { data: existingStop, error: existingStopErr } = await admin
+    .from("custom_route_stops")
+    .select("stop_id")
+    .eq("route_id", routeId)
+    .eq("stop_id", publishableDraft.stopId)
+    .maybeSingle();
+  if (existingStopErr) {
+    throw new Error(existingStopErr.message);
+  }
+
+  if (existingStop?.stop_id) {
+    const { error: updateErr } = await admin
+      .from("custom_route_stops")
+      .update(patch)
+      .eq("route_id", routeId)
+      .eq("stop_id", publishableDraft.stopId);
+    if (updateErr) {
+      throw new Error(updateErr.message);
+    }
+    return;
+  }
+
+  const { error: insertErr } = await admin
+    .from("custom_route_stops")
+    .insert({
+      route_id: routeId,
+      stop_id: publishableDraft.stopId,
+      ...patch,
+    });
+  if (insertErr) {
+    throw new Error(insertErr.message);
+  }
+}
+
+async function loadExistingPublishedInstagramStops(
+  admin: SupabaseClient,
+  routeId: string
+) {
+  const { data, error } = await admin
+    .from("custom_route_stops")
+    .select("stop_id,position,script_adult,audio_url_adult")
+    .eq("route_id", routeId);
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []) as ExistingPublishedInstagramStopRow[];
+  return new Map(rows.map((row) => [row.stop_id, row]));
+}
+
+async function stageExistingInstagramRouteStopPositions(
+  admin: SupabaseClient,
+  routeId: string,
+  existingStopsById: Map<string, ExistingPublishedInstagramStopRow>
+) {
+  const stagedStops = Array.from(existingStopsById.values()).sort(
+    (left, right) => (left.position ?? 0) - (right.position ?? 0)
+  );
+
+  for (let index = 0; index < stagedStops.length; index += 1) {
+    const stop = stagedStops[index];
+    const { error } = await admin
+      .from("custom_route_stops")
+      .update({ position: 10_000 + index })
+      .eq("route_id", routeId)
+      .eq("stop_id", stop.stop_id);
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+}
+
+async function loadExistingInstagramRoute(
+  admin: SupabaseClient,
+  routeId: string
+) {
+  const routeWithAttribution = await admin
+    .from("custom_routes")
+    .select("id,jam_id,story_by_avatar_url")
+    .eq("id", routeId)
+    .single();
+
+  if (!routeWithAttribution.error && routeWithAttribution.data) {
+    return routeWithAttribution.data as ExistingInstagramRouteRow;
+  }
+
+  if (!isMissingCustomRouteStoryByColumnError(routeWithAttribution.error?.message)) {
+    throw new Error(routeWithAttribution.error?.message || "Instagram route was not found");
+  }
+
+  const legacyRoute = await admin
+    .from("custom_routes")
+    .select("id,jam_id")
+    .eq("id", routeId)
+    .single();
+  if (legacyRoute.error || !legacyRoute.data) {
+    throw new Error(legacyRoute.error?.message || "Instagram route was not found");
+  }
+
+  return {
+    ...(legacyRoute.data as Omit<ExistingInstagramRouteRow, "story_by_avatar_url">),
+    story_by_avatar_url: null,
+  } satisfies ExistingInstagramRouteRow;
 }
 
 async function publishDraftToRoute(
@@ -1377,11 +1557,11 @@ async function publishDraftCollectionToRoute(
   admin: SupabaseClient,
   drafts: InstagramImportDraftRow[],
   routeTitle: string | null,
+  existingRouteId: string | null,
   onProgress?: (progress: number, message: string) => Promise<void>
 ) {
   const publishableDrafts = drafts.map(buildPublishableInstagramDraft);
   const apiKey = getOpenAiApiKey();
-  const jamId = await createJam(admin);
   const city =
     publishableDrafts.find((draft) => draft.city !== "nearby")?.city ||
     publishableDrafts[0]?.city ||
@@ -1398,24 +1578,54 @@ async function publishDraftCollectionToRoute(
 
   await onProgress?.(18, "Creating route");
   const attribution = await resolveInstagramRouteAttributionForDrafts(drafts);
-  const routeId = await createInstagramCustomRoute(admin, {
-    jam_id: jamId,
-    city,
-    transport_mode: "walk",
-    length_minutes: estimateRouteLengthMinutesForScripts(
-      publishableDrafts.map((draft) => draft.finalScript)
-    ),
-    title: resolvedRouteTitle,
-    narrator_default: "adult",
-    narrator_guidance: null,
-    narrator_voice: null,
-    status: "generating",
-    experience_kind: "mix",
-    story_by: attribution.storyBy,
-    story_by_url: attribution.storyByUrl,
-    story_by_avatar_url: attribution.storyByAvatarUrl,
-    story_by_source: attribution.storyBySource,
-  });
+  const routeLengthMinutes = estimateRouteLengthMinutesForScripts(
+    publishableDrafts.map((draft) => draft.finalScript)
+  );
+  let jamId: string;
+  let routeId: string;
+  let existingStopsById = new Map<string, ExistingPublishedInstagramStopRow>();
+  let resolvedRouteAvatarUrl = attribution.storyByAvatarUrl;
+
+  if (existingRouteId) {
+    const existingRoute = await loadExistingInstagramRoute(admin, existingRouteId);
+    jamId = existingRoute.jam_id;
+    routeId = existingRoute.id;
+    resolvedRouteAvatarUrl = attribution.storyByAvatarUrl || existingRoute.story_by_avatar_url || null;
+    existingStopsById = await loadExistingPublishedInstagramStops(admin, routeId);
+    await stageExistingInstagramRouteStopPositions(admin, routeId, existingStopsById);
+    await updateInstagramCustomRouteMetadata(admin, routeId, {
+      city,
+      length_minutes: routeLengthMinutes,
+      title: resolvedRouteTitle,
+      narrator_default: "adult",
+      narrator_guidance: null,
+      narrator_voice: null,
+      status: "generating",
+      experience_kind: "mix",
+      story_by: attribution.storyBy,
+      story_by_url: attribution.storyByUrl,
+      story_by_avatar_url: resolvedRouteAvatarUrl,
+      story_by_source: attribution.storyBySource,
+    });
+  } else {
+    jamId = await createJam(admin);
+    routeId = await createInstagramCustomRoute(admin, {
+      jam_id: jamId,
+      city,
+      transport_mode: "walk",
+      length_minutes: routeLengthMinutes,
+      title: resolvedRouteTitle,
+      narrator_default: "adult",
+      narrator_guidance: null,
+      narrator_voice: null,
+      status: "generating",
+      experience_kind: "mix",
+      story_by: attribution.storyBy,
+      story_by_url: attribution.storyByUrl,
+      story_by_avatar_url: attribution.storyByAvatarUrl,
+      story_by_source: attribution.storyBySource,
+    });
+  }
 
   const { error: jamErr } = await admin
     .from("jams")
@@ -1425,6 +1635,8 @@ async function publishDraftCollectionToRoute(
       current_stop: 0,
       completed_at: null,
       preset_id: null,
+      is_playing: false,
+      position_ms: 0,
     })
     .eq("id", jamId);
   if (jamErr) {
@@ -1432,29 +1644,11 @@ async function publishDraftCollectionToRoute(
   }
 
   await onProgress?.(34, `Adding stops (0/${publishableDrafts.length})`);
-
-  const { error: stopErr } = await admin
-    .from("custom_route_stops")
-    .insert(
-      publishableDrafts.map((publishableDraft, index) => ({
-        route_id: routeId,
-        stop_id: publishableDraft.stopId,
-        position: index,
-        title: publishableDraft.finalTitle,
-        lat: publishableDraft.confirmedPlace.lat,
-        lng: publishableDraft.confirmedPlace.lng,
-        image_url: publishableDraft.routeImage,
-        stop_kind: "story",
-        script_adult: publishableDraft.finalScript,
-        audio_url_adult: null,
-      }))
-    );
-  if (stopErr) {
-    throw new Error(stopErr.message);
-  }
+  const desiredStopIds = publishableDrafts.map((publishableDraft) => publishableDraft.stopId);
 
   for (let index = 0; index < publishableDrafts.length; index += 1) {
     const publishableDraft = publishableDrafts[index];
+    await upsertInstagramRouteStop(admin, routeId, publishableDraft, index);
     const canonical = await ensureCanonicalStopForCustom(admin, city, {
       id: publishableDraft.stopId,
       title: publishableDraft.confirmedPlace.label,
@@ -1479,19 +1673,26 @@ async function publishDraftCollectionToRoute(
       `Generating audio (${index + 1}/${publishableDrafts.length})`
     );
 
-    const audioBytes = await synthesizeSpeechWithOpenAI(
-      apiKey,
-      "adult",
-      publishableDraft.finalScript
-    );
-    const audioUrl = toNullableAudioUrl(
-      await uploadNarrationAudio(
-        audioBytes,
-        `custom-${routeId}`,
-        "adult",
-        publishableDraft.stopId
-      )
-    );
+    const existingStop = existingStopsById.get(publishableDraft.stopId) ?? null;
+    const existingScript = toNullableTrimmed(existingStop?.script_adult);
+    const existingAudioUrl = toNullableAudioUrl(existingStop?.audio_url_adult);
+    const shouldReuseAudio =
+      existingScript === publishableDraft.finalScript && isUsableGeneratedAudioUrl(existingAudioUrl);
+
+    const audioUrl = shouldReuseAudio
+      ? existingAudioUrl
+      : toNullableAudioUrl(
+          await uploadNarrationAudio(
+            await synthesizeSpeechWithOpenAI(
+              apiKey,
+              "adult",
+              publishableDraft.finalScript
+            ),
+            `custom-${routeId}`,
+            "adult",
+            publishableDraft.stopId
+          )
+        );
     if (!audioUrl) {
       throw new Error("Failed to create narration audio URL");
     }
@@ -1521,13 +1722,43 @@ async function publishDraftCollectionToRoute(
     }
   }
 
-  const { error: readyErr } = await admin
-    .from("custom_routes")
-    .update({ status: "ready" })
-    .eq("id", routeId);
-  if (readyErr) {
-    throw new Error(readyErr.message);
+  if (existingRouteId) {
+    const quotedStopIds = desiredStopIds.map((stopId) => JSON.stringify(stopId)).join(",");
+
+    const { error: deleteStopsErr } = await admin
+      .from("custom_route_stops")
+      .delete()
+      .eq("route_id", routeId)
+      .not("stop_id", "in", `(${quotedStopIds})`);
+    if (deleteStopsErr) {
+      throw new Error(deleteStopsErr.message);
+    }
+
+    const { error: deleteMappingsErr } = await admin
+      .from("route_stop_mappings")
+      .delete()
+      .eq("route_kind", "custom")
+      .eq("route_id", routeId)
+      .not("stop_id", "in", `(${quotedStopIds})`);
+    if (deleteMappingsErr) {
+      throw new Error(deleteMappingsErr.message);
+    }
   }
+
+  await updateInstagramCustomRouteMetadata(admin, routeId, {
+    city,
+    length_minutes: routeLengthMinutes,
+    title: resolvedRouteTitle,
+    narrator_default: "adult",
+    narrator_guidance: null,
+    narrator_voice: null,
+    status: "ready",
+    experience_kind: "mix",
+    story_by: attribution.storyBy,
+    story_by_url: attribution.storyByUrl,
+    story_by_avatar_url: resolvedRouteAvatarUrl,
+    story_by_source: attribution.storyBySource,
+  });
 
   return { jamId, routeId };
 }
@@ -1584,12 +1815,13 @@ async function processPublishCollectionJob(
     error: null,
   });
 
-  const routeTitle = extractCollectionRouteTitleFromJobMessage(job.message);
+  const { routeTitle, existingRouteId } = extractCollectionPublishOptionsFromJobMessage(job.message);
 
   const { jamId, routeId } = await publishDraftCollectionToRoute(
     admin,
     drafts,
     routeTitle,
+    existingRouteId,
     async (progress, message) => {
       await updateJobWithLock(admin, job.id, lockToken, {
         progress,
@@ -1622,9 +1854,23 @@ async function failJob(
   const draftIds = getJobDraftIds(job);
   const drafts = await loadDraftsByIds(admin, draftIds);
   for (const draft of drafts) {
+    const hasPublishedRoute = Boolean(draft.published_jam_id && draft.published_route_id);
+    const isPublishableDraft = isInstagramDraftPublishable(buildDraftContent(draft));
+    const recoveredStatus =
+      job.phase === "publish_collection"
+        ? hasPublishedRoute
+          ? "published"
+          : isPublishableDraft
+            ? "draft_ready"
+            : nextInstagramDraftStatus(draft.status, "job_failed")
+        : nextInstagramDraftStatus(draft.status, "job_failed");
+
     await updateDraft(admin, draft.id, {
-      status: nextInstagramDraftStatus(draft.status, "job_failed"),
-      error: message,
+      status: recoveredStatus,
+      error:
+        recoveredStatus === "failed"
+          ? message
+          : null,
     });
   }
   await updateJobWithLock(admin, job.id, lockToken, {

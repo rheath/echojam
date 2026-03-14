@@ -33,6 +33,14 @@ type PublishCollectionResponse = {
   error?: string;
 };
 
+type ResumeRouteResponse = {
+  routeId?: string;
+  routeTitle?: string | null;
+  draftIds?: string[];
+  drafts?: InstagramDraftResponse[];
+  error?: string;
+};
+
 type PlacesResponse = {
   candidates?: InstagramPlaceCandidate[];
   error?: string;
@@ -43,9 +51,10 @@ type StoredInstagramCollectionSession = {
   activeDraftId?: string | null;
   masterPublishJobId?: string | null;
   routeTitle?: string | null;
+  publishedRouteId?: string | null;
 };
 
-const SESSION_STORAGE_KEY = "instagram-import-session:v1";
+const SESSION_STORAGE_KEY = "instagram-import-session:v2";
 const COLLECTION_TITLE_MAX_LENGTH = 30;
 
 function clampCollectionTitle(value: string) {
@@ -136,6 +145,27 @@ function readStoredSession(): StoredInstagramCollectionSession {
   }
 }
 
+function buildInstagramImportPath(routeId?: string | null, draftId?: string | null) {
+  const params = new URLSearchParams();
+  const normalizedRouteId = toNullableTrimmed(routeId);
+  const normalizedDraftId = toNullableTrimmed(draftId);
+  if (normalizedRouteId) params.set("route", normalizedRouteId);
+  if (normalizedDraftId) params.set("draft", normalizedDraftId);
+  return params.size > 0 ? `/import/instagram?${params.toString()}` : "/import/instagram";
+}
+
+function moveItem<T>(items: T[], from: number, to: number) {
+  if (!Array.isArray(items) || items.length === 0) return items;
+  if (from === to) return items;
+  if (from < 0 || to < 0 || from >= items.length || to >= items.length) return items;
+
+  const next = [...items];
+  const [moved] = next.splice(from, 1);
+  if (typeof moved === "undefined") return items;
+  next.splice(to, 0, moved);
+  return next;
+}
+
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, init);
   const body = (await response.json().catch(() => ({}))) as T & { error?: string };
@@ -149,12 +179,14 @@ export default function InstagramImportClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftIdFromUrl = searchParams.get("draft");
+  const routeIdFromUrl = searchParams.get("route");
 
   const [urlInput, setUrlInput] = useState("");
   const [draft, setDraft] = useState<InstagramDraftResponse | null>(null);
   const [job, setJob] = useState<InstagramImportJobResponse | null>(null);
   const [collectionJob, setCollectionJob] = useState<InstagramImportJobResponse | null>(null);
   const [collectionJobId, setCollectionJobId] = useState<string | null>(null);
+  const [publishedRouteId, setPublishedRouteId] = useState<string | null>(null);
   const [collectionDraftIds, setCollectionDraftIds] = useState<string[]>([]);
   const [collectionDrafts, setCollectionDrafts] = useState<Record<string, InstagramDraftResponse>>({});
   const [collectionTitle, setCollectionTitle] = useState("");
@@ -193,6 +225,8 @@ export default function InstagramImportClient() {
     INSTAGRAM_COLLECTION_MAX_STOPS
   );
   const normalizedCollectionTitle = toNullableTrimmed(collectionTitle);
+  const activePublishedRouteId = toNullableTrimmed(publishedRouteId) || toNullableTrimmed(routeIdFromUrl);
+  const isResumedPublishedJourney = Boolean(activePublishedRouteId);
 
   const storeDraft = useCallback((nextDraft: InstagramDraftResponse) => {
     setCollectionDrafts((current) => ({
@@ -249,7 +283,7 @@ export default function InstagramImportClient() {
         setJob(nextDraft.latestJob);
         setError(null);
         if (opts?.updateUrl !== false) {
-          router.replace(`/import/instagram?draft=${encodeURIComponent(draftId)}`);
+          router.replace(buildInstagramImportPath(activePublishedRouteId, draftId));
         }
       }
       return nextDraft;
@@ -263,7 +297,7 @@ export default function InstagramImportClient() {
         setIsLoadingDraft(false);
       }
     }
-  }, [fetchDraftById, router, storeDraft]);
+  }, [activePublishedRouteId, fetchDraftById, router, storeDraft]);
 
   const persistActiveDraftEdits = useCallback(async () => {
     if (!draft) return null;
@@ -303,43 +337,110 @@ export default function InstagramImportClient() {
 
   useEffect(() => {
     if (sessionReady) return;
-    const stored = readStoredSession();
-    const normalizedDraftIds = normalizeInstagramCollectionDraftIds(
-      stored.draftIds ?? [],
-      INSTAGRAM_COLLECTION_MAX_STOPS
-    );
-    const normalizedActiveDraftId = toNullableTrimmed(stored.activeDraftId);
-    const normalizedMasterPublishJobId = toNullableTrimmed(stored.masterPublishJobId);
-    const shouldResumeStoredCollection =
-      draftIdFromUrl !== null && normalizedDraftIds.includes(draftIdFromUrl);
+    let cancelled = false;
 
-    restoredCollectionDraftIdsRef.current = normalizedDraftIds;
-    setCollectionDraftIds(shouldResumeStoredCollection ? normalizedDraftIds : []);
-    setCollectionTitle(
-      shouldResumeStoredCollection ? clampCollectionTitle(toNullableTrimmed(stored.routeTitle) || "") : ""
-    );
-    setCollectionJobId(normalizedMasterPublishJobId);
-    setShouldPersistSession(Boolean(draftIdFromUrl));
-    setSessionReady(true);
+    async function restoreSession() {
+      const stored = readStoredSession();
+      const normalizedMasterPublishJobId = toNullableTrimmed(stored.masterPublishJobId);
+      const normalizedStoredDraftIds = normalizeInstagramCollectionDraftIds(
+        stored.draftIds ?? [],
+        INSTAGRAM_COLLECTION_MAX_STOPS
+      );
+      const normalizedStoredRouteId = toNullableTrimmed(stored.publishedRouteId);
 
-    if (shouldResumeStoredCollection) {
-      void refreshCollectionDrafts(normalizedDraftIds);
+      if (normalizedMasterPublishJobId) {
+        void fetchJson<InstagramImportJobResponse>(
+          `/api/instagram-imports/jobs/${encodeURIComponent(normalizedMasterPublishJobId)}`
+        )
+          .then((nextJob) => {
+            if (!cancelled) {
+              setCollectionJob(nextJob);
+            }
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setCollectionJobId(null);
+            }
+          });
+      }
+
+      const normalizedRouteIdFromUrl = toNullableTrimmed(routeIdFromUrl);
+      if (normalizedRouteIdFromUrl) {
+        try {
+          const resumed = await fetchJson<ResumeRouteResponse>(
+            `/api/instagram-imports/routes/${encodeURIComponent(normalizedRouteIdFromUrl)}/resume`
+          );
+          if (cancelled) return;
+
+          const resumedDraftIds = normalizeInstagramCollectionDraftIds(
+            resumed.draftIds ?? [],
+            INSTAGRAM_COLLECTION_MAX_STOPS
+          );
+          const resumedDrafts = Array.isArray(resumed.drafts) ? resumed.drafts : [];
+          const draftsById = Object.fromEntries(
+            resumedDrafts.map((resumedDraft) => [resumedDraft.id, resumedDraft])
+          ) as Record<string, InstagramDraftResponse>;
+          const nextActiveDraftId =
+            (draftIdFromUrl && resumedDraftIds.includes(draftIdFromUrl) ? draftIdFromUrl : resumedDraftIds[0]) ||
+            null;
+
+          restoredCollectionDraftIdsRef.current = resumedDraftIds;
+          setPublishedRouteId(normalizedRouteIdFromUrl);
+          setCollectionDraftIds(resumedDraftIds);
+          setCollectionDrafts(draftsById);
+          setCollectionTitle(clampCollectionTitle(toNullableTrimmed(resumed.routeTitle) || ""));
+          setCollectionJobId(normalizedMasterPublishJobId);
+          setShouldPersistSession(true);
+
+          const nextActiveDraft = nextActiveDraftId ? draftsById[nextActiveDraftId] ?? null : null;
+          setDraft(nextActiveDraft);
+          setJob(nextActiveDraft?.latestJob ?? null);
+          setSessionReady(true);
+
+          const nextPath = buildInstagramImportPath(normalizedRouteIdFromUrl, nextActiveDraftId);
+          if (nextPath !== buildInstagramImportPath(normalizedRouteIdFromUrl, draftIdFromUrl)) {
+            router.replace(nextPath);
+          }
+          return;
+        } catch (resumeError) {
+          if (cancelled) return;
+          setError(
+            resumeError instanceof Error
+              ? resumeError.message
+              : "Failed to reopen the Instagram journey."
+          );
+          setPublishedRouteId(normalizedRouteIdFromUrl);
+          setCollectionJobId(normalizedMasterPublishJobId);
+          setShouldPersistSession(true);
+          setSessionReady(true);
+          return;
+        }
+      }
+
+      const shouldResumeStoredCollection =
+        draftIdFromUrl !== null && normalizedStoredDraftIds.includes(draftIdFromUrl);
+
+      restoredCollectionDraftIdsRef.current = normalizedStoredDraftIds;
+      setPublishedRouteId(normalizedStoredRouteId);
+      setCollectionDraftIds(shouldResumeStoredCollection ? normalizedStoredDraftIds : []);
+      setCollectionTitle(
+        shouldResumeStoredCollection ? clampCollectionTitle(toNullableTrimmed(stored.routeTitle) || "") : ""
+      );
+      setCollectionJobId(normalizedMasterPublishJobId);
+      setShouldPersistSession(Boolean(draftIdFromUrl || normalizedStoredRouteId));
+      setSessionReady(true);
+
+      if (shouldResumeStoredCollection) {
+        void refreshCollectionDrafts(normalizedStoredDraftIds);
+      }
     }
 
-    if (normalizedMasterPublishJobId) {
-      void fetchJson<InstagramImportJobResponse>(
-        `/api/instagram-imports/jobs/${encodeURIComponent(normalizedMasterPublishJobId)}`
-      )
-        .then((nextJob) => {
-          setCollectionJob(nextJob);
-        })
-        .catch(() => {
-          setCollectionJobId(null);
-        });
-    }
+    void restoreSession();
 
-    void normalizedActiveDraftId;
-  }, [draftIdFromUrl, refreshCollectionDrafts, sessionReady]);
+    return () => {
+      cancelled = true;
+    };
+  }, [draftIdFromUrl, refreshCollectionDrafts, routeIdFromUrl, router, sessionReady]);
 
   useEffect(() => {
     if (!sessionReady) return;
@@ -350,20 +451,22 @@ export default function InstagramImportClient() {
 
   useEffect(() => {
     if (!sessionReady) return;
-    if (draftIdFromUrl) {
+    if (draftIdFromUrl || activePublishedRouteId) {
       setShouldPersistSession(true);
     }
-  }, [draftIdFromUrl, sessionReady]);
+  }, [activePublishedRouteId, draftIdFromUrl, sessionReady]);
 
   useEffect(() => {
     if (!sessionReady) return;
     if (!draftIdFromUrl) {
-      setDraft(null);
-      setJob(null);
+      if (!activePublishedRouteId) {
+        setDraft(null);
+        setJob(null);
+      }
       return;
     }
     void loadDraft(draftIdFromUrl, { updateUrl: false });
-  }, [draftIdFromUrl, loadDraft, sessionReady]);
+  }, [activePublishedRouteId, draftIdFromUrl, loadDraft, sessionReady]);
 
   useEffect(() => {
     if (!sessionReady || !shouldPersistSession || typeof window === "undefined") return;
@@ -373,12 +476,21 @@ export default function InstagramImportClient() {
         activeDraftId: draftIdFromUrl ?? null,
         masterPublishJobId: collectionJobId,
         routeTitle: toNullableTrimmed(collectionTitle),
+        publishedRouteId: activePublishedRouteId,
       };
       window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stored));
     } catch {
       // Ignore sessionStorage failures; the page still works in-memory.
     }
-  }, [collectionDraftIds, collectionJobId, collectionTitle, draftIdFromUrl, sessionReady, shouldPersistSession]);
+  }, [
+    activePublishedRouteId,
+    collectionDraftIds,
+    collectionJobId,
+    collectionTitle,
+    draftIdFromUrl,
+    sessionReady,
+    shouldPersistSession,
+  ]);
 
   useEffect(() => {
     if (!draft) {
@@ -631,7 +743,7 @@ export default function InstagramImportClient() {
     try {
       await persistActiveDraftEdits();
       setShouldPersistSession(true);
-      router.replace(`/import/instagram?draft=${encodeURIComponent(nextDraftId)}`);
+      router.replace(buildInstagramImportPath(activePublishedRouteId, nextDraftId));
     } catch (selectionError) {
       setError(selectionError instanceof Error ? selectionError.message : "Failed to switch draft");
     }
@@ -649,17 +761,27 @@ export default function InstagramImportClient() {
       if (draftIdFromUrl === removedDraftId) {
         const nextActiveDraftId = nextDraftIds[0] || null;
         if (nextActiveDraftId) {
-          router.replace(`/import/instagram?draft=${encodeURIComponent(nextActiveDraftId)}`);
+          router.replace(buildInstagramImportPath(activePublishedRouteId, nextActiveDraftId));
         } else {
           setDraft(null);
           setJob(null);
           setUrlInput("");
-          router.replace("/import/instagram");
+          router.replace(buildInstagramImportPath(activePublishedRouteId, null));
         }
       }
     } catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : "Failed to remove stop");
     }
+  }
+
+  function moveCollectionDraft(draftId: string, direction: "up" | "down") {
+    setError(null);
+    setCollectionDraftIds((current) => {
+      const currentIndex = current.findIndex((candidateId) => candidateId === draftId);
+      if (currentIndex < 0) return current;
+      const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+      return moveItem(current, currentIndex, nextIndex);
+    });
   }
 
   async function handleMasterPublish() {
@@ -694,6 +816,7 @@ export default function InstagramImportClient() {
           body: JSON.stringify({
             draftIds: collectionDraftIds,
             routeTitle: normalizedCollectionTitle,
+            existingRouteId: activePublishedRouteId,
           }),
         }
       );
@@ -799,7 +922,9 @@ export default function InstagramImportClient() {
               </h2>
               <div className={styles.collectionFooter}>
                 <div className={styles.publishNote}>
-                  {!normalizedCollectionTitle
+                  {isResumedPublishedJourney
+                    ? "Published stops stay in this journey. Add a new Instagram link, then publish again to append it."
+                    : !normalizedCollectionTitle
                     ? "Add a route title to enable Master Publish."
                     : canMasterPublish
                       ? "All stops are ready for Master Publish."
@@ -852,40 +977,89 @@ export default function InstagramImportClient() {
                   ? getInstagramCollectionDraftStatus(collectionDraft)
                   : "importing";
                 const isSelected = draftIdFromUrl === draftId;
+                const isFirst = index === 0;
+                const isLast = index === collectionDraftIds.length - 1;
+                const isPublishedStopInJourney =
+                  Boolean(activePublishedRouteId) &&
+                  collectionDraft?.publish.publishedRouteId === activePublishedRouteId;
 
                 return (
                   <div
                     key={draftId}
                     className={`${styles.collectionRow} ${isSelected ? styles.collectionRowActive : ""}`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => void handleSelectCollectionDraft(draftId)}
-                      className={styles.collectionSelect}
-                    >
-                      <div className={styles.collectionIndex}>{index + 1}</div>
-                      <div className={styles.collectionCopy}>
-                        <div className={styles.collectionTitle}>
-                          {summarizeCollectionDraft(collectionDraft, draftId)}
-                        </div>
-                        <div className={styles.collectionMeta}>
-                          {describeCollectionDraft(collectionDraft)}
-                        </div>
+                    <div className={styles.collectionMain}>
+                      <div className={styles.collectionReorderButtons}>
+                        <button
+                          type="button"
+                          className={styles.collectionReorderButton}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            moveCollectionDraft(draftId, "up");
+                          }}
+                          aria-label={`Move ${summarizeCollectionDraft(collectionDraft, draftId)} up`}
+                          disabled={isFirst}
+                        >
+                          <Image
+                            src="/icons/chevron-right.svg"
+                            alt=""
+                            width={16}
+                            height={16}
+                            className={`${styles.collectionReorderIcon} ${styles.collectionReorderIconUp}`}
+                            aria-hidden="true"
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.collectionReorderButton}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            moveCollectionDraft(draftId, "down");
+                          }}
+                          aria-label={`Move ${summarizeCollectionDraft(collectionDraft, draftId)} down`}
+                          disabled={isLast}
+                        >
+                          <Image
+                            src="/icons/chevron-right.svg"
+                            alt=""
+                            width={16}
+                            height={16}
+                            className={`${styles.collectionReorderIcon} ${styles.collectionReorderIconDown}`}
+                            aria-hidden="true"
+                          />
+                        </button>
                       </div>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleSelectCollectionDraft(draftId)}
+                        className={styles.collectionSelect}
+                      >
+                        <div className={styles.collectionIndex}>{index + 1}</div>
+                        <div className={styles.collectionCopy}>
+                          <div className={styles.collectionTitle}>
+                            {summarizeCollectionDraft(collectionDraft, draftId)}
+                          </div>
+                          <div className={styles.collectionMeta}>
+                            {describeCollectionDraft(collectionDraft)}
+                          </div>
+                        </div>
+                      </button>
+                    </div>
                     <div className={styles.collectionActions}>
                       <span
                         className={`${styles.collectionStatus} ${styles[`status${status}`]}`}
                       >
                         {formatCollectionStatusLabel(status)}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => void handleRemoveCollectionDraft(draftId)}
-                        className={styles.linkButton}
-                      >
-                        Remove
-                      </button>
+                      {isPublishedStopInJourney ? null : (
+                        <button
+                          type="button"
+                          onClick={() => void handleRemoveCollectionDraft(draftId)}
+                          className={styles.linkButton}
+                        >
+                          Remove
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

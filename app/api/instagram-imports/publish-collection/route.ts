@@ -17,6 +17,7 @@ import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 type Body = {
   draftIds?: string[];
   routeTitle?: string | null;
+  existingRouteId?: string | null;
 };
 
 function sameOrderedIds(left: string[] | null | undefined, right: string[]) {
@@ -71,6 +72,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    const existingRouteId = toNullableTrimmed(body.existingRouteId);
 
     const admin = getSupabaseAdminClient();
     const drafts = await Promise.all(
@@ -86,7 +88,7 @@ export async function POST(req: Request) {
           draft.publish.publishedJamId === sharedPublishedJamId &&
           draft.publish.publishedRouteId === sharedPublishedRouteId
       );
-    if (allAlreadyPublished) {
+    if (allAlreadyPublished && !existingRouteId) {
       return NextResponse.json({
         draftId: normalizedDraftIds[0],
         publishedJamId: sharedPublishedJamId,
@@ -96,14 +98,20 @@ export async function POST(req: Request) {
       });
     }
 
-    if (
-      drafts.some(
-        (draft) =>
-          Boolean(draft.publish.publishedJamId || draft.publish.publishedRouteId)
-      )
-    ) {
+    const invalidPublishedDraft = drafts.find((draft) => {
+      const publishedRouteId = draft.publish.publishedRouteId;
+      const publishedJamId = draft.publish.publishedJamId;
+      if (!publishedRouteId && !publishedJamId) return false;
+      if (!existingRouteId) return true;
+      return publishedRouteId !== existingRouteId;
+    });
+    if (invalidPublishedDraft) {
       return NextResponse.json(
-        { error: "Remove already-published stops from the collection before master publish." },
+        {
+          error: existingRouteId
+            ? "Only stops already published to this Instagram journey can be reused when appending."
+            : "Remove already-published stops from the collection before master publish.",
+        },
         { status: 400 }
       );
     }
@@ -128,15 +136,15 @@ export async function POST(req: Request) {
       throw new Error(activeJobsErr.message);
     }
 
-    const message = `Queued for master publish: ${routeTitle}`;
+    const message = existingRouteId
+      ? `Queued for master publish [route:${existingRouteId}]: ${routeTitle}`
+      : `Queued for master publish: ${routeTitle}`;
 
     const existingJob = (activeJobs ?? []).find((job) =>
-      sameOrderedIds((job as { draft_ids?: string[] | null }).draft_ids, normalizedDraftIds)
+      sameOrderedIds((job as { draft_ids?: string[] | null }).draft_ids, normalizedDraftIds) &&
+      (job.message || "") === message
     ) as { id: string; message?: string | null } | undefined;
     if (existingJob?.id) {
-      if ((existingJob.message || "") !== message) {
-        await admin.from("instagram_import_jobs").update({ message }).eq("id", existingJob.id);
-      }
       return NextResponse.json({ draftId: normalizedDraftIds[0], jobId: existingJob.id, queued: true });
     }
     const job = await createInstagramImportJob(

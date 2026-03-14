@@ -13,7 +13,7 @@ import {
   type RouteDef,
   type RoutePricing,
 } from "@/app/content/salemRoutes";
-import { buildPresetOverviewStop, getPresetCityMeta, isPresetOverviewStopId } from "@/lib/presetOverview";
+import { getPresetCityMeta, isPresetOverviewStopId } from "@/lib/presetOverview";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { getMaxStops, validateMixSelection } from "@/lib/mixConstraints";
 import {
@@ -245,7 +245,6 @@ const FOLLOW_ALONG_ORIGIN_FALLBACK_SUBTITLE = "Location detected";
 const PERSONA_KEYS: Array<Exclude<Persona, "custom">> = ["adult", "preteen", "ghost"];
 const CUSTOM_NARRATOR_MAX_CHARS = 500;
 const DEFAULT_STOP_IMAGE = "/images/salem/placeholder.png";
-const LANDING_THEME_STORAGE_KEY = "wandrful-theme";
 const WALK_DISCOVERY_STORAGE_PREFIX = "wandrful-walk-discovery";
 const CITY_META: Record<CityOption, { label: string; center: { lat: number; lng: number } }> = {
   salem: { label: "Salem", center: { lat: 42.5195, lng: -70.8967 } },
@@ -281,10 +280,6 @@ const INSTAGRAM_IMPORT_ENABLED = ["1", "true", "yes", "on"].includes(
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
-}
-
-function isLandingTheme(value: string | null): value is LandingTheme {
-  return value === "dark" || value === "light";
 }
 
 function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
@@ -438,19 +433,6 @@ function stopMatches(a: CustomMixStop, b: CustomMixStop) {
   const bId = (b.id || "").trim();
   if (aId && bId) return aId === bId;
   return getStopCoordKey(a) === getStopCoordKey(b);
-}
-
-function mergeUniqueStops(primary: CustomMixStop[], secondary: CustomMixStop[]) {
-  const merged: CustomMixStop[] = [];
-  for (const stop of primary) {
-    if (merged.some((m) => stopMatches(m, stop))) continue;
-    merged.push(stop);
-  }
-  for (const stop of secondary) {
-    if (merged.some((m) => stopMatches(m, stop))) continue;
-    merged.push(stop);
-  }
-  return merged;
 }
 
 function moveItem<T>(items: T[], from: number, to: number) {
@@ -625,7 +607,6 @@ const [narratorFlowSource, setNarratorFlowSource] = useState<NarratorFlowSource>
 const [selectedCity, setSelectedCity] = useState<CityOption>("salem");
 const [instantDiscoveryCity, setInstantDiscoveryCity] = useState<string | null>(null);
 const [builderSelectedStops, setBuilderSelectedStops] = useState<CustomMixStop[]>([]);
-const [buildMixOrderedStops, setBuildMixOrderedStops] = useState<CustomMixStop[]>([]);
 const [searchInput, setSearchInput] = useState("");
 const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
 const [searchCandidates, setSearchCandidates] = useState<CustomMixStop[]>([]);
@@ -640,9 +621,9 @@ const [generationJobKind, setGenerationJobKind] = useState<GenerationJobKind | n
 const [generationProgress, setGenerationProgress] = useState(0);
 const [generationStatusLabel, setGenerationStatusLabel] = useState(GENERATION_STATUS_LABELS.queued);
 const [generationMessage, setGenerationMessage] = useState("Queued");
-const [landingTheme, setLandingTheme] = useState<LandingTheme>("light");
-const [hasLoadedLandingTheme, setHasLoadedLandingTheme] = useState(false);
+const [landingTheme, setLandingTheme] = useState<LandingTheme>("dark");
 const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
+const [didInstagramAvatarFail, setDidInstagramAvatarFail] = useState(false);
 const [followAlongOrigin, setFollowAlongOrigin] = useState<FollowAlongLocation | null>(null);
 const [followAlongDestinationQuery, setFollowAlongDestinationQuery] = useState("");
 const [followAlongDestinationResults, setFollowAlongDestinationResults] = useState<
@@ -762,45 +743,15 @@ const walkDiscoveryRequestIdRef = useRef(0);
     () => CITY_META[selectedCity].center,
     [selectedCity]
   );
-  const availableStopsForCity = useMemo<CustomMixStop[]>(() => {
-    const overview = buildPresetOverviewStop(selectedCity);
-    const byId = new Map<string, CustomMixStop>();
-    byId.set(overview.id, {
-      id: overview.id,
-      title: overview.title,
-      lat: overview.lat,
-      lng: overview.lng,
-      image: overview.image,
-    });
-    for (const r of routesForSelectedCity) {
-      for (const s of r.stops) {
-        if (byId.has(s.id)) continue;
-        byId.set(s.id, {
-          id: s.id,
-          title: s.title,
-          lat: s.lat,
-          lng: s.lng,
-          image: toSafeStopImage(s.images[0]),
-        });
-      }
-    }
-    return Array.from(byId.values());
-  }, [routesForSelectedCity, selectedCity]);
-  const buildMixDisplayStops = useMemo(() => {
-    const orderedSelected = buildMixOrderedStops.filter((ordered) =>
-      builderSelectedStops.some((selected) => stopMatches(selected, ordered))
-    );
-    const missingSelected = builderSelectedStops.filter((selected) =>
-      !orderedSelected.some((ordered) => stopMatches(ordered, selected))
-    );
-    return [...orderedSelected, ...missingSelected];
-  }, [buildMixOrderedStops, builderSelectedStops]);
   const activePersonaDisplayName = getRouteNarratorLabel(route, persona);
   const isInstagramAttributedCustomRoute =
     !isPresetWalkRoute && route?.storyBySource === "instagram" && Boolean(route?.storyBy?.trim());
   const instagramStoryByLabel = isInstagramAttributedCustomRoute ? route?.storyBy?.trim() || null : null;
   const instagramStoryByUrl = isInstagramAttributedCustomRoute ? route?.storyByUrl?.trim() || null : null;
   const instagramStoryByAvatarUrl = isInstagramAttributedCustomRoute ? route?.storyByAvatarUrl?.trim() || null : null;
+  const shouldShowInstagramStoryAvatar = Boolean(instagramStoryByAvatarUrl && !didInstagramAvatarFail);
+  const activeInstagramCustomRouteId =
+    step === "walk" && isInstagramAttributedCustomRoute ? getCustomRouteId(route?.id ?? null) : null;
   const activePresetWalkRouteId =
     step === "walk" && isPresetWalkRoute && jam?.route_id ? (jam.route_id as RouteDef["id"]) : null;
   const isActivePresetWalkRegenerating =
@@ -875,8 +826,7 @@ const walkDiscoveryRequestIdRef = useRef(0);
   );
   const generatingBackgroundImage = useMemo(() => {
     if (generationJobKind === "custom") {
-      const sourceStops = buildMixOrderedStops.length > 0 ? buildMixOrderedStops : builderSelectedStops;
-      const stopWithImage = sourceStops.find((stop) => (stop.image || "").trim().length > 0);
+      const stopWithImage = builderSelectedStops.find((stop) => (stop.image || "").trim().length > 0);
       if (stopWithImage) return toSafeStopImage(stopWithImage.image);
     }
 
@@ -887,10 +837,10 @@ const walkDiscoveryRequestIdRef = useRef(0);
     if (routeStopWithImage) return toSafeStopImage(routeStopWithImage.images[0]);
 
     return DEFAULT_STOP_IMAGE;
-  }, [buildMixOrderedStops, builderSelectedStops, generationJobKind, route, selectedRoute, selectedRouteId]);
+  }, [builderSelectedStops, generationJobKind, route, selectedRoute, selectedRouteId]);
   const narratorPreviewStops = useMemo(() => {
     if (narratorFlowSource === "buildMix") {
-      return buildMixDisplayStops;
+      return builderSelectedStops;
     }
     if (narratorFlowSource === "followAlong" && followAlongDestination) {
       return [
@@ -905,7 +855,7 @@ const walkDiscoveryRequestIdRef = useRef(0);
       ];
     }
     return [];
-  }, [buildMixDisplayStops, followAlongDestination, narratorFlowSource]);
+  }, [builderSelectedStops, followAlongDestination, narratorFlowSource]);
   const narratorPreviewCityCenter =
     narratorFlowSource === "followAlong"
       ? (followAlongOrigin ?? selectedCityCenter)
@@ -925,35 +875,6 @@ const walkDiscoveryRequestIdRef = useRef(0);
           destination: followAlongPreview?.destination ?? followAlongDestination,
         }
       : null;
-
-  useEffect(() => {
-    if (!showLandingThemeToggle) {
-      setLandingTheme("light");
-      setHasLoadedLandingTheme(true);
-      return;
-    }
-    if (typeof window === "undefined") return;
-    try {
-      const storedTheme = window.localStorage.getItem(LANDING_THEME_STORAGE_KEY);
-      if (isLandingTheme(storedTheme)) {
-        setLandingTheme(storedTheme);
-      }
-    } catch {
-      // Ignore localStorage access failures and keep the default theme.
-    } finally {
-      setHasLoadedLandingTheme(true);
-    }
-  }, [showLandingThemeToggle]);
-
-  useEffect(() => {
-    if (!showLandingThemeToggle) return;
-    if (!hasLoadedLandingTheme || typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(LANDING_THEME_STORAGE_KEY, landingTheme);
-    } catch {
-      // Ignore localStorage access failures; the toggle still works for this session.
-    }
-  }, [hasLoadedLandingTheme, landingTheme, showLandingThemeToggle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1220,11 +1141,6 @@ const walkDiscoveryRequestIdRef = useRef(0);
     setIsLandingJourneyModalOpen(false);
   }
 
-  async function launchLandingAroundMe() {
-    closeLandingJourneyModal();
-    await handleNearbyStory();
-  }
-
   async function launchLandingAlongTheWay() {
     closeLandingJourneyModal();
     await startWalkDiscoveryExperience();
@@ -1488,7 +1404,7 @@ const walkDiscoveryRequestIdRef = useRef(0);
     const endpoint = isCustom
       ? `/api/custom-routes/${customRouteId}`
       : `/api/preset-routes/${routeRef}`;
-    const res = await fetch(endpoint);
+    const res = await fetch(endpoint, { cache: "no-store" });
     if (!res.ok) {
       let detail: string | null = null;
       try {
@@ -2247,7 +2163,6 @@ async function startStopNarration() {
     setBuilderSelectedStops((prev) => {
       const exists = prev.some((s) => stopMatches(s, stop));
       if (exists) {
-        setBuildMixOrderedStops((ordered) => ordered.filter((s) => !stopMatches(s, stop)));
         return prev.filter((s) => !stopMatches(s, stop));
       }
       const nextMaxStops = getMaxStops();
@@ -2255,10 +2170,6 @@ async function startStopNarration() {
         setErr(`Select at most ${nextMaxStops} stops.`);
         return prev;
       }
-      setBuildMixOrderedStops((ordered) => {
-        const withoutExisting = ordered.filter((s) => !stopMatches(s, stop));
-        return [...withoutExisting, stop];
-      });
       return [...prev, stop];
     });
   }
@@ -2269,17 +2180,7 @@ async function startStopNarration() {
       const currentIdx = prev.findIndex((candidate) => stopMatches(candidate, stop));
       if (currentIdx < 0) return prev;
       const nextIdx = direction === "up" ? currentIdx - 1 : currentIdx + 1;
-      const moved = moveItem(prev, currentIdx, nextIdx);
-      if (moved === prev) return prev;
-
-      setBuildMixOrderedStops((orderedPrev) => {
-        const nonSelected = orderedPrev.filter(
-          (candidate) => !moved.some((selected) => stopMatches(selected, candidate))
-        );
-        return [...moved, ...nonSelected];
-      });
-
-      return moved;
+      return moveItem(prev, currentIdx, nextIdx);
     });
   }
 
@@ -2302,10 +2203,6 @@ async function startStopNarration() {
 
     const nextStops = [...builderSelectedStops, stop];
     setBuilderSelectedStops(nextStops);
-    setBuildMixOrderedStops((prev) => {
-      const withoutIncoming = prev.filter((existing) => !stopMatches(existing, stop));
-      return [stop, ...withoutIncoming];
-    });
     setSearchCandidates((prev) => prev.filter((candidate) => !stopMatches(candidate, stop)));
     setSearchError(null);
   }
@@ -2446,7 +2343,6 @@ async function startStopNarration() {
     setIsEditingStopsFromWalk(true);
     setReturnToWalkOnClose(true);
     setBuilderSelectedStops(baseStops);
-    setBuildMixOrderedStops(mergeUniqueStops(baseStops, availableStopsForCity));
     setSelectedPersona((jam?.persona ?? selectedPersona ?? "adult") as Persona);
     setStep("buildMix");
   }
@@ -3124,7 +3020,6 @@ async function startStopNarration() {
     if (step !== "buildMix") return;
     if (!isEditingStopsFromWalk && narratorFlowSource !== "buildMix") {
       setBuilderSelectedStops([]);
-      setBuildMixOrderedStops([]);
       setSelectedPersona(null);
       setCustomNarratorGuidance("");
       setInstantDiscoveryCity(null);
@@ -3137,12 +3032,16 @@ async function startStopNarration() {
     setGenerationProgress(0);
     setGenerationStatusLabel(GENERATION_STATUS_LABELS.queued);
     setGenerationMessage("Queued");
-  }, [step, isEditingStopsFromWalk, narratorFlowSource, availableStopsForCity]);
+  }, [step, isEditingStopsFromWalk, narratorFlowSource]);
 
   useEffect(() => {
     if (step !== "pickDuration" || !customNarratorEnabled) return;
     setSelectedPersona("custom");
   }, [step, customNarratorEnabled]);
+
+  useEffect(() => {
+    setDidInstagramAvatarFail(false);
+  }, [instagramStoryByAvatarUrl, route?.id]);
 
   useEffect(() => {
     if (step !== "walk" || !isWalkDiscoveryRoute || !jam?.id) return;
@@ -3362,7 +3261,7 @@ async function startStopNarration() {
                   </button>
                   <button
                     type="button"
-                    onClick={openLandingJourneyModal}
+                    onClick={launchLandingMixStudio}
                     className={`${styles.landingHeroCta} ${styles.landingHeroCtaOutline}`}
                   >
                     Create
@@ -3394,7 +3293,7 @@ async function startStopNarration() {
                     onClick={openLandingJourneyModal}
                     className={styles.landingHeroCta}
                   >
-                    Mix your journey
+                    Create your journey
                   </button>
                 </div>
               </div>
@@ -3577,7 +3476,7 @@ async function startStopNarration() {
                 className={styles.landingJourneyModalOverlay}
                 role="dialog"
                 aria-modal="true"
-                aria-label="Mix your story"
+                aria-label="Stories unfold around you"
                 onClick={(event) => {
                   if (event.target !== event.currentTarget) return;
                   closeLandingJourneyModal();
@@ -3588,7 +3487,7 @@ async function startStopNarration() {
                     type="button"
                     className={styles.landingJourneyModalClose}
                     onClick={closeLandingJourneyModal}
-                    aria-label="Close mix your story"
+                    aria-label="Close nearby stories"
                   >
                     <Image
                       src="/icons/x.svg"
@@ -3598,90 +3497,21 @@ async function startStopNarration() {
                       className={styles.landingJourneyModalCloseIcon}
                       aria-hidden="true"
                     />
-                  </button> 
-                  <h2 className={styles.landingJourneyModalTitle}>Start exploring</h2>
+                  </button>
+                  <h2 className={styles.landingJourneyModalTitle}>Stories unfold around you</h2>
                   <div className={styles.landingJourneyModalBody}>
-                    
-
+                    <p className={styles.landingJourneyModalSubtext}>
+As you move, Wandrful suggests nearby places with stories.
+You choose where to go — each stop shapes what unfolds next.                     </p>
                     <button
                       type="button"
                       onClick={() => {
                         void launchLandingAlongTheWay();
                       }}
-                      className={`${styles.landingJourneyOption} ${
-                        (isStartingWalkDiscovery || isResolvingNearbyGeo) ? styles.pickRouteRowDisabled : ""
-                      }`}
+                      className={`${styles.landingCtaButton} ${styles.startTourButton} ${styles.landingJourneyModalCta}`}
                       disabled={isStartingWalkDiscovery || isResolvingNearbyGeo}
                     >
-                      <div className={styles.landingJourneyOptionMain}>
-                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                          <Image
-                            src="/icons/play-fill.svg"
-                            alt=""
-                            width={24}
-                            height={24}
-                            className={styles.pickRouteWalkIcon}
-                            aria-hidden="true"
-                          />
-                        </div>
-                        <div className={styles.pickRouteMain}>
-                          <div className={styles.pickRouteTitle}>Wander</div>
-                          <div className={styles.pickRouteMeta}>
-                            {isStartingWalkDiscovery
-                              ? "Starting your walk..."
-                              : "Stories unfold as you move."}
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={launchLandingMixStudio}
-                      className={styles.landingJourneyOption}
-                    >
-                      <div className={styles.landingJourneyOptionMain}>
-                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                          <Image
-                            src="/icons/shuffle.svg"
-                            alt=""
-                            width={24}
-                            height={24}
-                            className={styles.pickRouteWalkIcon}
-                            aria-hidden="true"
-                          />
-                        </div>
-                        <div className={styles.pickRouteMain}>
-                          <div className={styles.pickRouteTitle}>Follow</div>
-                          <div className={styles.pickRouteMeta}>Choose your stops. Shape the story.</div>
-                        </div>
-                      </div>
-                    </button>
-                    
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void launchLandingAroundMe();
-                      }}
-                      className={`${styles.landingJourneyOption} ${isSurpriseMixDisabled ? styles.pickRouteRowDisabled : ""}`}
-                      disabled={isSurpriseMixDisabled}
-                    >
-                      <div className={styles.landingJourneyOptionMain}>
-                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                          <Image
-                            src="/icons/pin-angle-fill.svg"
-                            alt=""
-                            width={24}
-                            height={24}
-                            className={styles.pickRouteWalkIcon}
-                            aria-hidden="true"
-                          />
-                        </div>
-                        <div className={styles.pickRouteMain}>
-                          <div className={styles.pickRouteTitle}>Nearby (Kill)</div>
-                          <div className={styles.pickRouteMeta}>Combined with Wander but testing needed </div>
-                        </div>
-                      </div>
+                      {isStartingWalkDiscovery || isResolvingNearbyGeo ? "Starting nearby..." : "Get discovering"}
                     </button>
                   </div>
                 </div>
@@ -4067,128 +3897,24 @@ async function startStopNarration() {
               />
             </button>
             <div className={styles.pickCopyBlock}>
-              <h2 className={styles.pickHeading}>Mix your journey</h2>
+              <h2 className={styles.pickHeading}>Create your journey</h2>
             </div>
 
-            {INSTAGRAM_IMPORT_ENABLED ? (
-              <button
-                type="button"
-                onClick={() => {
-                  router.push("/import/instagram/access");
-                }}
-                className={`${styles.pickRouteRow} ${styles.buildMixEntryRow}`}
-              >
-                <div className={styles.pickRouteMainWithIcon}>
-                  <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                    <Image
-                      src="/icons/file-earmark-text.svg"
-                      alt=""
-                      width={24}
-                      height={24}
-                      className={styles.pickRouteWalkIcon}
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div className={styles.pickRouteMain}>
-                    <div className={styles.pickRouteTitle}>Start with Instagram</div>
-                    <div className={styles.pickRouteMeta}>Mix your posts into a journey.</div>
-                  </div>
-                </div>
-              </button>
-            ) : null}
-
-            <div className={styles.buildMixLinkAddWrap}>
-              <div className={styles.buildMixSearchRow}>
-              <div className={styles.pickRouteTitle}>Start with a place</div>
-                    <div className={styles.pickRouteMeta}>Build your story from scratch</div>
-                <div className={styles.buildMixSearchInputWrap}>
-                  <input
-                    type="text"
-                    value={searchInput}
-                    onChange={(e) => setSearchInput(e.target.value)}
-                    onKeyDown={handleBuildMixSearchKeyDown}
-                    className={styles.buildMixSearchInput}
-                    placeholder={`Search for a place`}
-                    aria-label="Search places"
-                  />
-                  <div className={styles.buildMixSearchActions}>
-                    {searchInput.trim().length > 0 && (
-                      <button
-                        type="button"
-                        onClick={clearBuildMixSearch}
-                        className={styles.buildMixSearchActionButton}
-                        aria-label="Clear search"
-                      >
-                        <svg viewBox="0 0 24 24" className={styles.buildMixSearchClearIcon} aria-hidden="true">
-                          <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                          <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                        </svg>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={searchPlaces}
-                      disabled={isSearchingPlaces}
-                      className={styles.buildMixSearchActionButton}
-                      aria-label={isSearchingPlaces ? "Searching places" : "Search places"}
-                    >
-                      <svg viewBox="0 0 24 24" className={styles.buildMixSearchIcon} aria-hidden="true">
-                        <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="2" />
-                        <line x1="16.2" y1="16.2" x2="21" y2="21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-              {searchError && <div className={styles.buildMixSearchError}>{searchError}</div>}
-              {searchInput.trim().length > 0 && availableSearchCandidates.length > 0 && (
-                <div className={styles.buildMixSearchDropdown}>
-                  {availableSearchCandidates.map((candidate) => (
-                      <div
-                        key={candidate.id}
-                        className={styles.buildMixSearchDropdownRow}
-                      >
-                        <div className={styles.buildMixSearchDropdownTitle}>{candidate.title}</div>
-                        <button
-                          type="button"
-                          onClick={() => addSearchedCandidate(candidate)}
-                          className={styles.pickRouteToggleButton}
-                          aria-label={`Add ${candidate.title}`}
-                        >
-                          <div className={styles.pickRouteArrow}>
-                            <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                              <Image
-                                src="/icons/plus.svg"
-                                alt=""
-                                width={20}
-                                height={20}
-                                className={styles.pickRouteArrowIcon}
-                                aria-hidden="true"
-                              />
-                            </div>
-                          </div>
-                        </button>
-                      </div>
-                    )
-                  )}
-                </div>
-              )}
-            </div>
             <div className={styles.pickSectionLabel}>
                
               {builderSelectedStops.length} of {maxStopsForSelection || 0} stops selected  for {formatRouteMiles(selectedStopsDistanceMiles)}
             </div>
             <div className={styles.pickRouteList}>
-              {buildMixDisplayStops.length === 0 ? (
+              {builderSelectedStops.length === 0 ? (
                 null
               ) : (
-                buildMixDisplayStops.map((stop, idx) => {
+                builderSelectedStops.map((stop, idx) => {
                   const stopCoordKey = getStopCoordKey(stop);
                   const active = builderSelectedStops.some(
                     (s) => s.id === stop.id || getStopCoordKey(s) === stopCoordKey
                   );
                   const isFirst = idx === 0;
-                  const isLast = idx === buildMixDisplayStops.length - 1;
+                  const isLast = idx === builderSelectedStops.length - 1;
                   return (
                     <div
                       key={stop.id}
@@ -4268,6 +3994,85 @@ async function startStopNarration() {
                 })
               )}
             </div>
+
+            <div className={styles.buildMixLinkAddWrap}>
+              <div className={styles.buildMixSearchRow}>
+              <div className={styles.pickRouteTitle}>Start with a place</div> 
+                <div className={styles.buildMixSearchInputWrap}>
+                  <input
+                    type="text"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    onKeyDown={handleBuildMixSearchKeyDown}
+                    enterKeyHint="search"
+                    className={styles.buildMixSearchInput}
+                    placeholder={`Search for a place`}
+                    aria-label="Search places"
+                  />
+                  <div className={styles.buildMixSearchActions}>
+                    {searchInput.trim().length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearBuildMixSearch}
+                        className={styles.buildMixSearchActionButton}
+                        aria-label="Clear search"
+                      >
+                        <svg viewBox="0 0 24 24" className={styles.buildMixSearchClearIcon} aria-hidden="true">
+                          <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={searchPlaces}
+                      disabled={isSearchingPlaces}
+                      className={styles.buildMixSearchActionButton}
+                      aria-label={isSearchingPlaces ? "Searching places" : "Search places"}
+                    >
+                      <svg viewBox="0 0 24 24" className={styles.buildMixSearchIcon} aria-hidden="true">
+                        <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                        <line x1="16.2" y1="16.2" x2="21" y2="21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {searchError && <div className={styles.buildMixSearchError}>{searchError}</div>}
+              {searchInput.trim().length > 0 && availableSearchCandidates.length > 0 && (
+                <div className={styles.buildMixSearchDropdown}>
+                  {availableSearchCandidates.map((candidate) => (
+                      <div
+                        key={candidate.id}
+                        className={styles.buildMixSearchDropdownRow}
+                      >
+                        <div className={styles.buildMixSearchDropdownTitle}>{candidate.title}</div>
+                        <button
+                          type="button"
+                          onClick={() => addSearchedCandidate(candidate)}
+                          className={styles.pickRouteToggleButton}
+                          aria-label={`Add ${candidate.title}`}
+                        >
+                          <div className={styles.pickRouteArrow}>
+                            <div className={styles.pickRouteIconCircle} aria-hidden="true">
+                              <Image
+                                src="/icons/plus.svg"
+                                alt=""
+                                width={20}
+                                height={20}
+                                className={styles.pickRouteArrowIcon}
+                                aria-hidden="true"
+                              />
+                            </div>
+                          </div>
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+            
 
               {builderSelectedStops.length > 0 && (
                 <div className={`${styles.pickDurationStartWrap} ${styles.buildMixStickyCtaWrap} ${styles.buildMixStickyCtaEnter}`}>
@@ -4928,12 +4733,14 @@ async function startStopNarration() {
                             className={styles.walkNarratorAvatarWrap}
                             aria-label={`Open ${instagramStoryByLabel} on Instagram`}
                           >
-                            {instagramStoryByAvatarUrl ? (
+                            {shouldShowInstagramStoryAvatar ? (
                               <Image
                                 src={instagramStoryByAvatarUrl}
                                 alt={`${instagramStoryByLabel} avatar`}
                                 fill
+                                unoptimized
                                 className={styles.walkNarratorAvatar}
+                                onError={() => setDidInstagramAvatarFail(true)}
                               />
                             ) : (
                               <Image
@@ -4948,12 +4755,14 @@ async function startStopNarration() {
                           </a>
                         ) : (
                           <div className={styles.walkNarratorAvatarWrap}>
-                            {instagramStoryByAvatarUrl ? (
+                            {shouldShowInstagramStoryAvatar ? (
                               <Image
                                 src={instagramStoryByAvatarUrl}
                                 alt={`${instagramStoryByLabel} avatar`}
                                 fill
+                                unoptimized
                                 className={styles.walkNarratorAvatar}
+                                onError={() => setDidInstagramAvatarFail(true)}
                               />
                             ) : (
                               <Image
@@ -5042,6 +4851,18 @@ async function startStopNarration() {
               <div className={styles.walkActionRow}>
                 <button className={styles.pillButton} type="button" onClick={copyShareLink}>Share</button>
 
+                {activeInstagramCustomRouteId ? (
+                  <button
+                    className={styles.pillButton}
+                    type="button"
+                    onClick={() => {
+                      router.push(`/import/instagram?route=${encodeURIComponent(activeInstagramCustomRouteId)}`);
+                    }}
+                  >
+                    Edit (IG)
+                  </button>
+                ) : null}
+
                 {activePresetWalkRouteId && (
                   <button
                     className={styles.pillButton}
@@ -5056,13 +4877,15 @@ async function startStopNarration() {
                   </button>
                 )}
 
-                <button
-                  className={styles.pillButton}
-                  type="button"
-                  onClick={openEditStopsFromWalk}
-                >
-                  Edit
-                </button>
+                {!activeInstagramCustomRouteId ? (
+                  <button
+                    className={styles.pillButton}
+                    type="button"
+                    onClick={openEditStopsFromWalk}
+                  >
+                    Edit
+                  </button>
+                ) : null}
                 <button
                   className={styles.nowPlayingButton}
                   type="button"
@@ -5087,7 +4910,7 @@ async function startStopNarration() {
                   return (
                   <button
                     key={stop.id}
-                    onClick={() => void handleStopSelect(idx, { autoPlay: isPlaying })}
+                    onClick={() => void handleStopSelect(idx, { autoPlay: currentStopIndex !== idx })}
                     className={`${styles.stopItem} ${stop.isActive ? styles.stopItemActive : ""}`}
                     type="button"
                   >

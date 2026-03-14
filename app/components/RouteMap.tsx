@@ -343,21 +343,6 @@ export default function RouteMap({
     clearMarkers(endpointMarkersRef.current);
     endpointMarkersRef.current = buildEndpointMarkers(map, endpoints);
 
-    clearMarker(meMarkerRef.current);
-    meMarkerRef.current = myPos
-      ? createPinMarker({
-          map,
-          position: myPos,
-          title: "Your location",
-          icon: buildPinIcon({
-            background: USER_COLOR,
-            borderColor: "#ffffff",
-            scale: 0.72,
-          }),
-          zIndex: 10,
-        })
-      : null;
-
     clearPolyline(routeLineUnderlayRef.current);
     clearPolyline(routeLineRef.current);
     routeLineUnderlayRef.current = null;
@@ -390,13 +375,40 @@ export default function RouteMap({
     currentStopIndex,
     endpoints,
     isMapReady,
-    myPos,
     routeCoords,
     routeStatus,
     showRoutePath,
     spreadOverlappingStops,
     stops,
   ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) return;
+
+    if (!myPos) {
+      clearMarker(meMarkerRef.current);
+      meMarkerRef.current = null;
+      return;
+    }
+
+    if (meMarkerRef.current) {
+      meMarkerRef.current.setPosition(myPos);
+      return;
+    }
+
+    meMarkerRef.current = createPinMarker({
+      map,
+      position: myPos,
+      title: "Your location",
+      icon: buildPinIcon({
+        background: USER_COLOR,
+        borderColor: "#ffffff",
+        scale: 0.72,
+      }),
+      zIndex: 10,
+    });
+  }, [isMapReady, myPos]);
 
   useEffect(() => {
     const map = mapRef.current;
