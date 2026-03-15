@@ -245,6 +245,7 @@ const FOLLOW_ALONG_ORIGIN_FALLBACK_SUBTITLE = "Location detected";
 const PERSONA_KEYS: Array<Exclude<Persona, "custom">> = ["adult", "preteen", "ghost"];
 const CUSTOM_NARRATOR_MAX_CHARS = 500;
 const DEFAULT_STOP_IMAGE = "/images/salem/placeholder.png";
+const LANDING_VIDEO_MAX_PLAYS = 4;
 const WALK_DISCOVERY_STORAGE_PREFIX = "wandrful-walk-discovery";
 const CITY_META: Record<CityOption, { label: string; center: { lat: number; lng: number } }> = {
   salem: { label: "Salem", center: { lat: 42.5195, lng: -70.8967 } },
@@ -656,6 +657,7 @@ const jamCurrentStopRef = useRef<number | null>(null);
 const previousStepRef = useRef<FlowStep>("landing");
 const scriptModalCloseTimeoutRef = useRef<number | null>(null);
 const followAlongSessionRef = useRef(0);
+const landingVideoRef = useRef<HTMLVideoElement | null>(null);
 const followAlongLastPositionRef = useRef<{
   lat: number;
   lng: number;
@@ -3084,6 +3086,48 @@ async function startStopNarration() {
   }, [step]);
 
   useEffect(() => {
+    if (step !== "landing") return;
+
+    const video = landingVideoRef.current;
+    if (!video) return;
+
+    let playCount = 1;
+
+    video.pause();
+    video.currentTime = 0;
+
+    const startPlayback = () => {
+      void video.play().catch(() => {
+        // Ignore autoplay interruptions; the video stays muted and decorative.
+      });
+    };
+
+    const freezeOnLastFrame = () => {
+      if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+      video.currentTime = Math.max(0, video.duration - 0.05);
+      video.pause();
+    };
+
+    const onEnded = () => {
+      if (playCount >= LANDING_VIDEO_MAX_PLAYS) {
+        freezeOnLastFrame();
+        return;
+      }
+
+      playCount += 1;
+      video.currentTime = 0;
+      startPlayback();
+    };
+
+    video.addEventListener("ended", onEnded);
+    startPlayback();
+
+    return () => {
+      video.removeEventListener("ended", onEnded);
+    };
+  }, [step]);
+
+  useEffect(() => {
     if (!isLandingJourneyModalOpen) return;
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -3225,9 +3269,9 @@ async function startStopNarration() {
         >
           <section className={styles.landingImagePane}>
             <video
+              ref={landingVideoRef}
               className={styles.landingVideo}
               autoPlay
-              loop
               muted
               playsInline
               preload="auto"
