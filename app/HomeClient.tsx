@@ -33,6 +33,15 @@ import {
   WALK_DISCOVERY_FETCH_MIN_MOVE_METERS,
   WALK_DISCOVERY_MIN_DISTANCE_FROM_ACCEPTED_METERS,
 } from "@/lib/walkDiscovery";
+import {
+  createJamPerfTracker,
+  isJamDocumentVisible,
+  shouldCommitGeoUpdate,
+  shouldRunJamGeoTracking,
+  shouldRunWalkDiscoveryWork,
+  type GeoCommitSample,
+  type JamVisibilityState,
+} from "@/lib/jamRuntime";
 import dynamic from "next/dynamic";
 import styles from "./HomeClient.module.css";
 
@@ -247,6 +256,8 @@ const CUSTOM_NARRATOR_MAX_CHARS = 500;
 const DEFAULT_STOP_IMAGE = "/images/salem/placeholder.png";
 const LANDING_VIDEO_MAX_PLAYS = 4;
 const WALK_DISCOVERY_STORAGE_PREFIX = "wandrful-walk-discovery";
+const DISTANCE_TO_STOP_EPSILON_METERS = 5;
+const FOLLOW_ALONG_PROGRESS_EPSILON_METERS = 20;
 const CITY_META: Record<CityOption, { label: string; center: { lat: number; lng: number } }> = {
   salem: { label: "Salem", center: { lat: 42.5195, lng: -70.8967 } },
   boston: { label: "Boston", center: { lat: 42.3601, lng: -71.0589 } },
@@ -590,83 +601,100 @@ function saveWalkDiscoveryCooldowns(jamId: string, cooldowns: Record<string, num
   }
 }
 
+function hasMeaningfulNumberChange(
+  previous: number | null,
+  next: number | null,
+  epsilon: number
+) {
+  if (previous === null || next === null) return previous !== next;
+  return Math.abs(previous - next) >= epsilon;
+}
+
 export default function HomeClient() {
   const [distanceToStopM, setDistanceToStopM] = useState<number | null>(null);
-const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
-const audioRef = useRef<HTMLAudioElement | null>(null);
-const [isPlaying, setIsPlaying] = useState(false);
-const [audioTime, setAudioTime] = useState(0);
-const [audioDuration, setAudioDuration] = useState(0);
-const [listenCount, setListenCount] = useState(0);
-const [isLandingJourneyModalOpen, setIsLandingJourneyModalOpen] = useState(false);
-const [selectedRouteId, setSelectedRouteId] = useState<RouteDef["id"] | null>(null);
-const [isCreateOwnSelected, setIsCreateOwnSelected] = useState(false);
-const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
-const [customNarratorGuidance, setCustomNarratorGuidance] = useState("");
-const [pickDurationPage, setPickDurationPage] = useState<PickDurationPage>("routes");
-const [narratorFlowSource, setNarratorFlowSource] = useState<NarratorFlowSource>(null);
-const [selectedCity, setSelectedCity] = useState<CityOption>("salem");
-const [instantDiscoveryCity, setInstantDiscoveryCity] = useState<string | null>(null);
-const [builderSelectedStops, setBuilderSelectedStops] = useState<CustomMixStop[]>([]);
-const [searchInput, setSearchInput] = useState("");
-const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
-const [searchCandidates, setSearchCandidates] = useState<CustomMixStop[]>([]);
-const [searchError, setSearchError] = useState<string | null>(null);
+  const [proximity, setProximity] = useState<"far" | "near" | "arrived">("far");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [audioTime, setAudioTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [listenCount, setListenCount] = useState(0);
+  const [isLandingJourneyModalOpen, setIsLandingJourneyModalOpen] = useState(false);
+  const [selectedRouteId, setSelectedRouteId] = useState<RouteDef["id"] | null>(null);
+  const [isCreateOwnSelected, setIsCreateOwnSelected] = useState(false);
+  const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
+  const [customNarratorGuidance, setCustomNarratorGuidance] = useState("");
+  const [pickDurationPage, setPickDurationPage] = useState<PickDurationPage>("routes");
+  const [narratorFlowSource, setNarratorFlowSource] = useState<NarratorFlowSource>(null);
+  const [selectedCity, setSelectedCity] = useState<CityOption>("salem");
+  const [instantDiscoveryCity, setInstantDiscoveryCity] = useState<string | null>(null);
+  const [builderSelectedStops, setBuilderSelectedStops] = useState<CustomMixStop[]>([]);
+  const [searchInput, setSearchInput] = useState("");
+  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
+  const [searchCandidates, setSearchCandidates] = useState<CustomMixStop[]>([]);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [isGeneratingMix, setIsGeneratingMix] = useState(false);
   const [pendingPresetRouteAction, setPendingPresetRouteAction] = useState<{
     routeId: string;
     mode: "start" | "regenerate";
   } | null>(null);
-const [generationJobId, setGenerationJobId] = useState<string | null>(null);
-const [generationJobKind, setGenerationJobKind] = useState<GenerationJobKind | null>(null);
-const [generationProgress, setGenerationProgress] = useState(0);
-const [generationStatusLabel, setGenerationStatusLabel] = useState(GENERATION_STATUS_LABELS.queued);
-const [generationMessage, setGenerationMessage] = useState("Queued");
-const [landingTheme, setLandingTheme] = useState<LandingTheme>("dark");
-const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
-const [didInstagramAvatarFail, setDidInstagramAvatarFail] = useState(false);
-const [followAlongOrigin, setFollowAlongOrigin] = useState<FollowAlongLocation | null>(null);
-const [followAlongDestinationQuery, setFollowAlongDestinationQuery] = useState("");
-const [followAlongDestinationResults, setFollowAlongDestinationResults] = useState<
-  FollowAlongSearchResponse["results"]
->([]);
-const [followAlongDestination, setFollowAlongDestination] = useState<FollowAlongLocation | null>(null);
-const [followAlongPreview, setFollowAlongPreview] = useState<FollowAlongPreviewResponse | null>(null);
-const [isSearchingFollowAlongDestinations, setIsSearchingFollowAlongDestinations] = useState(false);
-const [isLoadingFollowAlongPreview, setIsLoadingFollowAlongPreview] = useState(false);
-const [isCreatingFollowAlong, setIsCreatingFollowAlong] = useState(false);
-const [followAlongRouteProgressM, setFollowAlongRouteProgressM] = useState<number | null>(null);
-const [followAlongOffRoute, setFollowAlongOffRoute] = useState(false);
-const [followAlongStatusCopy, setFollowAlongStatusCopy] = useState("Waiting for route preview");
-const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
-const [isScriptModalClosing, setIsScriptModalClosing] = useState(false);
-const [isGeneratingScriptForModal, setIsGeneratingScriptForModal] = useState(false);
-const [isGeneratingAudioForCurrentStop, setIsGeneratingAudioForCurrentStop] = useState(false);
-const [isGeneratingNearbyStory, setIsGeneratingNearbyStory] = useState(false);
-const [isResolvingNearbyGeo, setIsResolvingNearbyGeo] = useState(false);
-const [isStartingWalkDiscovery, setIsStartingWalkDiscovery] = useState(false);
-const [walkDiscoverySuggestion, setWalkDiscoverySuggestion] = useState<WalkDiscoverySuggestion | null>(null);
-const [isResolvingWalkDiscoverySuggestion, setIsResolvingWalkDiscoverySuggestion] = useState(false);
-const [isAcceptingWalkDiscoverySuggestion, setIsAcceptingWalkDiscoverySuggestion] = useState(false);
-const [isGeneratingWalkDiscoveryAcceptedStopAssets, setIsGeneratingWalkDiscoveryAcceptedStopAssets] = useState(false);
-const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
-const [isEditingStopsFromWalk, setIsEditingStopsFromWalk] = useState(false);
-const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
-const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null>(null);
-const jamCurrentStopRef = useRef<number | null>(null);
-const previousStepRef = useRef<FlowStep>("landing");
-const scriptModalCloseTimeoutRef = useRef<number | null>(null);
-const followAlongSessionRef = useRef(0);
-const landingVideoRef = useRef<HTMLVideoElement | null>(null);
-const followAlongLastPositionRef = useRef<{
-  lat: number;
-  lng: number;
-  timestamp: number;
-} | null>(null);
-const walkDiscoveryRecentPositionsRef = useRef<WalkDiscoveryPositionSample[]>([]);
-const walkDiscoveryLastFetchPosRef = useRef<{ lat: number; lng: number } | null>(null);
-const walkDiscoveryCooldownsRef = useRef<Record<string, number>>({});
-const walkDiscoveryRequestIdRef = useRef(0);
+  const [generationJobId, setGenerationJobId] = useState<string | null>(null);
+  const [generationJobKind, setGenerationJobKind] = useState<GenerationJobKind | null>(null);
+  const [generationProgress, setGenerationProgress] = useState(0);
+  const [generationStatusLabel, setGenerationStatusLabel] = useState(GENERATION_STATUS_LABELS.queued);
+  const [generationMessage, setGenerationMessage] = useState("Queued");
+  const [landingTheme, setLandingTheme] = useState<LandingTheme>("dark");
+  const [customRoute, setCustomRoute] = useState<RouteDef | null>(null);
+  const [didInstagramAvatarFail, setDidInstagramAvatarFail] = useState(false);
+  const [followAlongOrigin, setFollowAlongOrigin] = useState<FollowAlongLocation | null>(null);
+  const [followAlongDestinationQuery, setFollowAlongDestinationQuery] = useState("");
+  const [followAlongDestinationResults, setFollowAlongDestinationResults] = useState<
+    FollowAlongSearchResponse["results"]
+  >([]);
+  const [followAlongDestination, setFollowAlongDestination] = useState<FollowAlongLocation | null>(null);
+  const [followAlongPreview, setFollowAlongPreview] = useState<FollowAlongPreviewResponse | null>(null);
+  const [isSearchingFollowAlongDestinations, setIsSearchingFollowAlongDestinations] = useState(false);
+  const [isLoadingFollowAlongPreview, setIsLoadingFollowAlongPreview] = useState(false);
+  const [isCreatingFollowAlong, setIsCreatingFollowAlong] = useState(false);
+  const [followAlongRouteProgressM, setFollowAlongRouteProgressM] = useState<number | null>(null);
+  const [followAlongOffRoute, setFollowAlongOffRoute] = useState(false);
+  const [followAlongStatusCopy, setFollowAlongStatusCopy] = useState("Waiting for route preview");
+  const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
+  const [isScriptModalClosing, setIsScriptModalClosing] = useState(false);
+  const [isGeneratingScriptForModal, setIsGeneratingScriptForModal] = useState(false);
+  const [isGeneratingAudioForCurrentStop, setIsGeneratingAudioForCurrentStop] = useState(false);
+  const [isGeneratingNearbyStory, setIsGeneratingNearbyStory] = useState(false);
+  const [isResolvingNearbyGeo, setIsResolvingNearbyGeo] = useState(false);
+  const [isStartingWalkDiscovery, setIsStartingWalkDiscovery] = useState(false);
+  const [walkDiscoverySuggestion, setWalkDiscoverySuggestion] = useState<WalkDiscoverySuggestion | null>(null);
+  const [isResolvingWalkDiscoverySuggestion, setIsResolvingWalkDiscoverySuggestion] = useState(false);
+  const [isAcceptingWalkDiscoverySuggestion, setIsAcceptingWalkDiscoverySuggestion] = useState(false);
+  const [isGeneratingWalkDiscoveryAcceptedStopAssets, setIsGeneratingWalkDiscoveryAcceptedStopAssets] = useState(false);
+  const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
+  const [isEditingStopsFromWalk, setIsEditingStopsFromWalk] = useState(false);
+  const [activeStopIndex, setActiveStopIndex] = useState<number | null>(null);
+  const [pendingAutoplayStopId, setPendingAutoplayStopId] = useState<string | null>(null);
+  const jamCurrentStopRef = useRef<number | null>(null);
+  const previousStepRef = useRef<FlowStep>("landing");
+  const scriptModalCloseTimeoutRef = useRef<number | null>(null);
+  const followAlongSessionRef = useRef(0);
+  const landingVideoRef = useRef<HTMLVideoElement | null>(null);
+  const followAlongLastPositionRef = useRef<{
+    lat: number;
+    lng: number;
+    timestamp: number;
+  } | null>(null);
+  const walkDiscoveryRecentPositionsRef = useRef<WalkDiscoveryPositionSample[]>([]);
+  const walkDiscoveryLastFetchPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  const walkDiscoveryCooldownsRef = useRef<Record<string, number>>({});
+  const walkDiscoveryRequestIdRef = useRef(0);
+  const perfTrackerRef = useRef(createJamPerfTracker());
+  const lastCommittedGeoRef = useRef<GeoCommitSample | null>(null);
+  const latestRawGeoRef = useRef<GeoCommitSample | null>(null);
+  const lastDistanceToStopMRef = useRef<number | null>(null);
+  const lastProximityRef = useRef<"far" | "near" | "arrived">("far");
+  const lastFollowAlongRouteProgressMRef = useRef<number | null>(null);
+  const lastFollowAlongOffRouteRef = useRef(false);
+  const previousVisibilityRef = useRef<JamVisibilityState>("visible");
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -676,6 +704,9 @@ const walkDiscoveryRequestIdRef = useRef(0);
   const countedJamOpenRef = useRef<Set<string>>(new Set());
 
   const [step, setStep] = useState<FlowStep>("landing");
+  const [documentVisibility, setDocumentVisibility] = useState<JamVisibilityState>(() =>
+    typeof document === "undefined" ? "visible" : document.visibilityState
+  );
   const toggleLandingTheme = useCallback(() => {
     setLandingTheme((currentTheme) => (currentTheme === "dark" ? "light" : "dark"));
   }, []);
@@ -687,6 +718,7 @@ const walkDiscoveryRequestIdRef = useRef(0);
 
   const jamIdFromUrl = searchParams.get("jam");
   const debugStepFromUrl = searchParams.get("debugStep");
+  const debugPerfEnabled = searchParams.get("debugPerf") === "1";
   const showLandingThemeToggle = true;
   const nextLandingTheme = landingTheme === "dark" ? "light" : "dark";
 
@@ -713,6 +745,8 @@ const walkDiscoveryRequestIdRef = useRef(0);
     return (currentStop.audio[persona] || "").trim();
   }, [currentStop, persona]);
   const hasCurrentAudio = currentStopAudio.length > 0;
+  const jamTrackingMode = step === "walk" ? "walk" : step === "followAlongDrive" ? "followAlongDrive" : "idle";
+  const isJamVisible = isJamDocumentVisible(documentVisibility);
   const customRouteCity = instantDiscoveryCity ?? route?.city ?? "nearby";
   const routeMilesLabel = useMemo(() => {
     if (!route) return "";
@@ -760,6 +794,70 @@ const walkDiscoveryRequestIdRef = useRef(0);
     activePresetWalkRouteId !== null &&
     pendingPresetRouteAction?.routeId === activePresetWalkRouteId &&
     pendingPresetRouteAction.mode === "regenerate";
+  const commitDistanceToStop = useCallback((nextDistance: number | null) => {
+    if (!hasMeaningfulNumberChange(lastDistanceToStopMRef.current, nextDistance, DISTANCE_TO_STOP_EPSILON_METERS)) {
+      return false;
+    }
+    lastDistanceToStopMRef.current = nextDistance;
+    setDistanceToStopM(nextDistance);
+    return true;
+  }, []);
+  const commitProximity = useCallback((nextProximity: "far" | "near" | "arrived") => {
+    if (lastProximityRef.current === nextProximity) return false;
+    lastProximityRef.current = nextProximity;
+    setProximity(nextProximity);
+    return true;
+  }, []);
+  const commitFollowAlongRouteProgress = useCallback((nextProgress: number | null) => {
+    if (
+      !hasMeaningfulNumberChange(
+        lastFollowAlongRouteProgressMRef.current,
+        nextProgress,
+        FOLLOW_ALONG_PROGRESS_EPSILON_METERS
+      )
+    ) {
+      return false;
+    }
+    lastFollowAlongRouteProgressMRef.current = nextProgress;
+    setFollowAlongRouteProgressM(nextProgress);
+    return true;
+  }, []);
+  const commitFollowAlongOffRoute = useCallback((nextOffRoute: boolean) => {
+    if (lastFollowAlongOffRouteRef.current === nextOffRoute) return false;
+    lastFollowAlongOffRouteRef.current = nextOffRoute;
+    setFollowAlongOffRoute(nextOffRoute);
+    return true;
+  }, []);
+  const commitGeoPosition = useCallback(
+    (
+      coords: { lat: number; lng: number },
+      options?: {
+        force?: boolean;
+        timestamp?: number;
+      }
+    ) => {
+      const sample: GeoCommitSample = {
+        lat: coords.lat,
+        lng: coords.lng,
+        timestamp: options?.timestamp ?? Date.now(),
+      };
+      latestRawGeoRef.current = sample;
+      const decision = options?.force
+        ? { shouldCommit: true }
+        : shouldCommitGeoUpdate(lastCommittedGeoRef.current, sample);
+      if (!decision.shouldCommit) return false;
+      lastCommittedGeoRef.current = sample;
+      perfTrackerRef.current.count("react_geo_commits");
+      setMyPos((current) => {
+        if (current && current.lat === coords.lat && current.lng === coords.lng) {
+          return current;
+        }
+        return coords;
+      });
+      return true;
+    },
+    []
+  );
   const isAiPersona = (personaKey: Persona) => personaCatalog[personaKey].displayName.startsWith("AI");
   const usesNarratorIcon = (personaKey: Persona) => personaKey === "custom" || isAiPersona(personaKey);
   const customNarratorEnabled = isCustomNarratorFlowSource(narratorFlowSource, isPresetWalkRoute);
@@ -877,6 +975,28 @@ const walkDiscoveryRequestIdRef = useRef(0);
           destination: followAlongPreview?.destination ?? followAlongDestination,
         }
       : null;
+
+  useEffect(() => {
+    perfTrackerRef.current.setEnabled(debugPerfEnabled);
+    return () => {
+      perfTrackerRef.current.flush("home-client-unmount");
+    };
+  }, [debugPerfEnabled]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const syncVisibility = () => {
+      const nextVisibility = document.visibilityState;
+      setDocumentVisibility(nextVisibility);
+      perfTrackerRef.current.flush(`visibility:${nextVisibility}`);
+    };
+
+    syncVisibility();
+    document.addEventListener("visibilitychange", syncVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", syncVisibility);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1114,8 +1234,13 @@ const walkDiscoveryRequestIdRef = useRef(0);
     setFollowAlongDestinationResults([]);
     setFollowAlongDestination(null);
     setFollowAlongPreview(null);
-    setFollowAlongOffRoute(false);
-    setFollowAlongRouteProgressM(null);
+    lastCommittedGeoRef.current = null;
+    latestRawGeoRef.current = null;
+    followAlongLastPositionRef.current = null;
+    commitFollowAlongOffRoute(false);
+    commitFollowAlongRouteProgress(null);
+    commitDistanceToStop(null);
+    commitProximity("far");
     setFollowAlongStatusCopy("Waiting for route preview");
     walkDiscoveryRecentPositionsRef.current = [];
     walkDiscoveryLastFetchPosRef.current = null;
@@ -1229,7 +1354,7 @@ const walkDiscoveryRequestIdRef = useRef(0);
     try {
       const coords = await requestCurrentGeoPosition();
       if (sessionId !== followAlongSessionRef.current) return;
-      setMyPos(coords);
+      commitGeoPosition(coords, { force: true });
       setGeoAllowed(true);
       void resolveFollowAlongOrigin(coords, sessionId);
     } catch (e) {
@@ -1396,6 +1521,11 @@ const walkDiscoveryRequestIdRef = useRef(0);
   }
 
   const loadResolvedRoute = useCallback(async (routeRef: string) => {
+    const startedAt =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    perfTrackerRef.current.count("route_reloads");
     const customRouteId = getCustomRouteId(routeRef);
     const isCustom = Boolean(customRouteId);
     const presetRoute = getRouteById(routeRef);
@@ -1515,6 +1645,12 @@ const walkDiscoveryRequestIdRef = useRef(0);
       setCustomNarratorGuidance("");
     }
     setCustomRoute(nextRoute);
+    perfTrackerRef.current.timing(
+      "route_reload_ms",
+      (typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now()) - startedAt
+    );
     return nextRoute;
   }, [selectedCity, jam?.persona, instantDiscoveryCity]);
 
@@ -1622,7 +1758,9 @@ async function startStopNarration() {
   }, [customRouteCity, loadResolvedRoute, persona]);
 
   const refreshWalkDiscoverySuggestion = useCallback(async (force = false) => {
+    perfTrackerRef.current.count("walk_discovery_refresh_attempts");
     if (!jam?.id || !isWalkDiscoveryRoute) return;
+    if (!shouldRunWalkDiscoveryWork(documentVisibility, isWalkDiscoveryRoute)) return;
     if (
       isResolvingWalkDiscoverySuggestion ||
       isAcceptingWalkDiscoverySuggestion ||
@@ -1631,11 +1769,13 @@ async function startStopNarration() {
       return;
     }
 
-    let coords = myPos;
+    let coords = latestRawGeoRef.current
+      ? { lat: latestRawGeoRef.current.lat, lng: latestRawGeoRef.current.lng }
+      : myPos;
     if (!coords) {
       try {
         coords = await requestCurrentGeoPosition();
-        setMyPos(coords);
+        commitGeoPosition(coords, { force: true });
         setGeoAllowed(true);
       } catch {
         setGeoAllowed(false);
@@ -1708,6 +1848,7 @@ async function startStopNarration() {
   }, [
     jam?.id,
     isWalkDiscoveryRoute,
+    documentVisibility,
     isResolvingWalkDiscoverySuggestion,
     isAcceptingWalkDiscoverySuggestion,
     isGeneratingWalkDiscoveryAcceptedStopAssets,
@@ -1738,7 +1879,7 @@ async function startStopNarration() {
       if (!coords) {
         setIsResolvingNearbyGeo(true);
         coords = await requestCurrentGeoPosition();
-        setMyPos(coords);
+        commitGeoPosition(coords, { force: true });
         setGeoAllowed(true);
       }
 
@@ -1853,7 +1994,7 @@ async function startStopNarration() {
       if (!coords) {
         setIsResolvingNearbyGeo(true);
         coords = await requestCurrentGeoPosition();
-        setMyPos(coords);
+        commitGeoPosition(coords, { force: true });
         setGeoAllowed(true);
       }
 
@@ -2676,6 +2817,16 @@ async function startStopNarration() {
   }, [jam?.id]);
 
   useEffect(() => {
+    lastCommittedGeoRef.current = null;
+    latestRawGeoRef.current = null;
+    followAlongLastPositionRef.current = null;
+    lastDistanceToStopMRef.current = null;
+    lastProximityRef.current = "far";
+    lastFollowAlongRouteProgressMRef.current = null;
+    lastFollowAlongOffRouteRef.current = false;
+  }, [jam?.id]);
+
+  useEffect(() => {
     if (step === "walk" && isWalkDiscoveryRoute) return;
     setWalkDiscoverySuggestion(null);
   }, [step, isWalkDiscoveryRoute]);
@@ -2691,59 +2842,74 @@ async function startStopNarration() {
 
 // ---------- watchPosition ----------
   useEffect(() => {
-  if (step !== "walk") return;
-  if (!navigator.geolocation) return;
+    if (step !== "walk") return;
+    if (!shouldRunJamGeoTracking(jamTrackingMode, documentVisibility)) return;
+    if (!navigator.geolocation) return;
 
-  // If user never enabled geo, don't nag; banner will stay hidden.
-  let watchId: number | null = null;
+    let watchId: number | null = null;
 
-  try {
-    watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        const nextPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        setMyPos(nextPos);
-        setGeoAllowed(true);
-        walkDiscoveryRecentPositionsRef.current = appendWalkDiscoveryPosition(
-          walkDiscoveryRecentPositionsRef.current,
-          {
-            ...nextPos,
-            timestamp: pos.timestamp,
+    try {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          perfTrackerRef.current.count("walk_geo_ticks");
+          const nextPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          commitGeoPosition(nextPos, { timestamp: pos.timestamp });
+          setGeoAllowed(true);
+          walkDiscoveryRecentPositionsRef.current = appendWalkDiscoveryPosition(
+            walkDiscoveryRecentPositionsRef.current,
+            {
+              ...nextPos,
+              timestamp: pos.timestamp,
+            }
+          );
+
+          if (!currentStop) {
+            commitDistanceToStop(null);
+            commitProximity("far");
+          } else {
+            const meters = haversineMeters(nextPos.lat, nextPos.lng, currentStop.lat, currentStop.lng);
+            commitDistanceToStop(meters);
+
+            if (meters <= 35) commitProximity("arrived");
+            else if (meters <= 80) commitProximity("near");
+            else commitProximity("far");
           }
-        );
 
-        if (!currentStop) {
-          setDistanceToStopM(null);
-          setProximity("far");
-        } else {
-          const meters = haversineMeters(nextPos.lat, nextPos.lng, currentStop.lat, currentStop.lng);
-          setDistanceToStopM(meters);
+          if (
+            shouldRunWalkDiscoveryWork(documentVisibility, isWalkDiscoveryRoute) &&
+            !walkDiscoverySuggestion
+          ) {
+            void refreshWalkDiscoverySuggestion(false);
+          }
+        },
+        () => {
+          setGeoAllowed(false);
+        },
+        { enableHighAccuracy: true, maximumAge: 3000, timeout: 8000 }
+      );
+    } catch {
+      // ignore
+    }
 
-          // Thresholds (tweak later)
-          if (meters <= 35) setProximity("arrived");
-          else if (meters <= 80) setProximity("near");
-          else setProximity("far");
-        }
-
-        if (isWalkDiscoveryRoute && !walkDiscoverySuggestion) {
-          void refreshWalkDiscoverySuggestion(false);
-        }
-      },
-      () => {
-        setGeoAllowed(false);
-      },
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 8000 }
-    );
-  } catch {
-    // ignore
-  }
-
-  return () => {
-    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-  };
-}, [step, currentStop, isWalkDiscoveryRoute, walkDiscoverySuggestion, refreshWalkDiscoverySuggestion]);
+    return () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [
+    step,
+    jamTrackingMode,
+    documentVisibility,
+    currentStop,
+    isWalkDiscoveryRoute,
+    walkDiscoverySuggestion,
+    refreshWalkDiscoverySuggestion,
+    commitGeoPosition,
+    commitDistanceToStop,
+    commitProximity,
+  ]);
 
   useEffect(() => {
     if (step !== "followAlongDrive") return;
+    if (!shouldRunJamGeoTracking(jamTrackingMode, documentVisibility)) return;
     if (!route || route.experienceKind !== "follow_along") return;
     const routeCoords = route.routePathCoords ?? null;
     if (!routeCoords || routeCoords.length < 2) return;
@@ -2755,14 +2921,13 @@ async function startStopNarration() {
       nextPos: { lat: number; lng: number },
       speedMps: number | null
     ) => {
-      setMyPos(nextPos);
       setGeoAllowed(true);
 
       const progress = normalizeRouteProgress(nextPos, routeCoords);
-      setFollowAlongRouteProgressM(progress.distanceAlongMeters);
+      commitFollowAlongRouteProgress(progress.distanceAlongMeters);
 
       const isOffRoute = progress.distanceToRouteMeters > 180;
-      setFollowAlongOffRoute(isOffRoute);
+      commitFollowAlongOffRoute(isOffRoute);
       if (isOffRoute) {
         setFollowAlongStatusCopy("You drifted off route. Rejoin the route to resume stories.");
         return;
@@ -2782,7 +2947,7 @@ async function startStopNarration() {
         speedMps,
       });
 
-      setDistanceToStopM(
+      commitDistanceToStop(
         typeof trigger.aheadByMeters === "number" ? Math.max(0, trigger.aheadByMeters) : null
       );
       setFollowAlongStatusCopy(
@@ -2801,10 +2966,12 @@ async function startStopNarration() {
     try {
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
+          perfTrackerRef.current.count("follow_along_geo_ticks");
           const nextPos = {
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
           };
+          commitGeoPosition(nextPos, { timestamp: pos.timestamp });
           const last = followAlongLastPositionRef.current;
           let speedMps =
             typeof pos.coords.speed === "number" && Number.isFinite(pos.coords.speed)
@@ -2837,7 +3004,19 @@ async function startStopNarration() {
     return () => {
       if (watchId !== null) navigator.geolocation.clearWatch(watchId);
     };
-  }, [step, route, currentStopIndex, activeStopIndex, updateJam]);
+  }, [
+    step,
+    jamTrackingMode,
+    documentVisibility,
+    route,
+    currentStopIndex,
+    activeStopIndex,
+    updateJam,
+    commitGeoPosition,
+    commitDistanceToStop,
+    commitFollowAlongRouteProgress,
+    commitFollowAlongOffRoute,
+  ]);
 
   useEffect(() => {
     const el = audioRef.current;
@@ -2848,9 +3027,18 @@ async function startStopNarration() {
       setAudioDuration(Number.isFinite(el.duration) ? el.duration : 0);
       setAudioTime(el.currentTime || 0);
     };
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
-    const onEnded = () => setIsPlaying(false);
+    const onPlay = () => {
+      perfTrackerRef.current.count("audio_play_events");
+      setIsPlaying(true);
+    };
+    const onPause = () => {
+      perfTrackerRef.current.count("audio_pause_events");
+      setIsPlaying(false);
+    };
+    const onEnded = () => {
+      perfTrackerRef.current.count("audio_ended_events");
+      setIsPlaying(false);
+    };
 
     el.addEventListener("timeupdate", onTimeUpdate);
     el.addEventListener("loadedmetadata", onLoadedMeta);
@@ -2871,58 +3059,72 @@ async function startStopNarration() {
   }, [currentStop?.id, persona]);
 
   useEffect(() => {
-    if (step !== "followAlongDrive") return;
-    if (!route || route.experienceKind !== "follow_along") return;
-    const routeCoords = route.routePathCoords ?? null;
-    if (!routeCoords || routeCoords.length < 2) return;
+    const previousVisibility = previousVisibilityRef.current;
+    previousVisibilityRef.current = documentVisibility;
+    if (!isJamVisible || previousVisibility !== "hidden") return;
 
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== "visible") return;
+    if (step === "followAlongDrive" && route?.experienceKind === "follow_along") {
+      const routeCoords = route.routePathCoords ?? null;
+      if (!routeCoords || routeCoords.length < 2) return;
+
       void requestCurrentGeoPosition()
         .then((coords) => {
+          const timestamp = Date.now();
+          followAlongLastPositionRef.current = { ...coords, timestamp };
+          commitGeoPosition(coords, { force: true, timestamp });
           const progress = normalizeRouteProgress(coords, routeCoords);
-          setMyPos(coords);
-          setFollowAlongRouteProgressM(progress.distanceAlongMeters);
-          setFollowAlongOffRoute(progress.distanceToRouteMeters > 180);
+          commitFollowAlongRouteProgress(progress.distanceAlongMeters);
+          commitFollowAlongOffRoute(progress.distanceToRouteMeters > 180);
           setGeoAllowed(true);
         })
         .catch(() => {
           setGeoAllowed(false);
         });
-    };
+      return;
+    }
 
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [step, route]);
+    if (step !== "walk") return;
 
-  useEffect(() => {
-    if (step !== "walk" || !isWalkDiscoveryRoute || !jam?.id) return;
-
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== "visible") return;
-      setWalkDiscoverySuggestion(null);
-      walkDiscoveryLastFetchPosRef.current = null;
-      void requestCurrentGeoPosition()
-        .then((coords) => {
-          setMyPos(coords);
-          setGeoAllowed(true);
+    void requestCurrentGeoPosition()
+      .then((coords) => {
+        const timestamp = Date.now();
+        commitGeoPosition(coords, { force: true, timestamp });
+        setGeoAllowed(true);
+        if (currentStop) {
+          const meters = haversineMeters(coords.lat, coords.lng, currentStop.lat, currentStop.lng);
+          commitDistanceToStop(meters);
+          if (meters <= 35) commitProximity("arrived");
+          else if (meters <= 80) commitProximity("near");
+          else commitProximity("far");
+        }
+        if (shouldRunWalkDiscoveryWork(documentVisibility, isWalkDiscoveryRoute) && jam?.id) {
+          setWalkDiscoverySuggestion(null);
+          walkDiscoveryLastFetchPosRef.current = null;
           void refreshWalkDiscoverySuggestion(true);
-        })
-        .catch(() => {
-          setGeoAllowed(false);
-        });
-    };
-
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [step, isWalkDiscoveryRoute, jam?.id, refreshWalkDiscoverySuggestion]);
+        }
+      })
+      .catch(() => {
+        setGeoAllowed(false);
+      });
+  }, [
+    documentVisibility,
+    isJamVisible,
+    step,
+    route,
+    currentStop,
+    isWalkDiscoveryRoute,
+    jam?.id,
+    commitGeoPosition,
+    commitDistanceToStop,
+    commitProximity,
+    commitFollowAlongRouteProgress,
+    commitFollowAlongOffRoute,
+    refreshWalkDiscoverySuggestion,
+  ]);
 
   useEffect(() => {
     if (!walkDiscoverySuggestion) return;
+    if (!isJamVisible) return;
     if (
       !shouldExpireWalkDiscoverySuggestion({
         suggestion: walkDiscoverySuggestion,
@@ -2957,13 +3159,13 @@ async function startStopNarration() {
     return () => {
       window.clearTimeout(nextTick);
     };
-  }, [walkDiscoverySuggestion, myPos, persistWalkDiscoveryCooldown, refreshWalkDiscoverySuggestion]);
+  }, [walkDiscoverySuggestion, myPos, isJamVisible, persistWalkDiscoveryCooldown, refreshWalkDiscoverySuggestion]);
 
   useEffect(() => {
     if ((step === "walk" || step === "followAlongDrive") && currentStop) return;
-    setDistanceToStopM(null);
-    setProximity("far");
-  }, [step, currentStop]);
+    commitDistanceToStop(null);
+    commitProximity("far");
+  }, [step, currentStop, commitDistanceToStop, commitProximity]);
 
   useEffect(() => {
     if (!pendingAutoplayStopId) return;
@@ -2996,7 +3198,19 @@ async function startStopNarration() {
     setIsPlaying(false);
     setAudioTime(0);
     setAudioDuration(0);
-  }, [step, route?.id, route?.experienceKind]);
+    commitDistanceToStop(null);
+    commitProximity("far");
+    commitFollowAlongRouteProgress(null);
+    commitFollowAlongOffRoute(false);
+  }, [
+    step,
+    route?.id,
+    route?.experienceKind,
+    commitDistanceToStop,
+    commitProximity,
+    commitFollowAlongRouteProgress,
+    commitFollowAlongOffRoute,
+  ]);
 
   useEffect(() => {
     if (step !== "pickDuration") return;
@@ -3067,7 +3281,7 @@ async function startStopNarration() {
     void requestCurrentGeoPosition()
       .then((coords) => {
         if (cancelled) return;
-        setMyPos(coords);
+        commitGeoPosition(coords, { force: true });
         setGeoAllowed(true);
       })
       .catch(() => {
@@ -3078,7 +3292,7 @@ async function startStopNarration() {
     return () => {
       cancelled = true;
     };
-  }, [step, myPos]);
+  }, [step, myPos, commitGeoPosition]);
 
   useEffect(() => {
     if (!["landing", "pickDuration", "buildMix", "followAlongSetup", "generating", "walk", "followAlongDrive"].includes(step)) return;
@@ -4779,7 +4993,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                           >
                             {shouldShowInstagramStoryAvatar ? (
                               <Image
-                                src={instagramStoryByAvatarUrl}
+                                src={instagramStoryByAvatarUrl || DEFAULT_STOP_IMAGE}
                                 alt={`${instagramStoryByLabel} avatar`}
                                 fill
                                 unoptimized
@@ -4801,7 +5015,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                           <div className={styles.walkNarratorAvatarWrap}>
                             {shouldShowInstagramStoryAvatar ? (
                               <Image
-                                src={instagramStoryByAvatarUrl}
+                                src={instagramStoryByAvatarUrl || DEFAULT_STOP_IMAGE}
                                 alt={`${instagramStoryByLabel} avatar`}
                                 fill
                                 unoptimized
