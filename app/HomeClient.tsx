@@ -289,6 +289,7 @@ const DEFAULT_NEARBY_STORY_ENABLED = ["1", "true", "yes", "on"].includes(
 const INSTAGRAM_IMPORT_ENABLED = ["1", "true", "yes", "on"].includes(
   (process.env.NEXT_PUBLIC_ENABLE_INSTAGRAM_IMPORT || "").trim().toLowerCase()
 );
+const TRUTHY_FLAG_VALUES = ["1", "true", "yes", "on"];
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -719,6 +720,9 @@ export default function HomeClient() {
   const jamIdFromUrl = searchParams.get("jam");
   const debugStepFromUrl = searchParams.get("debugStep");
   const debugPerfEnabled = searchParams.get("debugPerf") === "1";
+  const showPresetWalkRefresh = TRUTHY_FLAG_VALUES.includes(
+    (searchParams.get("showRefresh") || "").trim().toLowerCase()
+  );
   const showLandingThemeToggle = true;
   const nextLandingTheme = landingTheme === "dark" ? "light" : "dark";
 
@@ -5121,7 +5125,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                   </button>
                 ) : null}
 
-                {activePresetWalkRouteId && (
+                {activePresetWalkRouteId && showPresetWalkRefresh && (
                   <button
                     className={styles.pillButton}
                     type="button"
