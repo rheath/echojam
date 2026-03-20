@@ -3,11 +3,15 @@ type Persona = "adult" | "preteen" | "ghost";
 type PresetCity = "salem" | "boston" | "concord" | "nyc";
 type PresetRoutePricingStatus = "free" | "paid" | "tbd";
 type PresetContentPriority = "default" | "history_first";
+type PresetNarrationBeat = "overview" | "hook" | "reveal" | "contrast" | "payoff";
+type PresetTtsVoice = "alloy" | "nova" | "shimmer" | "onyx";
 
 const PERSONAS = ["adult", "preteen", "ghost"] as const satisfies readonly Persona[];
 const CITIES = ["salem", "boston", "concord", "nyc"] as const satisfies readonly PresetCity[];
 const PRICING_STATUSES = ["free", "paid", "tbd"] as const satisfies readonly PresetRoutePricingStatus[];
 const CONTENT_PRIORITIES = ["default", "history_first"] as const satisfies readonly PresetContentPriority[];
+const NARRATION_BEATS = ["overview", "hook", "reveal", "contrast", "payoff"] as const satisfies readonly PresetNarrationBeat[];
+const PRESET_TTS_VOICES = ["alloy", "nova", "shimmer", "onyx"] as const satisfies readonly PresetTtsVoice[];
 
 const NonEmptyTrimmedStringArraySchema = z.array(z.string().trim().min(1)).min(1);
 
@@ -35,12 +39,34 @@ const PresetRoutePricingSchema = z
     }
   });
 
+const PresetRouteVoiceSchema = z.object({
+  archetypeId: z.string().trim().min(1),
+  displayName: z.string().trim().min(1).optional(),
+  basePersona: z.enum(PERSONAS),
+  ttsVoice: z.enum(PRESET_TTS_VOICES).optional(),
+  tone: NonEmptyTrimmedStringArraySchema.optional(),
+  storyLens: z.string().trim().min(1).optional(),
+  transitionStyle: z.string().trim().min(1).optional(),
+  bannedPatterns: NonEmptyTrimmedStringArraySchema.optional(),
+  openerFamilies: NonEmptyTrimmedStringArraySchema.optional(),
+});
+
+const PresetStopNarrationSchema = z.object({
+  beat: z.enum(NARRATION_BEATS).optional(),
+  angle: z.string().trim().min(1).optional(),
+  factBullets: NonEmptyTrimmedStringArraySchema.optional(),
+  mustMention: NonEmptyTrimmedStringArraySchema.optional(),
+  sensoryTargets: NonEmptyTrimmedStringArraySchema.optional(),
+  contentPriority: z.enum(CONTENT_PRIORITIES).optional(),
+});
+
 const PresetStopSeedSchema = z.object({
   placeId: z.string().trim().min(1),
   title: z.string().trim().min(1).optional(),
   narratorGuidance: z.string().trim().min(1).optional(),
   mustMention: NonEmptyTrimmedStringArraySchema.optional(),
   factBullets: NonEmptyTrimmedStringArraySchema.optional(),
+  narration: PresetStopNarrationSchema.optional(),
 });
 
 const PresetRouteSeedSchema = z
@@ -53,11 +79,20 @@ const PresetRouteSeedSchema = z
     storyBy: z.string().trim().min(1).optional(),
     narratorGuidance: z.string().trim().min(1).optional(),
     contentPriority: z.enum(CONTENT_PRIORITIES).optional(),
+    voice: PresetRouteVoiceSchema.optional(),
     pricing: PresetRoutePricingSchema.optional(),
     stopPlaceIds: z.array(z.string().trim().min(1)).min(1).optional(),
     stops: z.array(PresetStopSeedSchema).min(1).optional(),
   })
   .superRefine((route, ctx) => {
+    if (route.voice && route.voice.basePersona !== route.defaultPersona) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["voice", "basePersona"],
+        message: "voice.basePersona must match defaultPersona in preset v1",
+      });
+    }
+
     const hasLegacyStopPlaceIds = Array.isArray(route.stopPlaceIds);
     const hasStops = Array.isArray(route.stops);
     if (hasLegacyStopPlaceIds === hasStops) {

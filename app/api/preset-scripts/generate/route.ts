@@ -3,15 +3,18 @@ import { createClient } from "@supabase/supabase-js";
 import { getRouteById, type Persona } from "@/app/content/salemRoutes";
 import { ensureCanonicalStopForPreset, upsertRouteStopMapping } from "@/lib/canonicalStops";
 import {
-  generateScriptWithOpenAI,
   getSwitchConfig,
   shouldRegenerateScript,
   toNullableTrimmed,
 } from "@/lib/mixGeneration";
 import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
 import {
+  attachPresetStopNarration,
+  generatePresetScriptWithOpenAI,
+  type PresetNarrationRouteInput,
+} from "@/lib/presetNarration";
+import {
   getPresetRouteStopAsset,
-  mergePresetNarratorGuidance,
   upsertPresetRouteStopAsset,
 } from "@/lib/presetRouteAssets";
 
@@ -29,6 +32,20 @@ function getAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+function toPresetNarrationRoute(route: NonNullable<ReturnType<typeof getRouteById>>): PresetNarrationRouteInput {
+  return {
+    id: route.id,
+    title: route.title,
+    description: route.description,
+    durationMinutes: route.durationMinutes,
+    defaultPersona: route.defaultPersona,
+    storyBy: route.storyBy ?? null,
+    narratorGuidance: route.narratorGuidance ?? null,
+    contentPriority: route.contentPriority ?? null,
+    voice: route.voice ?? null,
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
@@ -38,7 +55,10 @@ export async function POST(req: Request) {
     const route = getRouteById(body.routeId);
     if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
     const city = route.city ?? normalizePresetCity(body.city);
-    const stops = buildPresetStopsWithOverview(route.stops, city, route.contentPriority);
+    const stops = attachPresetStopNarration(
+      buildPresetStopsWithOverview(route.stops, city, route.contentPriority),
+      route.stops
+    );
     const stopIndex = stops.findIndex((s) => s.id === body.stopId);
     if (stopIndex < 0) return NextResponse.json({ error: "Unknown stop for preset route" }, { status: 404 });
 
@@ -67,25 +87,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ script: existingScript, reused: true });
     }
 
-    const generated = await generateScriptWithOpenAI(
+    const generated = await generatePresetScriptWithOpenAI(
       apiKey,
       city,
-      "walk",
-      route.durationMinutes || 30,
-      body.persona,
-      {
-        id: stop.id,
-        title: stop.title,
-        lat: stop.lat,
-        lng: stop.lng,
-        image: stop.image,
-        mustMention: stop.mustMention ?? null,
-        factBullets: stop.factBullets ?? null,
-        contentPriority: stop.contentPriority ?? route.contentPriority ?? null,
-      },
+      toPresetNarrationRoute(route),
+      stop,
       stopIndex,
       stops.length,
-      mergePresetNarratorGuidance(route.narratorGuidance, stop.narratorGuidance)
+      body.persona
     );
 
     const script = toNullableTrimmed(generated);

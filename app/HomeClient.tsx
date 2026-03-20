@@ -4162,9 +4162,8 @@ You choose where to go — each stop shapes what unfolds next.                  
               <h2 className={styles.pickHeading}>Create your journey</h2>
             </div>
 
-            <div className={styles.pickSectionLabel}>
-               
-              {builderSelectedStops.length} of {maxStopsForSelection || 0} stops selected  for {formatRouteMiles(selectedStopsDistanceMiles)}
+            <div className={`${styles.pickSectionLabel} ${styles.buildMixSummaryLabel}`}>
+              {builderSelectedStops.length} of {maxStopsForSelection || 0} stops selected for {formatRouteMiles(selectedStopsDistanceMiles)}
             </div>
             <div className={styles.pickRouteList}>
               {builderSelectedStops.length === 0 ? (
@@ -4180,7 +4179,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                   return (
                     <div
                       key={stop.id}
-                      className={`${styles.pickRouteRow} ${styles.pickRouteRowBuildMix} ${active ? styles.pickRouteRowSelected : ""}`}
+                      className={`${styles.pickRouteRow} ${styles.pickRouteRowBuildMix} ${styles.buildMixStopCard} ${active ? styles.pickRouteRowSelected : ""}`}
                     >
                       <div className={styles.pickRouteMain}>
                         <div className={styles.buildMixTitleRow}>
@@ -4223,33 +4222,32 @@ You choose where to go — each stop shapes what unfolds next.                  
                       </div>
                       <button
                         type="button"
-                        className={styles.pickRouteToggleButton}
+                        className={
+                          active
+                            ? `${styles.pickRouteToggleButton} ${styles.buildMixStopActionButton} ${styles.walkDiscoverySkipButton}`
+                            : `${styles.pickRouteToggleButton} ${styles.buildMixStopActionButton}`
+                        }
                         onClick={() => toggleBuilderStop(stop)}
                         aria-label={active ? `Remove ${stop.title}` : `Add ${stop.title}`}
                       >
-                        <div className={styles.pickRouteArrow}>
-                        <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                          {active ? (
-                            <Image
-                              src="/icons/x.svg"
-                              alt=""
-                              width={20}
-                              height={20}
-                              className={styles.pickRouteArrowIcon}
-                              aria-hidden="true"
-                            />
-                          ) : (
-                            <Image
-                              src="/icons/plus.svg"
-                              alt=""
-                              width={20}
-                              height={20}
-                              className={styles.pickRouteArrowIcon}
-                              aria-hidden="true"
-                            />
-                          )}
-                        </div>
-                        </div>
+                        {active ? (
+                          <Image
+                            src="/icons/x.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className={styles.walkDiscoverySkipIcon}
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <div className={`${styles.pickRouteArrow} ${styles.buildMixStopAction}`}>
+                            <div className={`${styles.pickRouteIconCircle} ${styles.buildMixStopActionCircle}`} aria-hidden="true">
+                              <svg viewBox="0 0 16 16" className={styles.buildMixPlusIcon} aria-hidden="true">
+                                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4" fill="currentColor" />
+                              </svg>
+                            </div>
+                          </div>
+                        )}
                       </button>
                     </div>
                   );
@@ -4257,26 +4255,38 @@ You choose where to go — each stop shapes what unfolds next.                  
               )}
             </div>
 
-            <div className={styles.buildMixLinkAddWrap}>
-              <div className={styles.buildMixSearchRow}>
-              <div className={styles.pickRouteTitle}>Start with a place</div> 
-                <div className={styles.buildMixSearchInputWrap}>
-                  <input
-                    type="text"
-                    value={searchInput}
-                    onChange={(e) => setSearchInput(e.target.value)}
-                    onKeyDown={handleBuildMixSearchKeyDown}
-                    enterKeyHint="search"
-                    className={styles.buildMixSearchInput}
-                    placeholder={`Search for a place`}
-                    aria-label="Search places"
-                  />
-                  <div className={styles.buildMixSearchActions}>
-                    {searchInput.trim().length > 0 && (
+            <div className={`${styles.buildMixLinkAddWrap} ${styles.buildMixSearchPanel}`}>
+              <div className={`${styles.buildMixSearchRow} ${styles.buildMixSearchRowPanel}`}>
+                <div className={`${styles.pickRouteTitle} ${styles.buildMixSearchPanelTitle}`}>Add a stop</div>
+                <div className={`${styles.buildMixSearchInputWrap} ${styles.buildMixSearchInputWrapPanel}`}>
+                  <button
+                    type="button"
+                    onClick={searchPlaces}
+                    disabled={isSearchingPlaces}
+                    className={`${styles.buildMixSearchActionButton} ${styles.buildMixSearchActionButtonPanel} ${styles.buildMixSearchActionButtonLeading}`}
+                    aria-label={isSearchingPlaces ? "Searching places" : "Search places"}
+                  >
+                    <svg viewBox="0 0 24 24" className={styles.buildMixSearchIcon} aria-hidden="true">
+                      <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                      <line x1="16.2" y1="16.2" x2="21" y2="21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                  <div className={styles.buildMixSearchInputShell}>
+                    <input
+                      type="text"
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onKeyDown={handleBuildMixSearchKeyDown}
+                      enterKeyHint="search"
+                      className={`${styles.buildMixSearchInput} ${styles.buildMixSearchInputPanel}`}
+                      placeholder={`Where do you want to go?`}
+                      aria-label="Search places"
+                    />
+                    <div className={`${styles.buildMixSearchActions} ${styles.buildMixSearchActionsPanel}`}>
                       <button
                         type="button"
                         onClick={clearBuildMixSearch}
-                        className={styles.buildMixSearchActionButton}
+                        className={`${styles.buildMixSearchActionButton} ${styles.buildMixSearchActionButtonPanel}`}
                         aria-label="Clear search"
                       >
                         <svg viewBox="0 0 24 24" className={styles.buildMixSearchClearIcon} aria-hidden="true">
@@ -4284,53 +4294,35 @@ You choose where to go — each stop shapes what unfolds next.                  
                           <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                         </svg>
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={searchPlaces}
-                      disabled={isSearchingPlaces}
-                      className={styles.buildMixSearchActionButton}
-                      aria-label={isSearchingPlaces ? "Searching places" : "Search places"}
-                    >
-                      <svg viewBox="0 0 24 24" className={styles.buildMixSearchIcon} aria-hidden="true">
-                        <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="2" />
-                        <line x1="16.2" y1="16.2" x2="21" y2="21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                      </svg>
-                    </button>
+                    </div>
                   </div>
                 </div>
               </div>
-              {searchError && <div className={styles.buildMixSearchError}>{searchError}</div>}
+              {searchError && <div className={`${styles.buildMixSearchError} ${styles.buildMixSearchPanelError}`}>{searchError}</div>}
               {searchInput.trim().length > 0 && availableSearchCandidates.length > 0 && (
-                <div className={styles.buildMixSearchDropdown}>
+                <div className={`${styles.buildMixSearchDropdown} ${styles.buildMixSearchDropdownLight}`}>
                   {availableSearchCandidates.map((candidate) => (
-                      <div
-                        key={candidate.id}
-                        className={styles.buildMixSearchDropdownRow}
+                    <div
+                      key={candidate.id}
+                      className={`${styles.buildMixSearchDropdownRow} ${styles.buildMixSearchDropdownRowLight}`}
+                    >
+                      <div className={styles.buildMixSearchDropdownTitle}>{candidate.title}</div>
+                      <button
+                        type="button"
+                        onClick={() => addSearchedCandidate(candidate)}
+                        className={`${styles.pickRouteToggleButton} ${styles.buildMixStopActionButton}`}
+                        aria-label={`Add ${candidate.title}`}
                       >
-                        <div className={styles.buildMixSearchDropdownTitle}>{candidate.title}</div>
-                        <button
-                          type="button"
-                          onClick={() => addSearchedCandidate(candidate)}
-                          className={styles.pickRouteToggleButton}
-                          aria-label={`Add ${candidate.title}`}
-                        >
-                          <div className={styles.pickRouteArrow}>
-                            <div className={styles.pickRouteIconCircle} aria-hidden="true">
-                              <Image
-                                src="/icons/plus.svg"
-                                alt=""
-                                width={20}
-                                height={20}
-                                className={styles.pickRouteArrowIcon}
-                                aria-hidden="true"
-                              />
-                            </div>
+                        <div className={`${styles.pickRouteArrow} ${styles.buildMixStopAction}`}>
+                          <div className={`${styles.pickRouteIconCircle} ${styles.buildMixStopActionCircleLight}`} aria-hidden="true">
+                            <svg viewBox="0 0 16 16" className={styles.buildMixPlusIcon} aria-hidden="true">
+                              <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4" fill="currentColor" />
+                            </svg>
                           </div>
-                        </button>
-                      </div>
-                    )
-                  )}
+                        </div>
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

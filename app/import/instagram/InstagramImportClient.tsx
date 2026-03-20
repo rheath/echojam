@@ -864,10 +864,9 @@ export default function InstagramImportClient() {
             </Link>
             <h1 className={styles.title}>Import from Instagram</h1>
             <p className={styles.subtitle}>
-              Build a multi-stop route from public Instagram reels and posts. Add up to {INSTAGRAM_COLLECTION_MAX_STOPS} stops in one session, then master publish the full journey as a single custom route.
+              Build a multi-stop route from public Instagram reels and posts. Add up to {INSTAGRAM_COLLECTION_MAX_STOPS} stops in one session, then publish the full journey as a single custom route.
             </p>
-          </div>
-          <div className={styles.badge}>Session journey flow</div>
+          </div> 
         </header>
 
         <section className={`${styles.card} ${styles.titleCard}`}>

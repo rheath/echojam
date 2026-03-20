@@ -70,6 +70,20 @@
       "defaultPersona": "preteen",
       "storyBy": "AI Explorer",
       "narratorGuidance": "You are the Superhero Guide for curious kids and preteens. Keep the delivery cinematic and exciting, but let real New York comic-book history lead each stop. When the route mentions creators like Stan Lee, Jack Kirby, Steve Ditko, or Bob Kane, treat those names as real people connected to the city's creative history rather than as background flavor.",
+      "voice": {
+        "archetypeId": "superhero-city-historian",
+        "displayName": "AI Explorer",
+        "basePersona": "preteen",
+        "ttsVoice": "nova",
+        "tone": ["cinematic", "curious", "fact-forward", "big-city"],
+        "storyLens": "Treat real New York as the engine that made superhero cities feel possible. Keep creators, landmarks, and visual influence specific and concrete.",
+        "transitionStyle": "Leave each stop by making the next location feel like the next clue in how real NYC became superhero mythology.",
+        "bannedPatterns": [
+          "Do not drift into generic superhero hype without tying it back to a real New York detail.",
+          "Do not bury creator names or landmark names under vague language."
+        ],
+        "openerFamilies": ["action-start", "surprising-detail", "look-closer"]
+      },
       "contentPriority": "history_first",
       "pricing": {
         "status": "free",
@@ -80,6 +94,18 @@
           "placeId": "ChIJmQJIxlVYwokRLgeuocVOGVU",
           "title": "Times Square",
           "narratorGuidance": "Frame this as the public-facing spectacle of superhero New York, but keep the focus on why Midtown's energy became part of comic-book city language.",
+          "narration": {
+            "beat": "hook",
+            "angle": "Use Times Square as the opening proof that real Manhattan already looked like a superhero stage before the movies.",
+            "mustMention": ["Rob Heath, Times Square", "Marvel", "DC", "Stan Lee", "Jack Kirby"],
+            "factBullets": [
+              "Times Square's giant signs, bright lights, and nonstop crowds made Midtown feel larger than life long before superhero movies used that energy on screen.",
+              "Marvel and DC stories often turn streets like this into public stages for battles, rescues, and dramatic entrances because real New York already feels theatrical.",
+              "Creators such as Stan Lee and Jack Kirby worked in a city whose spectacle made ordinary streets feel ready for extraordinary events."
+            ],
+            "sensoryTargets": ["towering screens", "crowd movement", "street noise"],
+            "contentPriority": "history_first"
+          },
           "mustMention": ["Times Square", "Marvel", "DC", "Stan Lee", "Jack Kirby"],
           "factBullets": [
             "Times Square's giant signs, bright lights, and nonstop crowds made Midtown feel larger than life long before superhero movies used that energy on screen.",
@@ -91,6 +117,18 @@
           "placeId": "ChIJZx8c96NZwokRJklw7SVhKt4",
           "title": "Flatiron Building",
           "narratorGuidance": "Use the building's triangle shape as the visual bridge into comic-book city design, but make the real skyline influence the main point.",
+          "narration": {
+            "beat": "contrast",
+            "angle": "Contrast the Flatiron's real architecture with the fictional skylines it helped inspire.",
+            "mustMention": ["Flatiron Building", "Batman", "Gotham", "Superman", "Metropolis", "Bob Kane"],
+            "factBullets": [
+              "The Flatiron Building's triangle shape made it one of New York's most distinctive early skyscrapers.",
+              "Dramatic skyline shapes like this helped artists imagine fictional comic-book city skylines such as Batman's Gotham and Superman's Metropolis.",
+              "Bob Kane drew on the mood of dark, dramatic New York architecture when shaping the atmosphere that readers associate with Gotham."
+            ],
+            "sensoryTargets": ["the wedge shape", "wind around the corner", "the skyline angle above the street"],
+            "contentPriority": "history_first"
+          },
           "mustMention": ["Flatiron Building", "Batman", "Gotham", "Superman", "Metropolis", "Bob Kane"],
           "factBullets": [
             "The Flatiron Building's triangle shape made it one of New York's most distinctive early skyscrapers.",
@@ -102,6 +140,18 @@
           "placeId": "ChIJhRwB-yFawokRi0AhGH87UTc",
           "title": "Grand Central Terminal",
           "narratorGuidance": "Keep the wonder of secret passageways, but center the real station infrastructure that made underground comic-book worlds believable.",
+          "narration": {
+            "beat": "reveal",
+            "angle": "Reveal how real New York infrastructure made secret-base storytelling feel believable.",
+            "mustMention": ["Grand Central Terminal", "Daredevil", "subway tunnels"],
+            "factBullets": [
+              "Grand Central Terminal includes tracks, tunnels, and hidden spaces that helped make the idea of a second city under New York feel believable.",
+              "Comic-book stories use real New York infrastructure like this to imagine secret bases, escape routes, and underground worlds beneath busy streets.",
+              "A place like Grand Central makes heroes such as Daredevil feel grounded in a city with real layers above and below the sidewalk."
+            ],
+            "sensoryTargets": ["vaulted ceilings", "footsteps and echoes", "the hidden layers below street level"],
+            "contentPriority": "history_first"
+          },
           "mustMention": ["Grand Central Terminal", "Daredevil", "subway tunnels"],
           "factBullets": [
             "Grand Central Terminal includes tracks, tunnels, and hidden spaces that helped make the idea of a second city under New York feel believable.",
@@ -113,6 +163,18 @@
           "placeId": "ChIJeWPFRwJZwokRGD60OOo74RU",
           "title": "Chrysler Building",
           "narratorGuidance": "Treat this as a real skyscraper that helped define the visual language of superhero Manhattan, not just a generic tower.",
+          "narration": {
+            "beat": "contrast",
+            "angle": "Use the Chrysler Building to show how one real skyline form became part of comic-book vertical spectacle.",
+            "mustMention": ["Chrysler Building", "Art Deco", "Spider-Man", "Fantastic Four"],
+            "factBullets": [
+              "The Chrysler Building's Art Deco crown became one of the most recognizable shapes in the Manhattan skyline.",
+              "Art Deco skyscrapers helped define the vertical, gleaming New York that comic artists used for rooftop chases and high-altitude action.",
+              "When readers imagine heroes such as Spider-Man or the Fantastic Four above Manhattan, buildings like the Chrysler help sell that feeling of height and scale."
+            ],
+            "sensoryTargets": ["the metal crown", "height above the avenue", "the sharp Art Deco lines"],
+            "contentPriority": "history_first"
+          },
           "mustMention": ["Chrysler Building", "Art Deco", "Spider-Man", "Fantastic Four"],
           "factBullets": [
             "The Chrysler Building's Art Deco crown became one of the most recognizable shapes in the Manhattan skyline.",
@@ -124,6 +186,18 @@
           "placeId": "ChIJe7vKMf9YwokRIMYfDz7iF9o",
           "title": "Midtown Skyline",
           "narratorGuidance": "Use the skyline as the proof that Manhattan itself became part of superhero storytelling.",
+          "narration": {
+            "beat": "reveal",
+            "angle": "Treat the skyline as the moment where the whole thesis clicks: Manhattan itself became a character.",
+            "mustMention": ["Midtown Manhattan", "Spider-Man", "Avengers", "Stan Lee", "Steve Ditko"],
+            "factBullets": [
+              "Midtown Manhattan's stacked towers and narrow avenues created the vertical obstacle course that made Spider-Man feel inseparable from New York.",
+              "Stan Lee and Steve Ditko helped turn Manhattan itself into a superhero setting rather than a generic background city.",
+              "Teams like the Avengers feel natural in New York because the real skyline already suggests scale, danger, motion, and spectacle."
+            ],
+            "sensoryTargets": ["stacked towers", "narrow avenues", "the sense of vertical scale"],
+            "contentPriority": "history_first"
+          },
           "mustMention": ["Midtown Manhattan", "Spider-Man", "Avengers", "Stan Lee", "Steve Ditko"],
           "factBullets": [
             "Midtown Manhattan's stacked towers and narrow avenues created the vertical obstacle course that made Spider-Man feel inseparable from New York.",
@@ -135,6 +209,18 @@
           "placeId": "ChIJK3vOQyNawokRXEa9errdJiU",
           "title": "Brooklyn Bridge",
           "narratorGuidance": "End with a big finish, but ground it in why this real bridge became such a strong comic-book image.",
+          "narration": {
+            "beat": "payoff",
+            "angle": "Make the Brooklyn Bridge the payoff: real infrastructure on mythic scale.",
+            "mustMention": ["Brooklyn Bridge", "East River", "Spider-Man", "Superman"],
+            "factBullets": [
+              "The Brooklyn Bridge was already one of New York's great engineering symbols before superheroes existed.",
+              "Because it stretches high above the East River and connects boroughs, it became a perfect visual for comic-book rescue scenes, chases, and final battles.",
+              "A landmark like the Brooklyn Bridge turns real infrastructure into mythic scale, which is exactly what superhero storytelling loves."
+            ],
+            "sensoryTargets": ["cables overhead", "the East River below", "the long span between boroughs"],
+            "contentPriority": "history_first"
+          },
           "mustMention": ["Brooklyn Bridge", "East River", "Spider-Man", "Superman"],
           "factBullets": [
             "The Brooklyn Bridge was already one of New York's great engineering symbols before superheroes existed.",

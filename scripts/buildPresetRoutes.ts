@@ -1,10 +1,33 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-// @ts-expect-error Node --experimental-strip-types requires explicit .ts extension in ESM mode.
 import { PresetCitySeedSchema, PresetMetaSchema, type PresetCitySeed, type PresetMeta, type PresetRoutePricingSeed, type PresetRouteSeed, type PresetStopSeed } from "../lib/presets/schema.ts";
 
 type Persona = "adult" | "preteen" | "ghost";
+type PresetContentPriority = "default" | "history_first";
+type PresetNarrationBeat = "overview" | "hook" | "reveal" | "contrast" | "payoff";
+type PresetTtsVoice = "alloy" | "nova" | "shimmer" | "onyx";
+
+type GeneratedRouteVoice = {
+  archetypeId: string;
+  displayName?: string;
+  basePersona: Persona;
+  ttsVoice?: PresetTtsVoice;
+  tone?: string[];
+  storyLens?: string;
+  transitionStyle?: string;
+  bannedPatterns?: string[];
+  openerFamilies?: string[];
+};
+
+type GeneratedStopNarration = {
+  beat?: PresetNarrationBeat;
+  angle?: string;
+  factBullets?: string[];
+  mustMention?: string[];
+  sensoryTargets?: string[];
+  contentPriority?: PresetContentPriority;
+};
 
 type CanonicalStopRow = {
   id: string;
@@ -33,6 +56,7 @@ type StopResolved = {
   narratorGuidance?: string;
   mustMention?: string[];
   factBullets?: string[];
+  narration?: GeneratedStopNarration;
 };
 
 type GeneratedRoutePricing = {
@@ -51,6 +75,7 @@ type GeneratedRoute = {
   storyBy?: string;
   narratorGuidance?: string;
   contentPriority?: "default" | "history_first";
+  voice?: GeneratedRouteVoice;
   pricing: GeneratedRoutePricing;
   city: string;
   stops: StopResolved[];
@@ -299,6 +324,7 @@ function buildResolvedStop(city: string, stopSeed: PresetStopSeed, resolvedPlace
     ...(stopSeed.narratorGuidance ? { narratorGuidance: stopSeed.narratorGuidance } : {}),
     ...(stopSeed.mustMention?.length ? { mustMention: stopSeed.mustMention } : {}),
     ...(stopSeed.factBullets?.length ? { factBullets: stopSeed.factBullets } : {}),
+    ...(stopSeed.narration ? { narration: stopSeed.narration } : {}),
   };
 }
 
@@ -417,6 +443,7 @@ async function main() {
         ...(route.storyBy ? { storyBy: route.storyBy } : {}),
         ...(route.narratorGuidance ? { narratorGuidance: route.narratorGuidance } : {}),
         ...(route.contentPriority ? { contentPriority: route.contentPriority } : {}),
+        ...(route.voice ? { voice: route.voice } : {}),
         pricing: normalizeRoutePricing(route.pricing),
         city: seed.city,
         stops: resolvedStops,

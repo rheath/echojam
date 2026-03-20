@@ -44,6 +44,7 @@ Required env vars:
 ```bash
 GOOGLE_PLACES_API_KEY=...
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=...
+NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=...
 CANONICAL_IMAGE_SYNC_TOKEN=...
 GOOGLE_PLACE_PHOTO_MAX_WIDTH=1400 # optional
 ```
@@ -52,6 +53,7 @@ Key roles:
 
 - `GOOGLE_PLACES_API_KEY`: server-side key for Places, Geocoding, Place Photos, and route preview calls.
 - `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`: browser key for the Google Maps JavaScript renderer. Restrict this key to your allowed web origins.
+- `NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID`: browser map ID for the Google Maps JavaScript renderer and advanced markers.
 
 Background sync endpoint (server-to-server only):
 

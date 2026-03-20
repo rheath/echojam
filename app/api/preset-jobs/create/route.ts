@@ -4,7 +4,6 @@ import { getRouteById } from "@/app/content/salemRoutes";
 import { ensureCanonicalStopForPreset, upsertRouteStopMapping } from "@/lib/canonicalStops";
 import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
 import {
-  generateScriptWithOpenAI,
   getSwitchConfig,
   isUsableGeneratedAudioUrl,
   shouldRegenerateAudio,
@@ -13,12 +12,16 @@ import {
   toNullableAudioUrl,
   toNullableTrimmed,
   type Persona,
-  type StopInput,
   uploadNarrationAudio,
 } from "@/lib/mixGeneration";
 import {
+  attachPresetStopNarration,
+  generatePresetScriptWithOpenAI,
+  type PresetNarrationRouteInput,
+  type PresetNarrationStopInput,
+} from "@/lib/presetNarration";
+import {
   getPresetRouteStopAsset,
-  mergePresetNarratorGuidance,
   type PresetAssetPersona,
   upsertPresetRouteStopAsset,
 } from "@/lib/presetRouteAssets";
@@ -40,14 +43,27 @@ function getAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+function toPresetNarrationRoute(route: NonNullable<ReturnType<typeof getRouteById>>): PresetNarrationRouteInput {
+  return {
+    id: route.id,
+    title: route.title,
+    description: route.description,
+    durationMinutes: route.durationMinutes,
+    defaultPersona: route.defaultPersona,
+    storyBy: route.storyBy ?? null,
+    narratorGuidance: route.narratorGuidance ?? null,
+    contentPriority: route.contentPriority ?? null,
+    voice: route.voice ?? null,
+  };
+}
+
 async function runPresetGeneration(
   jobId: string,
   routeId: string,
   city: string,
-  lengthMinutes: number,
+  route: PresetNarrationRouteInput,
   persona: PresetAssetPersona,
-  stops: StopInput[],
-  narratorGuidance?: string | null,
+  stops: Array<PresetNarrationStopInput>,
   forceRegenerateAll = false
 ) {
   const admin = getAdmin();
@@ -81,7 +97,7 @@ async function runPresetGeneration(
   };
 
   type RowState = {
-    stop: StopInput;
+    stop: PresetNarrationStopInput;
     script: string | null;
   };
   const states: RowState[] = [];
@@ -98,16 +114,17 @@ async function runPresetGeneration(
     if (!script) {
       try {
         script = toNullableTrimmed(
-          await generateScriptWithOpenAI(
+          await generatePresetScriptWithOpenAI(
             apiKey,
             city,
-            "walk",
-            lengthMinutes,
-            persona,
-            stop,
+            route,
+            {
+              ...stop,
+              narration: stop.narration ?? null,
+            },
             originalPosition,
             stops.length,
-            mergePresetNarratorGuidance(narratorGuidance, stop.narratorGuidance)
+            persona
           )
         );
       } catch (e) {
@@ -280,7 +297,8 @@ export async function POST(req: Request) {
           .single();
         if (jobErr || !job?.id) throw new Error(jobErr?.message || "Failed to create preset generation job");
 
-        const stops: StopInput[] = buildPresetStopsWithOverview(route.stops, city, route.contentPriority);
+        const stops = buildPresetStopsWithOverview(route.stops, city, route.contentPriority);
+        const narrationStops = attachPresetStopNarration(stops, route.stops);
 
         after(async () => {
           try {
@@ -288,10 +306,9 @@ export async function POST(req: Request) {
               job.id,
               route.id,
               city,
-              route.durationMinutes || 30,
+              toPresetNarrationRoute(route),
               persona,
-              stops,
-              route.narratorGuidance,
+              narrationStops,
               Boolean(body.forceRegenerateAll)
             );
           } catch (e) {

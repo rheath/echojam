@@ -1031,6 +1031,7 @@
   margin: 0;
   font-size: 44px; 
   font-weight: 500;
+  margin-top:40px;
 }
 
 .pickHeadingBelowClose {
@@ -1066,11 +1067,12 @@
   font-size: 16px;
   opacity: 0.82;
 }
+ 
 
-.pickSectionLabel {
-  margin-top: 30px;
-  font-size: 16px;
-  font-weight: 700;
+.buildMixSummaryLabel {
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 700; 
 }
 
 .pickLimitHint {
@@ -1080,10 +1082,17 @@
 }
 
 .buildMixLinkAddWrap {
-  margin-top: 12px;
+  margin-top: 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.buildMixSearchPanel {
+  padding: 22px 22px 18px;
+  border-radius: 22px;
+  background: #d9d9dc;
+  color: #11111a;
 }
 
 .buildMixEntryRow {
@@ -1094,9 +1103,38 @@
   display: block;
 }
 
+.buildMixSearchPanelTitle {
+  color: #11111a;
+  font-size: 28px;
+  line-height: 1.05;
+}
+
+.buildMixSearchRowPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .buildMixSearchInputWrap {
   position: relative;
   width: 100%;
+}
+
+.buildMixSearchInputWrapPanel {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-height: 52px;
+  border-radius: 30px;
+  background: #fff;
+  border: 1px solid rgba(17, 17, 26, 0.08);
+  overflow: hidden;
+}
+
+.buildMixSearchInputShell {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .buildMixSearchInput {
@@ -1112,6 +1150,17 @@
   height: 52px;
 }
 
+.buildMixSearchInputPanel {
+  border: 0;
+  background: transparent;
+  padding: 14px 64px 14px 6px;
+  border-radius: 0;
+}
+
+.buildMixSearchInputPanel::placeholder {
+  color: rgba(17, 17, 26, 0.32);
+}
+
 .buildMixSearchActions {
   position: absolute;
   right: 8px;
@@ -1120,6 +1169,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.buildMixSearchActionsPanel {
 }
 
 .buildMixSearchActionButton {
@@ -1135,6 +1187,18 @@
   cursor: pointer;
 }
 
+.buildMixSearchActionButtonPanel {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  background: transparent;
+}
+
+.buildMixSearchActionButtonLeading {
+  flex: 0 0 auto;
+  margin-left: 8px;
+}
+
 .buildMixSearchActionButton:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -1146,13 +1210,17 @@
 }
 
 .buildMixSearchClearIcon {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
 }
 
 .buildMixSearchError {
   font-size: 14px;
   color: #ffd3df;
+}
+
+.buildMixSearchPanelError {
+  color: rgba(120, 18, 40, 0.92);
 }
 
 .buildMixSearchDropdown {
@@ -1179,6 +1247,29 @@
 .buildMixSearchDropdownTitle {
   font-size: 14px;
   line-height: 1.35;
+}
+
+.buildMixSearchDropdownLight {
+  margin-top: 8px;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+}
+
+.buildMixSearchDropdownRowLight {
+  padding: 18px 4px 18px 0;
+  border-bottom: 1px solid rgba(17, 17, 26, 0.12);
+}
+
+.buildMixSearchDropdownRowLight:last-child {
+  border-bottom: 0;
+  padding-bottom: 6px;
+}
+
+.buildMixSearchDropdownLight .buildMixSearchDropdownTitle {
+  color: #11111a;
+  font-size: 18px;
+  font-weight: 700;
 }
 
 .buildMixSelectedLabel {
@@ -1231,12 +1322,20 @@
   cursor: default;
 }
 
-.pickRouteRowSelected {
-  background: transparent;
-}
+ .buildMixStopCard {
+    border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0 8px;
+  }
+
 
 .pickRouteRowSelected .pickRouteTitle {
   color: #ff79a8;
+}
+
+.buildMixStopCard.pickRouteRowSelected .pickRouteTitle {
+  color: #f4f4f6;
 }
 
 .pickRouteRowDisabled {
@@ -1263,10 +1362,10 @@
 }
 
 .pickRouteIconCircle {
-  width: 44px;
-  height: 44px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px; 
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -1281,7 +1380,8 @@
 }
 
 .pickRouteTitle {
-  font-size: 24px;
+   font-size: 16px;
+  line-height: 1;
   font-weight: 700;
 }
 
@@ -1337,29 +1437,31 @@
 .buildMixTitleRow {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 16px;
   max-width: 100%;
+  width: 100%;
 }
 
 .buildMixStopTitleWithIndex {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
+  line-height: 1.15;
 }
 
 .buildMixReorderButtons {
   display: inline-flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
   flex: 0 0 auto;
 }
 
 .buildMixReorderButton {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: 999px;
-  border: 1px solid #34353b;
-  background: rgba(255, 255, 255, 0.08);
+  border: 0;
+  background: transparent;
   color: inherit;
   padding: 0;
   display: inline-flex;
@@ -1369,7 +1471,7 @@
 }
 
 .buildMixReorderButton:disabled {
-  opacity: 0.35;
+  opacity: 0.28;
   cursor: not-allowed;
 }
 
@@ -1385,6 +1487,35 @@
 
 .buildMixReorderIconDown {
   transform: rotate(90deg);
+}
+
+.buildMixStopActionButton {
+  flex: 0 0 auto;
+}
+
+.buildMixStopAction {
+  width: auto;
+}
+
+.buildMixStopActionCircle {
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.buildMixStopActionCircleLight {
+  background: transparent;
+  border: 2px solid #11111a;
+}
+
+.buildMixStopActionIconDark {
+  filter: none;
+}
+
+.buildMixPlusIcon {
+  width: 24px;
+  height: 24px;
+  color: #11111a;
 }
 
 .pickRouteArrowIcon {
@@ -1810,6 +1941,10 @@
 }
 
 .buildMixInfo .pickRouteList {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   padding-bottom: 8px;
 }
 
@@ -3222,24 +3357,41 @@
   }
 
   .pickHeading {
-    font-size: 44px;
+    margin-top: 0;
   }
 
   .pickHeadingBelowClose {
     margin-top: 0;
   }
 
-  .pickSectionLabel {
-    margin-top: 24px;
-  }
+   
+   
 
   .pickSectionDivider {
     width: calc(100% + 48px);
     margin-left: -24px;
   }
 
-  .pickRouteTitle {
+  
+
+  .buildMixSearchPanel {
+    padding: 20px 20px 16px;
+    border-radius: 20px;
+  }
+
+  .buildMixSearchPanelTitle {
     font-size: 20px;
+  }
+
+  .buildMixSearchDropdownLight .buildMixSearchDropdownTitle {
+    font-size: 16px;
+  }
+
+  
+
+  .buildMixStopActionCircle {
+    width: 28px;
+  height: 28px; 
   }
 
   .pickRouteArrow {
@@ -3337,6 +3489,10 @@
 
   .buildMixInfo .pickRouteList {
     padding-bottom: 120px;
+  }
+
+  .buildMixSearchPanel {
+    max-width: 100%;
   }
 
   .buildMixImagePane {

@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  loadGoogleLegacyRoutesLibrary,
+  getGoogleMapsMapId,
   loadGoogleMapsLibraries,
+  loadGoogleRoutesLibrary,
 } from "@/lib/googleMapsLoader";
 import styles from "./RouteMap.module.css";
 
@@ -42,6 +43,14 @@ type Props = {
 
 type RouteStatus = "loading" | "ready" | "failed";
 type StopVisualStatus = "visited" | "current" | "upcoming" | "arrival";
+type RouteMarker = google.maps.marker.AdvancedMarkerElement;
+type MarkerVisual = {
+  background: string;
+  borderColor: string;
+  glyph?: string;
+  glyphColor?: string;
+  scale?: number;
+};
 type DisplayStop = {
   id: string;
   title: string;
@@ -61,101 +70,6 @@ const VISITED_COLOR = "#8e93a3";
 const UPCOMING_COLOR = "#2b1b3f";
 const USER_COLOR = "#2e78ff";
 const ORIGIN_COLOR = "#111111";
-const MINIMAL_TOURISM_MAP_STYLES: google.maps.MapTypeStyle[] = [
-  {
-    elementType: "geometry",
-    stylers: [{ color: "#f6f5f1" }],
-  },
-  {
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#767676" }],
-  },
-  {
-    elementType: "labels.text.stroke",
-    stylers: [{ color: "#f6f5f1" }],
-  },
-  {
-    featureType: "administrative",
-    elementType: "labels",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "administrative.land_parcel",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "administrative.neighborhood",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "landscape",
-    elementType: "geometry",
-    stylers: [{ color: "#f1f0eb" }],
-  },
-  {
-    featureType: "poi",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.park",
-    elementType: "geometry",
-    stylers: [{ color: "#ecebe4" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry",
-    stylers: [{ color: "#ffffff" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#e9e6df" }],
-  },
-  {
-    featureType: "road",
-    elementType: "labels.icon",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "road.arterial",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#8a857d" }],
-  },
-  {
-    featureType: "road.highway",
-    elementType: "geometry",
-    stylers: [{ color: "#fdfcf8" }],
-  },
-  {
-    featureType: "road.highway",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#e0ddd6" }],
-  },
-  {
-    featureType: "road.highway",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#7d776f" }],
-  },
-  {
-    featureType: "road.local",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "transit",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "water",
-    elementType: "geometry",
-    stylers: [{ color: "#d8dde1" }],
-  },
-  {
-    featureType: "water",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#7a7f84" }],
-  },
-];
-
 export default function RouteMap({
   stops,
   currentStopIndex,
@@ -172,9 +86,9 @@ export default function RouteMap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
-  const stopMarkersRef = useRef<google.maps.Marker[]>([]);
-  const endpointMarkersRef = useRef<google.maps.Marker[]>([]);
-  const meMarkerRef = useRef<google.maps.Marker | null>(null);
+  const stopMarkersRef = useRef<RouteMarker[]>([]);
+  const endpointMarkersRef = useRef<RouteMarker[]>([]);
+  const meMarkerRef = useRef<RouteMarker | null>(null);
   const routeLineRef = useRef<google.maps.Polyline | null>(null);
   const routeLineUnderlayRef = useRef<google.maps.Polyline | null>(null);
   const [isMapReady, setIsMapReady] = useState(false);
@@ -213,27 +127,25 @@ export default function RouteMap({
       }
 
       try {
-        const { DirectionsService } = await loadGoogleLegacyRoutesLibrary();
-        const directions = new DirectionsService();
-        const result = await directions.route({
+        const { Route } = await loadGoogleRoutesLibrary();
+        const result = await Route.computeRoutes({
           origin: { lat: stops[0].lat, lng: stops[0].lng },
           destination: {
             lat: stops[stops.length - 1].lat,
             lng: stops[stops.length - 1].lng,
           },
-          waypoints: stops.slice(1, -1).map((stop) => ({
-            location: { lat: stop.lat, lng: stop.lng },
-            stopover: true,
+          intermediates: stops.slice(1, -1).map((stop) => ({
+            lat: stop.lat,
+            lng: stop.lng,
           })),
-          optimizeWaypoints: false,
-          travelMode: google.maps.TravelMode.WALKING,
+          travelMode: "WALKING",
+          fields: ["path"],
         });
 
         if (cancelled) return;
         const coords =
-          result.routes?.[0]?.overview_path?.map(
-            (point) => [point.lng(), point.lat()] as [number, number]
-          ) ?? [];
+          result.routes?.[0]?.path?.map((point) => [point.lng, point.lat] as [number, number]) ??
+          [];
 
         if (coords.length > 1) {
           setRouteCoords(coords);
@@ -270,12 +182,12 @@ export default function RouteMap({
         const map = new Map(containerRef.current, {
           center: { lat: initialView.lat, lng: initialView.lng },
           zoom: initialView.zoom,
+          mapId: getGoogleMapsMapId(),
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
           clickableIcons: false,
           gestureHandling: "greedy",
-          styles: MINIMAL_TOURISM_MAP_STYLES,
         });
 
         mapRef.current = map;
@@ -325,7 +237,7 @@ export default function RouteMap({
         map,
         position: { lat: stop.lat, lng: stop.lng },
         title: stop.title,
-        icon: buildStopMarkerIcon(stop.status, stop.label),
+        visual: buildStopMarkerIcon(stop.status, stop.label),
         zIndex: stop.status === "current" ? 30 : 20 + idx,
         clickable: true,
       });
@@ -393,7 +305,7 @@ export default function RouteMap({
     }
 
     if (meMarkerRef.current) {
-      meMarkerRef.current.setPosition(myPos);
+      meMarkerRef.current.position = myPos;
       return;
     }
 
@@ -401,11 +313,11 @@ export default function RouteMap({
       map,
       position: myPos,
       title: "Your location",
-      icon: buildPinIcon({
+      visual: {
         background: USER_COLOR,
         borderColor: "#ffffff",
         scale: 0.72,
-      }),
+      },
       zIndex: 10,
     });
   }, [isMapReady, myPos]);
@@ -536,17 +448,17 @@ function buildStopMarkerIcon(status: StopVisualStatus, label: string) {
           ? VISITED_COLOR
           : UPCOMING_COLOR;
 
-  return buildPinIcon({
+  return {
     background,
     borderColor: "#ffffff",
     glyphColor: status === "current" ? "#111111" : "#ffffff",
     glyph: label,
     scale: status === "current" ? 1.15 : 0.96,
-  });
+  } satisfies MarkerVisual;
 }
 
 function buildEndpointMarkers(map: google.maps.Map, endpoints: Props["endpoints"]) {
-  const markers: google.maps.Marker[] = [];
+  const markers: RouteMarker[] = [];
 
   if (endpoints?.origin) {
     markers.push(
@@ -554,13 +466,13 @@ function buildEndpointMarkers(map: google.maps.Map, endpoints: Props["endpoints"
         map,
         position: endpoints.origin,
         title: endpoints.origin.label || "Start",
-        icon: buildPinIcon({
+        visual: {
           background: ORIGIN_COLOR,
           borderColor: "#ffffff",
           glyphColor: "#ffffff",
           glyph: "S",
           scale: 0.9,
-        }),
+        },
         zIndex: 15,
       })
     );
@@ -572,13 +484,13 @@ function buildEndpointMarkers(map: google.maps.Map, endpoints: Props["endpoints"
         map,
         position: endpoints.destination,
         title: endpoints.destination.label || "Finish",
-        icon: buildPinIcon({
+        visual: {
           background: ARRIVAL_COLOR,
           borderColor: "#ffffff",
           glyphColor: "#ffffff",
           glyph: "F",
           scale: 1,
-        }),
+        },
         zIndex: 16,
       })
     );
@@ -630,15 +542,15 @@ function fitMapToRoute(
   map.fitBounds(bounds, 56);
 }
 
-function clearMarkers(markers: google.maps.Marker[]) {
+function clearMarkers(markers: RouteMarker[]) {
   for (const marker of markers) {
-    marker.setMap(null);
+    marker.map = null;
   }
 }
 
-function clearMarker(marker: google.maps.Marker | null) {
+function clearMarker(marker: RouteMarker | null) {
   if (marker) {
-    marker.setMap(null);
+    marker.map = null;
   }
 }
 
@@ -677,64 +589,52 @@ function createPinMarker(params: {
   map: google.maps.Map;
   position: google.maps.LatLngLiteral;
   title: string;
-  icon: google.maps.Icon;
+  visual: MarkerVisual;
   zIndex?: number;
   clickable?: boolean;
 }) {
-  const marker = new google.maps.Marker({
+  const marker = new google.maps.marker.AdvancedMarkerElement({
     map: params.map,
     position: params.position,
     title: params.title,
     zIndex: params.zIndex,
-    icon: params.icon,
-    clickable: Boolean(params.clickable),
+    content: buildPinMarkerContent(params.visual, Boolean(params.clickable)),
   });
   return marker;
 }
 
-function buildPinIcon(params: {
-  background: string;
-  borderColor: string;
-  glyph?: string;
-  glyphColor?: string;
-  scale?: number;
-}): google.maps.Icon {
+function buildPinMarkerContent(params: MarkerVisual, clickable: boolean) {
   const scale = params.scale ?? 1;
-  const width = 36;
-  const height = 36;
-  const scaledWidth = width * scale;
-  const scaledHeight = height * scale;
+  const diameter = Math.round(36 * scale);
   const glyph = params.glyph ?? "";
   const glyphColor = params.glyphColor ?? "#ffffff";
-  const glyphFontSize = glyph.length > 1 ? 14 : 18;
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 36 36">
-      <circle
-        cx="18"
-        cy="18"
-        r="15"
-        fill="${params.background}"
-        stroke="${params.borderColor}"
-        stroke-width="2.5"
-      />
-      ${glyph
-        ? `<text x="18" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="${glyphFontSize}" font-weight="700" fill="${glyphColor}">${escapeSvgText(glyph)}</text>`
-        : ""}
-    </svg>
-  `.trim();
+  const glyphFontSize = Math.round((glyph.length > 1 ? 14 : 18) * Math.max(scale, 0.9));
 
-  return {
-    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-    scaledSize: new google.maps.Size(scaledWidth, scaledHeight),
-    anchor: new google.maps.Point(scaledWidth / 2, scaledHeight / 2),
-  };
-}
+  const root = document.createElement("div");
+  root.style.width = `${diameter}px`;
+  root.style.height = `${diameter}px`;
+  root.style.display = "flex";
+  root.style.alignItems = "center";
+  root.style.justifyContent = "center";
+  root.style.boxSizing = "border-box";
+  root.style.border = `2.5px solid ${params.borderColor}`;
+  root.style.borderRadius = "999px";
+  root.style.background = params.background;
+  root.style.boxShadow = "0 2px 10px rgba(17, 17, 17, 0.18)";
+  root.style.color = glyphColor;
+  root.style.fontFamily = "Arial, sans-serif";
+  root.style.fontSize = `${glyphFontSize}px`;
+  root.style.fontWeight = "700";
+  root.style.lineHeight = "1";
+  root.style.userSelect = "none";
+  root.style.cursor = clickable ? "pointer" : "default";
+  root.style.transform = "translateY(50%)";
 
-function escapeSvgText(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
+  if (glyph) {
+    root.textContent = glyph;
+  } else {
+    root.setAttribute("aria-hidden", "true");
+  }
+
+  return root;
 }
