@@ -872,6 +872,7 @@ export default function InstagramImportClient() {
       const queuedJob: InstagramImportJobResponse = {
         id: response.jobId,
         draftId: response.draftId,
+        draftIds: collectionDraftIds,
         phase: "publish_collection",
         status: "queued",
         progress: 0,
