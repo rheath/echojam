@@ -1,0 +1,90 @@
+.page {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(255, 189, 189, 0.18), transparent 24%),
+    linear-gradient(180deg, #f7f1ea 0%, #efe6dc 100%);
+  color: #231813;
+}
+
+.shell {
+  width: min(960px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 48px 0 72px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.backLink,
+.secondaryLink {
+  color: #6f4b39;
+  text-decoration: none;
+}
+
+.title {
+  margin: 8px 0 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+.subtitle {
+  max-width: 700px;
+  color: #624b3d;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(73, 48, 35, 0.12);
+  border-radius: 28px;
+  padding: 28px;
+  box-shadow: 0 18px 46px rgba(73, 48, 35, 0.08);
+}
+
+.fieldLabel {
+  display: grid;
+  gap: 10px;
+  font-weight: 700;
+}
+
+.textInput {
+  border-radius: 18px;
+  border: 1px solid rgba(73, 48, 35, 0.14);
+  padding: 15px 16px;
+  font: inherit;
+  background: #fffbf6;
+}
+
+.actions {
+  margin-top: 18px;
+}
+
+.primaryButton {
+  border: none;
+  border-radius: 999px;
+  padding: 14px 18px;
+  font: inherit;
+  font-weight: 700;
+  background: #d45b38;
+  color: #fff7f0;
+  cursor: pointer;
+}
+
+.statusBanner {
+  margin-top: 16px;
+  color: #624b3d;
+}
+
+.errorBanner {
+  margin-top: 16px;
+  color: #8f1f1f;
+}
+
+@media (max-width: 720px) {
+  .header {
+    display: grid;
+  }
+}

@@ -1,0 +1,1 @@
+export const CUSTOM_NARRATOR_MAX_CHARS = 500;

@@ -24,6 +24,12 @@ type CreateBody = {
   routeTitle?: string | null;
   narratorGuidance?: string | null;
   experienceKind?: CustomRouteExperienceKind | null;
+  routeAttribution?: {
+    storyBy?: string | null;
+    storyByUrl?: string | null;
+    storyByAvatarUrl?: string | null;
+    storyBySource?: "instagram" | "tiktok" | "social" | null;
+  } | null;
 };
 
 const CREATE_JOB_REQUEST_TIMEOUT_MS = 12000;
@@ -71,6 +77,7 @@ export async function POST(req: Request) {
             routeTitle: body.routeTitle,
             narratorGuidance,
             experienceKind: body.experienceKind ?? "mix",
+            routeAttribution: body.routeAttribution ?? undefined,
           });
         } catch (e) {
           if (

@@ -57,6 +57,7 @@ export type InstagramPlaceCandidate = {
 export type InstagramImportJobResponse = {
   id: string;
   draftId: string;
+  draftIds: string[] | null;
   phase: InstagramImportJobPhase;
   status: InstagramImportJobStatus | "processing" | "queued" | "failed";
   progress: number;
@@ -142,6 +143,16 @@ export type InstagramCollectionDraftSnapshot = {
 };
 
 export const INSTAGRAM_COLLECTION_MAX_STOPS = 10;
+export const INSTAGRAM_IMPORT_MAX_SPLIT_STOPS = 5;
+
+export type InstagramTourStopConversion = {
+  title: string;
+  script: string;
+  placeQuery: string;
+  cityHint: string | null;
+  countryHint: string | null;
+  confidence: number;
+};
 
 export function instagramRouteStopIdForDraft(draftId: string) {
   return `ig-${draftId.slice(0, 12)}`;
@@ -483,6 +494,91 @@ export function buildInstagramScriptGenerationSourceText(
   return sections.join("\n\n");
 }
 
+function extractJsonValue(raw: string) {
+  const trimmed = raw.trim();
+  if (
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  ) {
+    return trimmed;
+  }
+
+  const firstObjectBrace = trimmed.indexOf("{");
+  const lastObjectBrace = trimmed.lastIndexOf("}");
+  const firstArrayBrace = trimmed.indexOf("[");
+  const lastArrayBrace = trimmed.lastIndexOf("]");
+
+  if (
+    firstArrayBrace >= 0 &&
+    lastArrayBrace > firstArrayBrace &&
+    (firstObjectBrace < 0 || firstArrayBrace < firstObjectBrace)
+  ) {
+    return trimmed.slice(firstArrayBrace, lastArrayBrace + 1);
+  }
+
+  if (firstObjectBrace >= 0 && lastObjectBrace > firstObjectBrace) {
+    return trimmed.slice(firstObjectBrace, lastObjectBrace + 1);
+  }
+
+  throw new Error("JSON response was not found in model output");
+}
+
+function normalizeInstagramTourStopConversion(
+  value: unknown
+): InstagramTourStopConversion | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Record<string, unknown>;
+  const title = toNullableTrimmed(typeof candidate.title === "string" ? candidate.title : null);
+  const script = toNullableTrimmed(typeof candidate.script === "string" ? candidate.script : null);
+  const placeQuery = toNullableTrimmed(
+    typeof candidate.placeQuery === "string" ? candidate.placeQuery : null
+  );
+  if (!title || !script || !placeQuery) return null;
+
+  const confidence = Number(candidate.confidence);
+  return {
+    title,
+    script,
+    placeQuery,
+    cityHint: toNullableTrimmed(typeof candidate.cityHint === "string" ? candidate.cityHint : null),
+    countryHint: toNullableTrimmed(
+      typeof candidate.countryHint === "string" ? candidate.countryHint : null
+    ),
+    confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.45,
+  };
+}
+
+export function parseInstagramTourStopConversions(
+  raw: string,
+  maxStops = INSTAGRAM_IMPORT_MAX_SPLIT_STOPS
+) {
+  const parsed = JSON.parse(extractJsonValue(raw)) as
+    | unknown[]
+    | { stops?: unknown[] }
+    | Record<string, unknown>;
+
+  const candidates = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { stops?: unknown[] }).stops)
+      ? (parsed as { stops: unknown[] }).stops
+      : [parsed];
+
+  const normalized = candidates
+    .map((candidate) => normalizeInstagramTourStopConversion(candidate))
+    .filter((candidate): candidate is InstagramTourStopConversion => Boolean(candidate))
+    .slice(0, Math.max(1, Math.floor(maxStops) || INSTAGRAM_IMPORT_MAX_SPLIT_STOPS));
+
+  if (normalized.length === 0) {
+    throw new Error("Tour stop conversion returned incomplete JSON");
+  }
+
+  if (candidates.length > 0 && normalized.length !== Math.min(candidates.length, maxStops)) {
+    throw new Error("Tour stop conversion returned incomplete JSON");
+  }
+
+  return normalized;
+}
+
 export function normalizeInstagramCollectionDraftIds(
   draftIds: Array<string | null | undefined>,
   maxStops = INSTAGRAM_COLLECTION_MAX_STOPS
@@ -499,6 +595,20 @@ export function normalizeInstagramCollectionDraftIds(
   }
 
   return normalized;
+}
+
+export function normalizeInstagramImportJobDraftIds(
+  phase: InstagramImportJobPhase,
+  draftId: string | null | undefined,
+  draftIds: Array<string | null | undefined> | null | undefined
+) {
+  const maxStops =
+    phase === "publish_collection"
+      ? INSTAGRAM_COLLECTION_MAX_STOPS
+      : phase === "import"
+        ? INSTAGRAM_IMPORT_MAX_SPLIT_STOPS
+        : 1;
+  return normalizeInstagramCollectionDraftIds(draftIds ?? [draftId], maxStops);
 }
 
 export function addInstagramCollectionDraftId(

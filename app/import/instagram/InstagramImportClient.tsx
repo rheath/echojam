@@ -166,6 +166,14 @@ function moveItem<T>(items: T[], from: number, to: number) {
   return next;
 }
 
+function mergeCollectionDraftIds(currentDraftIds: string[], incomingDraftIds: string[]) {
+  return incomingDraftIds.reduce(
+    (draftIds, draftId) =>
+      addInstagramCollectionDraftId(draftIds, draftId, INSTAGRAM_COLLECTION_MAX_STOPS),
+    currentDraftIds
+  );
+}
+
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, init);
   const body = (await response.json().catch(() => ({}))) as T & { error?: string };
@@ -195,6 +203,7 @@ export default function InstagramImportClient() {
   const [placeQueryInput, setPlaceQueryInput] = useState("");
   const [searchResults, setSearchResults] = useState<InstagramPlaceCandidate[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
@@ -227,6 +236,7 @@ export default function InstagramImportClient() {
   const normalizedCollectionTitle = toNullableTrimmed(collectionTitle);
   const activePublishedRouteId = toNullableTrimmed(publishedRouteId) || toNullableTrimmed(routeIdFromUrl);
   const isResumedPublishedJourney = Boolean(activePublishedRouteId);
+  const activeComposerDraftId = draft?.id || collectionDraftIds[0] || null;
 
   const storeDraft = useCallback((nextDraft: InstagramDraftResponse) => {
     setCollectionDrafts((current) => ({
@@ -518,7 +528,33 @@ export default function InstagramImportClient() {
         if (cancelled) return;
         setJob(nextJob);
         if (isTerminalJob(nextJob)) {
-          const nextDraft = await loadDraft(nextJob.draftId, { updateUrl: false });
+          const resolvedDraftIds = Array.from(
+            new Set(
+              (nextJob.draftIds && nextJob.draftIds.length > 0 ? nextJob.draftIds : [nextJob.draftId])
+                .map((draftId) => toNullableTrimmed(draftId))
+                .filter((draftId): draftId is string => Boolean(draftId))
+            )
+          );
+          const importedDrafts = await Promise.all(
+            resolvedDraftIds.map((draftId) => fetchDraftById(draftId))
+          );
+          if (cancelled) return;
+          if (importedDrafts.length > 0) {
+            setCollectionDrafts((current) => ({
+              ...current,
+              ...Object.fromEntries(importedDrafts.map((draft) => [draft.id, draft])),
+            }));
+          }
+          if (nextJob.phase === "import" && nextJob.status === "draft_ready") {
+            setCollectionDraftIds((current) => mergeCollectionDraftIds(current, resolvedDraftIds));
+            setImportSuccessMessage(
+              resolvedDraftIds.length > 1
+                ? `Imported ${resolvedDraftIds.length} stops from this reel.`
+                : null
+            );
+          }
+          const nextDraftId = resolvedDraftIds[0] || nextJob.draftId;
+          const nextDraft = nextDraftId ? await loadDraft(nextDraftId, { updateUrl: false }) : null;
           if (!cancelled && nextDraft && nextJob.phase === "publish" && nextJob.status === "published") {
             setCollectionDraftIds((current) =>
               removeInstagramCollectionDraftId(current, nextDraft.id)
@@ -536,7 +572,7 @@ export default function InstagramImportClient() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [job, loadDraft]);
+  }, [fetchDraftById, job, loadDraft]);
 
   useEffect(() => {
     if (!collectionJobId || (collectionJob && collectionJob.id === collectionJobId)) return;
@@ -653,6 +689,7 @@ export default function InstagramImportClient() {
 
     setIsCreating(true);
     setError(null);
+    setImportSuccessMessage(null);
     try {
       await persistActiveDraftEdits();
       const response = await fetchJson<CreateResponse>("/api/instagram-imports/create", {
@@ -910,6 +947,7 @@ export default function InstagramImportClient() {
               This journey is full. Publish it or remove a stop to add another.
             </div>
           ) : null}
+          {importSuccessMessage ? <div className={styles.successBanner}>{importSuccessMessage}</div> : null}
           {error ? <div className={styles.errorBanner}>{error}</div> : null}
         </section>
 
@@ -919,8 +957,8 @@ export default function InstagramImportClient() {
               <h2 className={styles.sectionTitle}>
                 Journey: {collectionDraftIds.length}/{INSTAGRAM_COLLECTION_MAX_STOPS} stops
               </h2>
-              <div className={styles.collectionFooter}>
-                <div className={styles.publishNote}>
+                <div className={styles.collectionFooter}>
+                  <div className={styles.publishNote}>
                   {isResumedPublishedJourney
                     ? "Published stops stay in this journey. Add a new Instagram link, then publish again to append it."
                     : !normalizedCollectionTitle
@@ -928,7 +966,18 @@ export default function InstagramImportClient() {
                     : canMasterPublish
                       ? "All stops are ready for Master Publish."
                       : "Each stop must finish importing and have a confirmed location before Master Publish."}
-                </div>
+                  </div>
+                {activeComposerDraftId ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      router.push(`/import/mixed?instagramDraft=${encodeURIComponent(activeComposerDraftId)}`);
+                    }}
+                    className={styles.linkButton}
+                  >
+                    Open in Mixed Composer
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => void handleMasterPublish()}

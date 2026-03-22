@@ -158,9 +158,6 @@ export async function POST(req: Request) {
     const cityLikeQuery = isCityLikeQuery(query);
     const limit = toSafeLimit(body.limit, cityLikeQuery);
 
-    if (!city) {
-      return NextResponse.json({ error: "City is required and must be one of salem, boston, concord, nyc." }, { status: 400 });
-    }
     if (query.length < MIN_QUERY_LENGTH) {
       return NextResponse.json({ error: "Query must be at least 2 characters." }, { status: 400 });
     }
@@ -193,7 +190,7 @@ export async function POST(req: Request) {
       const candidates: CandidateStop[] = [];
       const seenPlaceIds = new Set<string>();
       const seenCoordKeys = new Set<string>();
-      const placeholder = cityPlaceholderImage(city);
+      const placeholder = cityPlaceholderImage(city || "nearby");
 
       for (const place of places) {
         const title = (place.displayName?.text || "").trim();

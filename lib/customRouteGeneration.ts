@@ -56,6 +56,12 @@ export type PrepareCustomRouteJobInput = {
     routePolyline?: [number, number][] | null;
   };
   narratorVoice?: CustomNarratorVoice | null;
+  routeAttribution?: {
+    storyBy?: string | null;
+    storyByUrl?: string | null;
+    storyByAvatarUrl?: string | null;
+    storyBySource?: "instagram" | "tiktok" | "social" | null;
+  };
 };
 
 export type PreparedCustomRouteJob = {
@@ -96,6 +102,20 @@ const AUDIO_PATCH_BY_PERSONA = {
   custom: (audioUrl: string | null) => ({ audio_url_custom: audioUrl }),
 } as const;
 
+function isMissingStoryByColumnError(message: string | null | undefined) {
+  const normalized = (message || "").toLowerCase();
+  const isStoryByLookup =
+    normalized.includes("story_by") ||
+    normalized.includes("story_by_url") ||
+    normalized.includes("story_by_avatar_url") ||
+    normalized.includes("story_by_source");
+  return (
+    isStoryByLookup &&
+    ((normalized.includes("column") && normalized.includes("does not exist")) ||
+      (normalized.includes("could not find") && normalized.includes("schema cache")))
+  );
+}
+
 function formatCityLabel(city: string) {
   const normalized = (city || "").trim().toLowerCase();
   if (!normalized || normalized === "nearby") return "Nearby";
@@ -127,6 +147,21 @@ function deriveRouteTitle(
   }
 
   return `${formatCityLabel(city)} Mix`;
+}
+
+function normalizeRouteAttribution(
+  value: PrepareCustomRouteJobInput["routeAttribution"]
+) {
+  return {
+    story_by: toNullableTrimmed(value?.storyBy),
+    story_by_url: toNullableTrimmed(value?.storyByUrl),
+    story_by_avatar_url: toNullableTrimmed(value?.storyByAvatarUrl),
+    story_by_source: value?.storyBySource ?? null,
+  };
+}
+
+function normalizePrefilledScript(value: string | null | undefined) {
+  return toNullableTrimmed(value);
 }
 
 async function createJam(
@@ -268,6 +303,27 @@ export async function prepareCustomRouteJob(
       input.routeMeta?.routePolyline && input.routeMeta.routePolyline.length > 1
         ? input.routeMeta.routePolyline
         : null,
+    ...normalizeRouteAttribution(input.routeAttribution),
+  };
+  const legacyRoutePatch = {
+    city: routePatch.city,
+    transport_mode: routePatch.transport_mode,
+    length_minutes: routePatch.length_minutes,
+    title: routePatch.title,
+    narrator_default: routePatch.narrator_default,
+    narrator_guidance: routePatch.narrator_guidance,
+    narrator_voice: routePatch.narrator_voice,
+    status: routePatch.status,
+    experience_kind: routePatch.experience_kind,
+    origin_label: routePatch.origin_label,
+    origin_lat: routePatch.origin_lat,
+    origin_lng: routePatch.origin_lng,
+    destination_label: routePatch.destination_label,
+    destination_lat: routePatch.destination_lat,
+    destination_lng: routePatch.destination_lng,
+    route_distance_meters: routePatch.route_distance_meters,
+    route_duration_seconds: routePatch.route_duration_seconds,
+    route_polyline: routePatch.route_polyline,
   };
 
   let routeId = existingRoute?.id as string | undefined;
@@ -276,10 +332,21 @@ export async function prepareCustomRouteJob(
       .from("custom_routes")
       .update(routePatch)
       .eq("id", routeId);
-    if (updateRouteErr) {
+    if (updateRouteErr && !isMissingStoryByColumnError(updateRouteErr.message)) {
       throw new Error(
         updateRouteErr.message || "Failed to update custom route"
       );
+    }
+    if (updateRouteErr && isMissingStoryByColumnError(updateRouteErr.message)) {
+      const { error: legacyUpdateRouteErr } = await input.admin
+        .from("custom_routes")
+        .update(legacyRoutePatch)
+        .eq("id", routeId);
+      if (legacyUpdateRouteErr) {
+        throw new Error(
+          legacyUpdateRouteErr.message || "Failed to update custom route"
+        );
+      }
     }
   } else {
     const { data: route, error: routeErr } = await input.admin
@@ -290,10 +357,24 @@ export async function prepareCustomRouteJob(
       })
       .select("id")
       .single();
-    if (routeErr || !route?.id) {
+    if (routeErr && isMissingStoryByColumnError(routeErr.message)) {
+      const { data: legacyRoute, error: legacyRouteErr } = await input.admin
+        .from("custom_routes")
+        .insert({
+          jam_id: jamId,
+          ...legacyRoutePatch,
+        })
+        .select("id")
+        .single();
+      if (legacyRouteErr || !legacyRoute?.id) {
+        throw new Error(legacyRouteErr?.message || "Failed to create custom route");
+      }
+      routeId = legacyRoute.id as string;
+    } else if (routeErr || !route?.id) {
       throw new Error(routeErr?.message || "Failed to create custom route");
+    } else {
+      routeId = route.id as string;
     }
-    routeId = route.id as string;
   }
   if (!routeId) throw new Error("Failed to resolve custom route id");
 
@@ -345,6 +426,13 @@ export async function prepareCustomRouteJob(
       typeof stop.triggerRadiusMeters === "number"
         ? Math.round(stop.triggerRadiusMeters)
         : null,
+    source_provider: stop.sourceProvider ?? null,
+    source_kind: stop.sourceKind ?? null,
+    source_url: toNullableTrimmed(stop.sourceUrl),
+    source_id: toNullableTrimmed(stop.sourceId),
+    source_creator_name: toNullableTrimmed(stop.sourceCreatorName),
+    source_creator_url: toNullableTrimmed(stop.sourceCreatorUrl),
+    source_creator_avatar_url: toNullableTrimmed(stop.sourceCreatorAvatarUrl),
   }));
   const { error: stopsErr } = await input.admin
     .from("custom_route_stops")
@@ -450,6 +538,9 @@ export async function runCustomRouteGeneration(
       !forceScript && !isCustomNarrator
         ? toNullableTrimmed(assetRow?.script)
         : null;
+    if (!forceScript) {
+      script = script || normalizePrefilledScript(stop.prefilledScript);
+    }
     if (!script) {
       try {
         script = toNullableTrimmed(

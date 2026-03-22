@@ -47,6 +47,13 @@ type StopRow = {
   lat: number;
   lng: number;
   image_url: string | null;
+  source_provider?: "instagram" | "tiktok" | "google_places" | null;
+  source_kind?: "social_import" | "place_search" | null;
+  source_url?: string | null;
+  source_id?: string | null;
+  source_creator_name?: string | null;
+  source_creator_url?: string | null;
+  source_creator_avatar_url?: string | null;
   google_place_id?: string | null;
   stop_kind?: "story" | "arrival" | null;
   distance_along_route_meters?: number | null;
@@ -85,7 +92,7 @@ type RouteRow = {
   story_by: string | null;
   story_by_url: string | null;
   story_by_avatar_url: string | null;
-  story_by_source: "instagram" | null;
+  story_by_source: "instagram" | "tiktok" | "social" | null;
 };
 
 type InstagramDraftAttributionRow = {
@@ -123,6 +130,18 @@ function isMissingGhostColumnError(message: string | null | undefined) {
   if (normalized.includes("script_custom")) return true;
   if (normalized.includes("audio_url_custom")) return true;
   return normalized.includes("column") && normalized.includes("does not exist") && normalized.includes("custom_route_stops");
+}
+
+function isMissingSourceColumnError(message: string | null | undefined) {
+  const normalized = (message ?? "").toLowerCase();
+  if (!normalized) return false;
+  return (
+    normalized.includes("source_provider") ||
+    normalized.includes("source_kind") ||
+    normalized.includes("source_url") ||
+    normalized.includes("source_id") ||
+    normalized.includes("source_creator")
+  );
 }
 
 function isMissingStoryByColumnError(message: string | null | undefined) {
@@ -344,7 +363,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
     route = await hydrateInstagramRouteAttribution(admin, route);
 
     const stopsSelectWithGhost =
-      "stop_id,title,lat,lng,image_url,stop_kind,distance_along_route_meters,trigger_radius_meters,script_adult,script_preteen,script_ghost,script_custom,audio_url_adult,audio_url_preteen,audio_url_ghost,audio_url_custom,position";
+      "stop_id,title,lat,lng,image_url,source_provider,source_kind,source_url,source_id,source_creator_name,source_creator_url,source_creator_avatar_url,stop_kind,distance_along_route_meters,trigger_radius_meters,script_adult,script_preteen,script_ghost,script_custom,audio_url_adult,audio_url_preteen,audio_url_ghost,audio_url_custom,position";
     const stopsSelectLegacy =
       "stop_id,title,lat,lng,image_url,stop_kind,distance_along_route_meters,trigger_radius_meters,script_adult,script_preteen,audio_url_adult,audio_url_preteen,position";
     let stops: StopRow[] = [];
@@ -355,7 +374,10 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       .eq("route_id", routeId)
       .order("position", { ascending: true });
 
-    if (stopsWithGhostErr && isMissingGhostColumnError(stopsWithGhostErr.message)) {
+    if (
+      stopsWithGhostErr &&
+      (isMissingGhostColumnError(stopsWithGhostErr.message) || isMissingSourceColumnError(stopsWithGhostErr.message))
+    ) {
       const { data: legacyStops, error: legacyStopsErr } = await admin
         .from("custom_route_stops")
         .select(stopsSelectLegacy)
@@ -475,6 +497,13 @@ export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }
       return {
         ...stop,
         image_url: proxyGoogleImageUrl(imageUrl) || imageUrl,
+        source_provider: stop.source_provider ?? null,
+        source_kind: stop.source_kind ?? null,
+        source_url: toNullableTrimmed(stop.source_url),
+        source_id: toNullableTrimmed(stop.source_id),
+        source_creator_name: toNullableTrimmed(stop.source_creator_name),
+        source_creator_url: toNullableTrimmed(stop.source_creator_url),
+        source_creator_avatar_url: toNullableTrimmed(stop.source_creator_avatar_url),
         google_place_id: toNullableTrimmed(canonicalImage?.google_place_id),
         script_adult: scriptAdult,
         script_preteen: scriptPreteen,

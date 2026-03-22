@@ -40,6 +40,13 @@ export type Stop = {
   lat: number;
   lng: number;
   googlePlaceId?: string;
+  sourceProvider?: "instagram" | "tiktok" | "google_places" | null;
+  sourceKind?: "social_import" | "place_search" | null;
+  sourceUrl?: string | null;
+  sourceId?: string | null;
+  sourceCreatorName?: string | null;
+  sourceCreatorUrl?: string | null;
+  sourceCreatorAvatarUrl?: string | null;
   narratorGuidance?: string | null;
   mustMention?: string[] | null;
   factBullets?: string[] | null;
@@ -64,7 +71,7 @@ export type RouteDef = {
   storyBy?: string;
   storyByUrl?: string | null;
   storyByAvatarUrl?: string | null;
-  storyBySource?: "instagram" | null;
+  storyBySource?: "instagram" | "tiktok" | "social" | null;
   narratorGuidance?: string | null;
   contentPriority?: PresetContentPriority | null;
   voice?: PresetRouteVoice | null;

@@ -22,7 +22,7 @@ type CustomRouteRow = {
   transport_mode: "walk" | "drive" | null;
   city: string | null;
   story_by: string | null;
-  story_by_source: "instagram" | null;
+  story_by_source: "instagram" | "tiktok" | "social" | null;
 };
 
 type CustomRouteStopRow = {
@@ -175,7 +175,7 @@ async function resolveCustomRouteSummary(routeId: string) {
     minutes,
     transportMode: typedRoute.transport_mode || null,
     city: typedRoute.city || null,
-    storyBy: typedRoute.story_by_source === "instagram" ? typedRoute.story_by : null,
+    storyBy: typedRoute.story_by_source ? typedRoute.story_by : null,
   };
 }
 

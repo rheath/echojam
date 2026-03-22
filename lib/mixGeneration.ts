@@ -15,6 +15,9 @@ export type GenerationMode =
   | "force_regenerate_script"
   | "force_regenerate_audio";
 
+export type SocialSourceProvider = "instagram" | "tiktok";
+export type MixedSourceProvider = SocialSourceProvider | "google_places";
+
 export type GenerationSwitch = {
   mode?: GenerationMode;
   replay_audio?: Record<string, Partial<Record<Persona, string>>>;
@@ -27,6 +30,14 @@ export type StopInput = {
   lng: number;
   image: string;
   googlePlaceId?: string;
+  sourceProvider?: MixedSourceProvider | null;
+  sourceKind?: "social_import" | "place_search" | null;
+  sourceUrl?: string | null;
+  sourceId?: string | null;
+  sourceCreatorName?: string | null;
+  sourceCreatorUrl?: string | null;
+  sourceCreatorAvatarUrl?: string | null;
+  prefilledScript?: string | null;
   narratorGuidance?: string | null;
   mustMention?: string[] | null;
   factBullets?: string[] | null;

@@ -16,6 +16,7 @@ import {
 import { getPresetCityMeta, isPresetOverviewStopId } from "@/lib/presetOverview";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { getMaxStops, validateMixSelection } from "@/lib/mixConstraints";
+import { CUSTOM_NARRATOR_MAX_CHARS } from "@/lib/customNarrator";
 import {
   nextFollowAlongStopIndex,
   normalizeRouteProgress,
@@ -124,7 +125,7 @@ type CustomRouteResponse = {
     story_by?: string | null;
     story_by_url?: string | null;
     story_by_avatar_url?: string | null;
-    story_by_source?: "instagram" | null;
+    story_by_source?: "instagram" | "tiktok" | "social" | null;
   };
   stops: Array<{
     stop_id: string;
@@ -132,6 +133,13 @@ type CustomRouteResponse = {
     lat: number;
     lng: number;
     image_url: string | null;
+    source_provider?: "instagram" | "tiktok" | "google_places" | null;
+    source_kind?: "social_import" | "place_search" | null;
+    source_url?: string | null;
+    source_id?: string | null;
+    source_creator_name?: string | null;
+    source_creator_url?: string | null;
+    source_creator_avatar_url?: string | null;
     google_place_id?: string | null;
     stop_kind?: "story" | "arrival" | null;
     distance_along_route_meters?: number | null;
@@ -182,6 +190,16 @@ type FollowAlongSearchResponse = {
 type FollowAlongOriginResponse = {
   origin: FollowAlongLocation;
 };
+
+function formatStopSourceLabel(stop: Pick<RouteDef["stops"][number], "sourceProvider" | "sourceCreatorName"> | null | undefined) {
+  if (!stop?.sourceProvider) return null;
+  if (stop.sourceProvider === "google_places") return "Google Place";
+  const creator = (stop.sourceCreatorName || "").trim();
+  if (stop.sourceProvider === "instagram") {
+    return creator ? `Instagram • ${creator}` : "Instagram";
+  }
+  return creator ? `TikTok • ${creator}` : "TikTok";
+}
 
 type FollowAlongPreviewResponse = {
   origin: FollowAlongLocation;
@@ -252,7 +270,6 @@ const BACKGROUND_GENERATION_TIMEOUT_MS = 120000;
 const FOLLOW_ALONG_ORIGIN_PENDING_SUBTITLE = "Finding address...";
 const FOLLOW_ALONG_ORIGIN_FALLBACK_SUBTITLE = "Location detected";
 const PERSONA_KEYS: Array<Exclude<Persona, "custom">> = ["adult", "preteen", "ghost"];
-const CUSTOM_NARRATOR_MAX_CHARS = 500;
 const DEFAULT_STOP_IMAGE = "/images/salem/placeholder.png";
 const LANDING_VIDEO_MAX_PLAYS = 4;
 const WALK_DISCOVERY_STORAGE_PREFIX = "wandrful-walk-discovery";
@@ -740,6 +757,7 @@ export default function HomeClient() {
   }, [activeStopIndex, route]);
 
   const currentStop = route && currentStopIndex !== null ? route.stops[currentStopIndex] : null;
+  const currentStopSourceLabel = currentStop ? formatStopSourceLabel(currentStop) : null;
   const currentStopScript = useMemo(() => {
     if (!currentStop) return "";
     return currentStop?.text?.[persona] || "";
@@ -784,14 +802,16 @@ export default function HomeClient() {
     [selectedCity]
   );
   const activePersonaDisplayName = getRouteNarratorLabel(route, persona);
-  const isInstagramAttributedCustomRoute =
-    !isPresetWalkRoute && route?.storyBySource === "instagram" && Boolean(route?.storyBy?.trim());
-  const instagramStoryByLabel = isInstagramAttributedCustomRoute ? route?.storyBy?.trim() || null : null;
-  const instagramStoryByUrl = isInstagramAttributedCustomRoute ? route?.storyByUrl?.trim() || null : null;
-  const instagramStoryByAvatarUrl = isInstagramAttributedCustomRoute ? route?.storyByAvatarUrl?.trim() || null : null;
+  const isSocialAttributedCustomRoute =
+    !isPresetWalkRoute &&
+    (route?.storyBySource === "instagram" || route?.storyBySource === "tiktok" || route?.storyBySource === "social") &&
+    Boolean(route?.storyBy?.trim());
+  const instagramStoryByLabel = isSocialAttributedCustomRoute ? route?.storyBy?.trim() || null : null;
+  const instagramStoryByUrl = isSocialAttributedCustomRoute ? route?.storyByUrl?.trim() || null : null;
+  const instagramStoryByAvatarUrl = isSocialAttributedCustomRoute ? route?.storyByAvatarUrl?.trim() || null : null;
   const shouldShowInstagramStoryAvatar = Boolean(instagramStoryByAvatarUrl && !didInstagramAvatarFail);
   const activeInstagramCustomRouteId =
-    step === "walk" && isInstagramAttributedCustomRoute ? getCustomRouteId(route?.id ?? null) : null;
+    step === "walk" && isSocialAttributedCustomRoute ? getCustomRouteId(route?.id ?? null) : null;
   const activePresetWalkRouteId =
     step === "walk" && isPresetWalkRoute && jam?.route_id ? (jam.route_id as RouteDef["id"]) : null;
   const isActivePresetWalkRegenerating =
@@ -1563,6 +1583,13 @@ export default function HomeClient() {
       lat: s.lat,
       lng: s.lng,
       googlePlaceId: (s.google_place_id || "").trim() || undefined,
+      sourceProvider: s.source_provider ?? null,
+      sourceKind: s.source_kind ?? null,
+      sourceUrl: s.source_url ?? null,
+      sourceId: s.source_id ?? null,
+      sourceCreatorName: s.source_creator_name ?? null,
+      sourceCreatorUrl: s.source_creator_url ?? null,
+      sourceCreatorAvatarUrl: s.source_creator_avatar_url ?? null,
       isOverview: Boolean(s.is_overview) || isPresetOverviewStopId(stopId),
       stopKind: s.stop_kind || "story",
       distanceAlongRouteMeters:
@@ -3379,6 +3406,7 @@ async function startStopNarration() {
             isOverview: true,
             image: toSafeStopImage(stop.images[0]),
             subtitle: "Starting point",
+            sourceLabel: formatStopSourceLabel(stop),
             isActive: false,
           };
         }
@@ -3394,6 +3422,7 @@ async function startStopNarration() {
           isOverview: Boolean(stop.isOverview),
           image: toSafeStopImage(stop.images[0]),
           subtitle: `${fallbackMinutes} mins away`,
+          sourceLabel: formatStopSourceLabel(stop),
           isActive: false,
         };
       }
@@ -3411,6 +3440,7 @@ async function startStopNarration() {
         isOverview: Boolean(stop.isOverview),
         image: toSafeStopImage(stop.images[0]),
         subtitle,
+        sourceLabel: formatStopSourceLabel(stop),
         isActive: idx === selectedIdx,
       };
     });
@@ -3696,7 +3726,7 @@ async function startStopNarration() {
                 <div className={styles.creatorAccessCalloutCopy}>
                   <div className={styles.creatorAccessCalloutTitle}>
                     Mix your Instagram stories into real-world journeys others can explore.
-                  </div> 
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -3705,7 +3735,7 @@ async function startStopNarration() {
                   }}
                   className={styles.landingHeroCta}
                 >
-                Unlock Creator Mix Studio
+                  Unlock Creator Mix Studio
                 </button>
               </section>
             ) : null}
@@ -4977,7 +5007,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                   </>
                 ) : (
                   <>
-                    {isInstagramAttributedCustomRoute ? (
+                    {isSocialAttributedCustomRoute ? (
                       <>
                         {instagramStoryByUrl ? (
                           <a
@@ -5182,6 +5212,9 @@ You choose where to go — each stop shapes what unfolds next.                  
                         {`${displayNumber}. ${stop.title}`}
                       </div>
                       <div className={styles.stopSubtitle}>{stop.subtitle}</div>
+                      {stop.sourceLabel ? (
+                        <div className={styles.stopSourceMeta}>{stop.sourceLabel}</div>
+                      ) : null}
                     </div>
                   </button>
                   );
@@ -5296,6 +5329,9 @@ You choose where to go — each stop shapes what unfolds next.                  
                                 ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
                                 : "Audio not generated yet"}
                         </div>
+                        {currentStopSourceLabel ? (
+                          <div className={styles.nowPlayingSourceMeta}>{currentStopSourceLabel}</div>
+                        ) : null}
                       </div>
                     </button>
                     {hasCurrentAudio ? (

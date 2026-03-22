@@ -20,7 +20,10 @@ import {
   estimateTextTokenCount,
   instagramRouteStopIdForDraft,
   INSTAGRAM_COLLECTION_MAX_STOPS,
+  INSTAGRAM_IMPORT_MAX_SPLIT_STOPS,
   isInstagramDraftPublishable,
+  normalizeInstagramImportJobDraftIds,
+  parseInstagramTourStopConversions,
   type InstagramDraftContent,
   type InstagramImportDraftStatus,
   type InstagramImportJobPhase,
@@ -97,15 +100,6 @@ type InstagramImportJobRow = {
   lock_token: string | null;
   created_at: string;
   updated_at: string;
-};
-
-type TourStopConversion = {
-  title: string;
-  script: string;
-  placeQuery: string;
-  cityHint: string | null;
-  countryHint: string | null;
-  confidence: number;
 };
 
 type GooglePlaceSearchResponse = {
@@ -361,6 +355,7 @@ export function serializeInstagramJob(job: InstagramImportJobRow | null) {
   return {
     id: job.id,
     draftId: job.draft_id,
+    draftIds: getJobDraftIds(job),
     phase: job.phase,
     status: job.status,
     progress: job.progress,
@@ -372,7 +367,7 @@ export function serializeInstagramJob(job: InstagramImportJobRow | null) {
 }
 
 function getJobDraftIds(job: InstagramImportJobRow) {
-  return normalizeInstagramCollectionDraftIds(job.draft_ids ?? [job.draft_id], INSTAGRAM_COLLECTION_MAX_STOPS);
+  return normalizeInstagramImportJobDraftIds(job.phase, job.draft_id, job.draft_ids);
 }
 
 export function serializeInstagramDraft(
@@ -608,17 +603,6 @@ async function runChatCompletion(apiKey: string, systemPrompt: string, userPromp
   return toNullableTrimmed(payload.choices?.[0]?.message?.content || "");
 }
 
-function extractJsonObject(raw: string) {
-  const trimmed = raw.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
-  const firstBrace = trimmed.indexOf("{");
-  const lastBrace = trimmed.lastIndexOf("}");
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    return trimmed.slice(firstBrace, lastBrace + 1);
-  }
-  throw new Error("JSON response was not found in model output");
-}
-
 async function cleanupImportedText(apiKey: string, importedText: string) {
   const systemPrompt = [
     "You clean travel post source material into concise factual notes for a tour draft.",
@@ -636,7 +620,7 @@ async function cleanupImportedText(apiKey: string, importedText: string) {
   return await runChatCompletion(apiKey, systemPrompt, userPrompt);
 }
 
-async function convertCleanedTextToTourStop(
+async function convertCleanedTextToTourStops(
   apiKey: string,
   sources: InstagramScriptGenerationSources
 ) {
@@ -646,28 +630,32 @@ async function convertCleanedTextToTourStop(
   }
 
   const systemPrompt = [
-    "You convert travel source material into one EchoJam tour stop.",
+    "You convert travel source material into one to five ordered EchoJam tour stops.",
     "Use the transcript for narrative flow, spoken details, and sequencing when it is available.",
     "Use the caption to add place names, logistics, concrete facts, and context when it is available.",
     "Treat cleaned notes as supporting context, but do not ignore transcript or caption.",
     "If transcript and caption disagree, prefer the most concrete factual details.",
-    "If the source mentions multiple locations, pick one primary place only.",
-    "Choose the place most central to the story, not a route summary.",
+    "When the source clearly moves across multiple meaningful locations or beats, split it into multiple ordered stops.",
+    "Keep single-place stories as exactly one stop.",
+    "Do not create filler stops or route summaries.",
     "Do not invent locations or details.",
     "Return strict JSON only.",
   ].join(" ");
 
   const userPrompt = [
-    "Convert this Instagram source into exactly one draft stop.",
+    `Convert this Instagram source into an ordered list of 1 to ${INSTAGRAM_IMPORT_MAX_SPLIT_STOPS} draft stops.`,
     "Use both transcript and caption together when both are available.",
-    "Output JSON with keys: title, script, placeQuery, cityHint, countryHint, confidence.",
+    "Output strict JSON with one top-level key: stops.",
+    "stops must be an ordered array.",
+    "Each stop must include: title, script, placeQuery, cityHint, countryHint, confidence.",
     "title: a short user-facing stop title.",
-    "script: 90-180 words of spoken tour narration.",
-    "placeQuery: the best single place search query for Google Places.",
+    "script: 90-180 words of spoken tour narration for that stop only.",
+    "placeQuery: the best single place search query for Google Places for that stop.",
     "cityHint: the most likely city or region if known, else null.",
     "countryHint: the most likely country if known, else null.",
     "confidence: number from 0 to 1.",
     "Use null for unknown hints.",
+    "Preserve chronological order when there are multiple stops.",
     "",
     promptSourceText,
   ].join("\n");
@@ -676,23 +664,7 @@ async function convertCleanedTextToTourStop(
   if (!raw) {
     throw new Error("Tour stop conversion returned empty output");
   }
-
-  const parsed = JSON.parse(extractJsonObject(raw)) as Partial<TourStopConversion>;
-  const title = toNullableTrimmed(parsed.title);
-  const script = toNullableTrimmed(parsed.script);
-  const placeQuery = toNullableTrimmed(parsed.placeQuery);
-  if (!title || !script || !placeQuery) {
-    throw new Error("Tour stop conversion returned incomplete JSON");
-  }
-  const confidence = Number(parsed.confidence);
-  return {
-    title,
-    script,
-    placeQuery,
-    cityHint: toNullableTrimmed(parsed.cityHint),
-    countryHint: toNullableTrimmed(parsed.countryHint),
-    confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.45,
-  } satisfies TourStopConversion;
+  return parseInstagramTourStopConversions(raw, INSTAGRAM_IMPORT_MAX_SPLIT_STOPS);
 }
 
 function buildPlaceSearchQueries(query: string, cityHint: string | null, countryHint: string | null) {
@@ -826,7 +798,9 @@ export async function createInstagramImportJob(
   const normalizedDraftIds =
     phase === "publish_collection"
       ? normalizeInstagramCollectionDraftIds(opts?.draftIds ?? [draftId], INSTAGRAM_COLLECTION_MAX_STOPS)
-      : null;
+      : phase === "import"
+        ? normalizeInstagramCollectionDraftIds(opts?.draftIds ?? [draftId], INSTAGRAM_IMPORT_MAX_SPLIT_STOPS)
+        : normalizeInstagramCollectionDraftIds([draftId], 1);
   const insertPayload: Record<string, unknown> = {
     draft_id: draftId,
     phase,
@@ -1150,47 +1124,99 @@ async function processImportJob(
 
   await updateJobWithLock(admin, job.id, lockToken, {
     progress: 72,
-    message: "Converting to tour draft",
+    message: "Converting to tour stops",
   });
-  const converted = await convertCleanedTextToTourStop(apiKey, {
+  const convertedStops = await convertCleanedTextToTourStops(apiKey, {
     caption: metadata.caption,
     transcript,
     cleanedText,
   });
-  const candidates = await searchPlaces(converted.placeQuery, converted.cityHint, converted.countryHint, 3);
-  const topCandidate = candidates[0] ?? null;
+  const placeCandidatesByStop = await Promise.all(
+    convertedStops.map(async (convertedStop) => ({
+      convertedStop,
+      candidates: await searchPlaces(
+        convertedStop.placeQuery,
+        convertedStop.cityHint,
+        convertedStop.countryHint,
+        3
+      ),
+    }))
+  );
 
-  const warnings = [draft.warning, transcriptResult.warning, candidates.length === 0 ? "Location confirmation required." : null]
-    .filter((value): value is string => Boolean(toNullableTrimmed(value)))
-    .join(" ");
+  const siblingDraftIds =
+    convertedStops.length > 1
+      ? (
+          await admin
+            .from("instagram_import_drafts")
+            .insert(
+              convertedStops.slice(1).map(() => ({
+                source_url: draft.source_url,
+                source_kind: draft.source_kind,
+                source_shortcode: draft.source_shortcode,
+                status: "pending_import",
+              }))
+            )
+            .select("id")
+        )
+      : null;
+  if (siblingDraftIds?.error) {
+    throw new Error(siblingDraftIds.error.message || "Failed to create Instagram sibling drafts");
+  }
+  const orderedDraftIds = [
+    draft.id,
+    ...((siblingDraftIds?.data ?? []).map((row) => toNullableTrimmed((row as { id?: string }).id)).filter(
+      (value): value is string => Boolean(value)
+    )),
+  ];
+  if (orderedDraftIds.length !== convertedStops.length) {
+    throw new Error("Failed to materialize every imported Instagram stop");
+  }
 
-  await updateDraft(admin, draft.id, {
-    source_owner_title: metadata.ownerTitle,
-    source_owner_user_id: metadata.ownerUserId,
-    source_caption: metadata.caption,
-    source_thumbnail_url: metadata.thumbnailUrl,
-    transcript_raw: transcript,
-    transcript_cleaned: cleanedText,
-    generated_title: converted.title,
-    generated_script: converted.script,
-    place_query: converted.placeQuery,
-    place_city_hint: converted.cityHint,
-    place_country_hint: converted.countryHint,
-    place_confidence: converted.confidence,
-    suggested_place_label: topCandidate?.label ?? null,
-    suggested_place_lat: topCandidate?.lat ?? null,
-    suggested_place_lng: topCandidate?.lng ?? null,
-    suggested_place_image_url: topCandidate?.imageUrl ?? null,
-    suggested_google_place_id: topCandidate?.googlePlaceId ?? null,
-    status: nextInstagramDraftStatus(draft.status, "import_succeeded"),
-    warning: toNullableTrimmed(warnings),
-    error: null,
+  await updateJobWithLock(admin, job.id, lockToken, {
+    draft_ids: orderedDraftIds,
   });
+
+  const importSucceededStatus = nextInstagramDraftStatus("pending_import", "import_succeeded");
+  await Promise.all(
+    placeCandidatesByStop.map(async ({ convertedStop, candidates }, index) => {
+      const topCandidate = candidates[0] ?? null;
+      const warnings = [
+        index === 0 ? draft.warning : null,
+        index === 0 ? transcriptResult.warning : null,
+        candidates.length === 0 ? "Location confirmation required." : null,
+      ]
+        .filter((value): value is string => Boolean(toNullableTrimmed(value)))
+        .join(" ");
+
+      await updateDraft(admin, orderedDraftIds[index]!, {
+        source_owner_title: metadata.ownerTitle,
+        source_owner_user_id: metadata.ownerUserId,
+        source_caption: metadata.caption,
+        source_thumbnail_url: metadata.thumbnailUrl,
+        transcript_raw: transcript,
+        transcript_cleaned: cleanedText,
+        generated_title: convertedStop.title,
+        generated_script: convertedStop.script,
+        place_query: convertedStop.placeQuery,
+        place_city_hint: convertedStop.cityHint,
+        place_country_hint: convertedStop.countryHint,
+        place_confidence: convertedStop.confidence,
+        suggested_place_label: topCandidate?.label ?? null,
+        suggested_place_lat: topCandidate?.lat ?? null,
+        suggested_place_lng: topCandidate?.lng ?? null,
+        suggested_place_image_url: topCandidate?.imageUrl ?? null,
+        suggested_google_place_id: topCandidate?.googlePlaceId ?? null,
+        status: index === 0 ? nextInstagramDraftStatus(draft.status, "import_succeeded") : importSucceededStatus,
+        warning: toNullableTrimmed(warnings),
+        error: null,
+      });
+    })
+  );
 
   await updateJobWithLock(admin, job.id, lockToken, {
     status: successJobStatusForPhase("import"),
     progress: 100,
-    message: "Draft ready",
+    message: convertedStops.length > 1 ? `Drafts ready (${convertedStops.length} stops)` : "Draft ready",
     error: null,
   });
 }

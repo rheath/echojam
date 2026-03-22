@@ -212,11 +212,17 @@
 }
 
 .errorBanner,
-.warningBanner {
+.warningBanner,
+.successBanner {
   margin-top: 14px;
   padding: 12px 14px;
   border-radius: 14px;
   font-size: 14px;
+}
+
+.successBanner {
+  background: rgba(43, 120, 84, 0.12);
+  color: #24563d;
 }
 
 .errorBanner {

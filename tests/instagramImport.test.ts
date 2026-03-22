@@ -13,10 +13,13 @@ import {
   estimateTextTokenCount,
   getInstagramCollectionDraftStatus,
   INSTAGRAM_COLLECTION_MAX_STOPS,
+  INSTAGRAM_IMPORT_MAX_SPLIT_STOPS,
   isInstagramDraftPublishable,
   nextInstagramDraftStatus,
+  normalizeInstagramImportJobDraftIds,
   normalizeInstagramUrl,
   normalizeInstagramCollectionDraftIds,
+  parseInstagramTourStopConversions,
   parseInstagramPublicMetadataFromHtml,
   parseInstagramProfileImageUrlFromHtml,
   removeInstagramCollectionDraftId,
@@ -241,7 +244,114 @@ test("collection publish helpers derive titles and ready states", () => {
       { status: "draft_ready", location: { publishReady: true } },
       { status: "published", location: { publishReady: true } },
     ]),
-    false
+    true
+  );
+});
+
+test("parseInstagramTourStopConversions accepts a single stop object and multi-stop arrays", () => {
+  assert.deepEqual(
+    parseInstagramTourStopConversions(
+      JSON.stringify({
+        title: "Single stop",
+        script: "One narrated stop.",
+        placeQuery: "North End Boston",
+        cityHint: "Boston",
+        countryHint: "USA",
+        confidence: 0.91,
+      })
+    ),
+    [
+      {
+        title: "Single stop",
+        script: "One narrated stop.",
+        placeQuery: "North End Boston",
+        cityHint: "Boston",
+        countryHint: "USA",
+        confidence: 0.91,
+      },
+    ]
+  );
+
+  assert.deepEqual(
+    parseInstagramTourStopConversions(
+      JSON.stringify({
+        stops: [
+          {
+            title: "Stop 1",
+            script: "Script 1",
+            placeQuery: "Boston Common",
+            cityHint: "Boston",
+            countryHint: "USA",
+            confidence: 0.8,
+          },
+          {
+            title: "Stop 2",
+            script: "Script 2",
+            placeQuery: "Beacon Hill Boston",
+            cityHint: "Boston",
+            countryHint: "USA",
+            confidence: 0.7,
+          },
+        ],
+      })
+    ),
+    [
+      {
+        title: "Stop 1",
+        script: "Script 1",
+        placeQuery: "Boston Common",
+        cityHint: "Boston",
+        countryHint: "USA",
+        confidence: 0.8,
+      },
+      {
+        title: "Stop 2",
+        script: "Script 2",
+        placeQuery: "Beacon Hill Boston",
+        cityHint: "Boston",
+        countryHint: "USA",
+        confidence: 0.7,
+      },
+    ]
+  );
+});
+
+test("parseInstagramTourStopConversions rejects malformed stops and caps output", () => {
+  assert.throws(
+    () =>
+      parseInstagramTourStopConversions(
+        JSON.stringify({
+          stops: [{ title: "Missing script", placeQuery: "Boston" }],
+        })
+      ),
+    /incomplete json/i
+  );
+
+  const overLimit = parseInstagramTourStopConversions(
+    JSON.stringify({
+      stops: Array.from({ length: INSTAGRAM_IMPORT_MAX_SPLIT_STOPS + 2 }, (_, index) => ({
+        title: `Stop ${index + 1}`,
+        script: `Script ${index + 1}`,
+        placeQuery: `Place ${index + 1}`,
+        cityHint: "Boston",
+        countryHint: "USA",
+        confidence: 0.5,
+      })),
+    })
+  );
+  assert.equal(overLimit.length, INSTAGRAM_IMPORT_MAX_SPLIT_STOPS);
+  assert.equal(overLimit[0]?.title, "Stop 1");
+  assert.equal(overLimit.at(-1)?.title, `Stop ${INSTAGRAM_IMPORT_MAX_SPLIT_STOPS}`);
+});
+
+test("normalizeInstagramImportJobDraftIds preserves multi-stop imports and single-stop publish jobs", () => {
+  assert.deepEqual(
+    normalizeInstagramImportJobDraftIds("import", "draft-1", ["draft-1", "draft-2", "draft-3"]),
+    ["draft-1", "draft-2", "draft-3"]
+  );
+  assert.deepEqual(
+    normalizeInstagramImportJobDraftIds("publish", "draft-9", null),
+    ["draft-9"]
   );
 });
 
