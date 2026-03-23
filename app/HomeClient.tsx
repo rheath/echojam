@@ -2,7 +2,7 @@
  
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Image from "next/image";
+import Image, { type ImageProps } from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import {
   getPresetRouteSummariesByCity,
@@ -348,6 +348,34 @@ function toSafeStopImage(value: string | null | undefined) {
   if (normalized.startsWith("/")) return normalized;
   if (normalized.startsWith("https://") || normalized.startsWith("http://")) return normalized;
   return DEFAULT_STOP_IMAGE;
+}
+
+type WalkStepImageProps = Omit<ImageProps, "src" | "alt"> & {
+  src: string | null | undefined;
+  alt: string;
+};
+
+function WalkStepImage({ src, alt, onError, ...props }: WalkStepImageProps) {
+  const safeSrc = toSafeStopImage(src);
+  const [resolvedSrc, setResolvedSrc] = useState(safeSrc);
+
+  useEffect(() => {
+    setResolvedSrc(safeSrc);
+  }, [safeSrc]);
+
+  return (
+    <Image
+      {...props}
+      src={resolvedSrc}
+      alt={alt}
+      onError={(event) => {
+        if (resolvedSrc !== DEFAULT_STOP_IMAGE) {
+          setResolvedSrc(DEFAULT_STOP_IMAGE);
+        }
+        onError?.(event);
+      }}
+    />
+  );
 }
 
 function getRouteMiles(stops: RouteDef["stops"]) {
@@ -1554,6 +1582,27 @@ export default function HomeClient() {
       : `/api/preset-routes/${routeRef}`;
     const headers = await withSupabaseAuthHeaders();
     const res = await fetch(endpoint, { cache: "no-store", headers });
+    if (!res.ok && res.status === 402) {
+      try {
+        const lockedPayload = (await res.json()) as {
+          access?: "locked";
+          teaser?: {
+            slug?: string;
+          } | null;
+        };
+        if (lockedPayload.access === "locked") {
+          const teaserSlug = lockedPayload.teaser?.slug?.trim();
+          if (teaserSlug) {
+            setErr(null);
+            setCustomRoute(null);
+            router.replace(`/journeys/${encodeURIComponent(teaserSlug)}`);
+            return null;
+          }
+        }
+      } catch {
+        // Fall through to the generic error handling below if the locked payload is missing or malformed.
+      }
+    }
     if (!res.ok) {
       let detail: string | null = null;
       try {
@@ -5246,7 +5295,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                     type="button"
                   >
                     <div className={styles.stopThumbWrap}>
-                      <Image
+                      <WalkStepImage
                         src={toSafeStopImage(stop.image)}
                         alt={stop.title}
                         fill
@@ -5275,7 +5324,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                       <>
                         <div className={styles.walkDiscoveryContent}>
                           <div className={styles.walkDiscoveryImageWrap}>
-                            <Image
+                            <WalkStepImage
                               src={toSafeStopImage(walkDiscoverySuggestion.image)}
                               alt={walkDiscoverySuggestion.title}
                               fill
@@ -5357,7 +5406,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                       onClick={openScriptModal}
                     >
                       <div className={styles.nowPlayingThumbWrap}>
-                        <Image
+                        <WalkStepImage
                           src={toSafeStopImage(currentStop.images[0])}
                           alt={currentStop.title}
                           fill
@@ -5434,7 +5483,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                     />
                   </button>
                   <div className={styles.scriptModalImageWrap}>
-                    <Image
+                    <WalkStepImage
                       src={toSafeStopImage(currentStop.images[0])}
                       alt={currentStop.title}
                       fill
