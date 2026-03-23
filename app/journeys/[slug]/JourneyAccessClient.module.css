@@ -1,0 +1,573 @@
+.page {
+  min-height: 100vh;
+  background: #0b0b11;
+  color: #f4f4f6;
+}
+
+.layout {
+  min-height: 100vh;
+  display: grid; 
+  grid-template-columns: minmax(0, 59%) minmax(380px, 41%);
+  grid-template-areas: "hero rail";
+}
+
+.heroPane {
+  grid-area: hero;
+  position: relative;
+  min-height: 48vh;
+  background:
+    radial-gradient(120% 140% at 12% 12%, rgba(255, 95, 146, 0.3) 0%, rgba(255, 95, 146, 0) 48%),
+    linear-gradient(180deg, rgba(8, 8, 12, 0.16) 0%, rgba(8, 8, 12, 0.74) 100%),
+    linear-gradient(135deg, #2a2033 0%, #171722 52%, #0f1018 100%);
+  overflow: hidden;
+}
+
+.heroPaneWithImage {
+  background: #11111a;
+}
+
+.heroImage {
+  object-fit: cover;
+}
+
+.heroBackButton {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 2;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  background: rgba(24, 24, 31, 0.82);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.heroBackIcon {
+  width: 26px;
+  height: 26px;
+  filter: invert(1);
+}
+
+.rail {
+  grid-area: rail;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #11111a;
+}
+
+.railCard {
+  min-height: 100%;
+  padding: 28px 30px 32px;
+  background: radial-gradient(110% 140% at 0% 0%, #262631 0%, #171722 55%, #101019 100%);
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.avatarWrap {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 999px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.avatar {
+  object-fit: cover;
+}
+
+.avatarIcon {
+  width: 24px;
+  height: 24px;
+  filter: invert(1);
+  opacity: 0.9;
+}
+
+.metaText {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: rgba(244, 244, 246, 0.86);
+  font-size: 15px;
+}
+
+.metaActiveName {
+  color: #ff5f92;
+  font-weight: 700;
+}
+
+.pricePill {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.headline {
+  margin: 12px 0 0;
+  font-size: 44px;
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  font-weight: 500;
+}
+
+.subline {
+  margin-top: 10px;
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  color: rgba(244, 244, 246, 0.82);
+  font-size: 16px;
+}
+
+.teaserText {
+  margin: 18px 0 0;
+  max-width: 34rem;
+  color: rgba(244, 244, 246, 0.88);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.previewCard {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 22px;
+  padding: 14px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.previewCardNoImage {
+  grid-template-columns: 1fr;
+}
+
+.previewImageWrap {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.previewImage {
+  object-fit: cover;
+}
+
+.previewBody {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.previewEyebrow {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ea0ae;
+}
+
+.previewTitle {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.previewMeta {
+  color: rgba(244, 244, 246, 0.75);
+  font-size: 15px;
+}
+
+.previewLead {
+  margin: 0;
+  color: rgba(244, 244, 246, 0.88);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.stopSection {
+  margin-top: 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.stopSectionHeader {
+  display: grid;
+  gap: 8px;
+}
+
+.stopList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stopItem {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  color: inherit;
+}
+
+.stopItemHighlight {
+  opacity: 1;
+}
+
+.stopThumbWrap {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  border-radius: 12px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.stopThumb {
+  object-fit: cover;
+}
+
+.stopText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.stopTitle {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: #fff;
+  min-width: 0;
+  opacity: 0.9;
+}
+
+.stopTitleActive {
+  color: #ff79a8;
+}
+
+.stopSubtitle {
+  font-size: 16px;
+  color: rgba(244, 244, 246, 0.72);
+}
+
+.lockedStopsArea {
+  position: relative;
+  min-height: 320px;
+  border-radius: 28px;
+  overflow: hidden;
+      margin-left: -10px;
+    padding-left: 10px;
+}
+
+.lockedStopsBlur {
+  position: relative;
+  padding: 12px 0 20px;
+  filter: blur(8px);
+  opacity: 0.72;
+  pointer-events: none;
+  user-select: none;
+}
+
+.lockedStopsBlur::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(16, 16, 25, 0.18) 0%, rgba(16, 16, 25, 0.55) 100%);
+}
+
+.lockedOverlay {
+  position: absolute;
+  inset: 18px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.lockedOverlayCard {
+  width: min(100%, 420px);
+  pointer-events: auto;
+}
+
+.statusStack {
+  margin-top: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.statusMessage,
+.statusError,
+.loadingState,
+.actionCard {
+  padding: 16px 18px;
+  border-radius: 20px;
+}
+
+.statusMessage {
+  background: rgba(73, 178, 117, 0.16);
+  border: 1px solid rgba(73, 178, 117, 0.32);
+  color: #d7f4de;
+}
+
+.inlineResetLink {
+  display: inline;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.14em;
+  cursor: pointer;
+  opacity: 0.92;
+}
+
+.inlineResetLink:hover {
+  opacity: 1;
+}
+
+.inlineResetLink:focus-visible {
+  outline: 2px solid rgba(215, 244, 222, 0.85);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.statusError {
+  background: rgba(207, 84, 67, 0.18);
+  border: 1px solid rgba(207, 84, 67, 0.34);
+  color: #ffd8d1;
+}
+
+.loadingState {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(244, 244, 246, 0.8);
+}
+
+.actionCard {
+  display: grid;
+  gap: 16px;
+  background: #000;
+  border: 1px solid #e4e4ea;
+}
+
+.overlayIntro {
+  display: grid;
+  gap: 12px;
+}
+
+.overlayQuote {
+  margin: 0;
+  color: #f4f4f6;
+  font-size: 18px;
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.overlayMetaBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.actionTitle {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.actionText {
+  margin: 0;
+  color: #c7cad4;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.actionLabel {
+  display: grid;
+  gap: 8px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.input {
+  width: 100%;
+  min-height: 52px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  padding: 0 16px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 16px;
+}
+
+.input::placeholder {
+  color: rgba(244, 244, 246, 0.5);
+}
+
+.buttonRow {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.primaryButton,
+.secondaryButton,
+.primaryLink {
+  min-height: 52px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 160ms ease, opacity 160ms ease, background 160ms ease;
+}
+
+.primaryButton,
+.primaryLink {
+  border: 0;
+  background: #ff5f92;
+  color: #16161d;
+}
+
+.secondaryButton {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: #fff;
+}
+
+.primaryButton:hover,
+.secondaryButton:hover,
+.primaryLink:hover {
+  transform: translateY(-1px);
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (min-width: 981px) {
+  .layout {
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .heroPane {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .railCard {
+    min-height: auto;
+  }
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "hero"
+      "rail";
+  }
+
+  .heroPane {
+    min-height: 320px;
+  }
+
+  .rail {
+    overflow: visible;
+  }
+
+  .lockedStopsArea {
+    min-height: 360px;
+  }
+}
+
+@media (max-width: 640px) {
+  .heroBackButton {
+    top: 14px;
+    left: 14px;
+  }
+
+  .railCard {
+    padding: 22px 18px 28px;
+  }
+
+ 
+
+  .metaRow {
+    align-items: flex-start;
+  }
+
+  .pricePill {
+    margin-left: 0;
+  }
+
+  
+
+  .stopTitle {
+    font-size: 20px;
+  }
+
+  .stopSubtitle {
+    font-size: 15px;
+  }
+
+  .lockedStopsArea {
+    min-height: 420px;
+  }
+
+  .lockedOverlay {
+    inset: 14px 10px;
+    align-items: flex-start;
+    padding-top: 16px;
+  }
+
+  .buttonRow {
+    flex-direction: column;
+  }
+
+  .primaryButton,
+  .secondaryButton,
+  .primaryLink {
+    width: 100%;
+  }
+}

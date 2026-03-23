@@ -42,6 +42,7 @@ import {
   type GeoCommitSample,
   type JamVisibilityState,
 } from "@/lib/jamRuntime";
+import { buildGoogleMapsDirectionsUrl } from "@/lib/routePath";
 import dynamic from "next/dynamic";
 import styles from "./HomeClient.module.css";
 
@@ -3544,25 +3545,14 @@ async function startStopNarration() {
 
   const mapsUrl = useMemo(() => {
     if (!route) return "#";
-    const originPoint = route.origin ?? (route.stops[0] ? { lat: route.stops[0].lat, lng: route.stops[0].lng } : null);
-    const destinationPoint =
-      route.destination ??
-      (route.stops[route.stops.length - 1]
-        ? {
-            lat: route.stops[route.stops.length - 1].lat,
-            lng: route.stops[route.stops.length - 1].lng,
-          }
-        : null);
-    if (!originPoint || !destinationPoint) return "#";
-    const origin = `${originPoint.lat},${originPoint.lng}`;
-    const destination = `${destinationPoint.lat},${destinationPoint.lng}`;
-    const waypoints = route.stops
-      .filter((stop) => stop.stopKind !== "arrival")
-      .map((s) => `${s.lat},${s.lng}`)
-      .join("|");
-    const mode = route.transportMode === "drive" ? "driving" : "walking";
-    const base = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=${mode}`;
-    return waypoints ? `${base}&waypoints=${encodeURIComponent(waypoints)}` : base;
+    return buildGoogleMapsDirectionsUrl({
+      stops: route.stops,
+      endpoints: {
+        origin: route.origin ? { lat: route.origin.lat, lng: route.origin.lng } : null,
+        destination: route.destination ? { lat: route.destination.lat, lng: route.destination.lng } : null,
+      },
+      routeTravelMode: route.transportMode ?? null,
+    });
   }, [route]);
   const buildMixSubmitDisabled = isEditingStopsFromWalk ? isGeneratingMix : (!selectionValidation.ok || isGeneratingMix);
   const isSurpriseMixUnavailable = !isNearbyStoryEnabled;

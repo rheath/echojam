@@ -30,6 +30,8 @@ export type RouteLookupPlan =
   | { kind: "fetch"; request: RoutePathRequest }
   | { kind: "fallback" };
 
+type GoogleMapsTravelMode = "walking" | "driving";
+
 function samePoint(a: RoutePathPoint, b: RoutePathPoint) {
   return a.lat === b.lat && a.lng === b.lng;
 }
@@ -103,6 +105,38 @@ export function buildRoutePathRequest(params: {
   }
 
   return request;
+}
+
+function encodeRoutePathPoint(point: RoutePathPoint) {
+  return `${point.lat},${point.lng}`;
+}
+
+function resolveGoogleMapsTravelMode(mode: GoogleRouteTravelMode): GoogleMapsTravelMode {
+  return mode === "WALKING" ? "walking" : "driving";
+}
+
+export function buildGoogleMapsDirectionsUrl(params: {
+  stops: RoutePathStop[];
+  endpoints?: RoutePathEndpoints;
+  routeTravelMode?: RouteTravelMode | null;
+}) {
+  const request = buildRoutePathRequest(params);
+  if (!request) return "#";
+
+  const url = new URL("https://www.google.com/maps/dir/");
+  url.searchParams.set("api", "1");
+  url.searchParams.set("origin", encodeRoutePathPoint(request.origin));
+  url.searchParams.set("destination", encodeRoutePathPoint(request.destination));
+  url.searchParams.set("travelmode", resolveGoogleMapsTravelMode(request.travelMode));
+
+  const waypoints = request.intermediates
+    ?.map(({ location }) => encodeRoutePathPoint(location))
+    .join("|");
+  if (waypoints) {
+    url.searchParams.set("waypoints", waypoints);
+  }
+
+  return url.toString();
 }
 
 export function buildRouteLookupPlan(params: {

@@ -3,9 +3,16 @@ import { getJourneyAccess, getJourneyOfferingBySlug } from "@/lib/server/journey
 import { getRequestAuthUser } from "@/lib/server/requestAuth";
 import { getSiteBaseUrl } from "@/lib/server/siteUrl";
 import { createStripeCheckoutSession } from "@/lib/server/stripe";
+import { appendUtmParams, pickUtmParamsFromRecord, utmParamsToMetadata } from "@/lib/utm";
+
+type Body = {
+  utm?: Record<string, unknown> | null;
+};
 
 export async function POST(req: Request, ctx: { params: Promise<{ slug: string }> }) {
   try {
+    const body = (await req.json().catch(() => ({}))) as Body;
+    const utmParams = pickUtmParamsFromRecord(body.utm);
     const user = await getRequestAuthUser(req);
     if (!user) {
       return NextResponse.json({ error: "Sign in before checkout." }, { status: 401 });
@@ -30,13 +37,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
     }
 
     const baseUrl = await getSiteBaseUrl();
+    const successUrl = new URL(`/journeys/${encodeURIComponent(offering.slug)}`, baseUrl);
+    successUrl.searchParams.set("checkout", "success");
+    appendUtmParams(successUrl.searchParams, utmParams);
+
+    const cancelUrl = new URL(`/journeys/${encodeURIComponent(offering.slug)}`, baseUrl);
+    cancelUrl.searchParams.set("checkout", "cancelled");
+    appendUtmParams(cancelUrl.searchParams, utmParams);
+
     const session = await createStripeCheckoutSession({
       title: offering.title,
       description: offering.teaserDescription,
       amountUsdCents: offering.pricing.amountUsdCents,
       purchaserEmail: user.email,
-      successUrl: `${baseUrl}/journeys/${encodeURIComponent(offering.slug)}?checkout=success`,
-      cancelUrl: `${baseUrl}/journeys/${encodeURIComponent(offering.slug)}?checkout=cancelled`,
+      successUrl: successUrl.toString(),
+      cancelUrl: cancelUrl.toString(),
       metadata: {
         offering_id: offering.id,
         offering_slug: offering.slug,
@@ -44,6 +59,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
         source_id: offering.sourceId,
         user_id: user.id,
         purchaser_email: user.email ?? "",
+        ...utmParamsToMetadata(utmParams),
       },
     });
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getJourneyAccess, getJourneyOfferingBySlug } from "@/lib/server/journeyAccess";
-import { loadPresetRoutePayload } from "@/lib/server/presetRoutePayload";
+import { loadPresetRoutePayload, loadPresetRoutePreviewStops } from "@/lib/server/presetRoutePayload";
 import { getRequestAuthUser } from "@/lib/server/requestAuth";
 
 export async function GET(req: Request, ctx: { params: Promise<{ slug: string }> }) {
@@ -19,9 +19,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
     });
 
     if (access.accessState === "locked") {
+      const previewStops =
+        offering.sourceKind === "preset"
+          ? (await loadPresetRoutePreviewStops(offering.sourceId)) ?? []
+          : [];
       return NextResponse.json({
         access: "locked",
         teaser: access.offering,
+        previewStops,
       });
     }
 

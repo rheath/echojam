@@ -18,6 +18,26 @@ type CanonicalImageRow = {
   image_url: string | null;
 };
 
+type PresetRouteStopRecord = {
+  stop_id: string;
+  title: string;
+  lat: number;
+  lng: number;
+  image_url: string;
+  script_adult: string | null;
+  script_preteen: string | null;
+  script_ghost: string | null;
+  audio_url_adult: string | null;
+  audio_url_preteen: string | null;
+  audio_url_ghost: string | null;
+  is_overview: boolean;
+  position: number;
+};
+
+type LoadPresetRouteStopsOptions = {
+  includeAssets?: boolean;
+};
+
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -45,7 +65,12 @@ function pickStopImage(
   return toNullableTrimmed(routeImage) || placeholder;
 }
 
-export async function loadPresetRoutePayload(routeId: string, cityHint?: string | null) {
+async function loadPresetRouteStops(
+  routeId: string,
+  cityHint?: string | null,
+  options?: LoadPresetRouteStopsOptions
+) {
+  const includeAssets = options?.includeAssets ?? true;
   const route = getRouteById(routeId);
   if (!route) return null;
 
@@ -60,7 +85,7 @@ export async function loadPresetRoutePayload(routeId: string, cityHint?: string 
   }
 
   if (!admin) {
-    const stops = presetStops.map((stop, index) => ({
+    const stops: PresetRouteStopRecord[] = presetStops.map((stop, index) => ({
       stop_id: stop.id,
       title: stop.title,
       lat: stop.lat,
@@ -128,15 +153,17 @@ export async function loadPresetRoutePayload(routeId: string, cityHint?: string 
       audio_url_ghost: string | null;
     }
   >();
-  try {
-    const assetRows = await listPresetRouteStopAssets(
-      admin,
-      routeId,
-      presetStops.map((stop) => stop.id)
-    );
-    assetsByStop = mapPresetAssetsByStop(assetRows);
-  } catch (assetsErr) {
-    console.error("preset-routes: assets query failed", assetsErr);
+  if (includeAssets) {
+    try {
+      const assetRows = await listPresetRouteStopAssets(
+        admin,
+        routeId,
+        presetStops.map((stop) => stop.id)
+      );
+      assetsByStop = mapPresetAssetsByStop(assetRows);
+    } catch (assetsErr) {
+      console.error("preset-routes: assets query failed", assetsErr);
+    }
   }
 
   const imageByCanonical = new Map<string, CanonicalImageRow>();
@@ -151,7 +178,7 @@ export async function loadPresetRoutePayload(routeId: string, cityHint?: string 
     .limit(1)
     .maybeSingle();
 
-  const stops = presetStops.map((stop, index) => {
+  const stops: PresetRouteStopRecord[] = presetStops.map((stop, index) => {
     const mapping = mappingByStop.get(stop.id);
     const assetsForStop = assetsByStop.get(stop.id) ?? null;
     const imageForStop = mapping ? imageByCanonical.get(mapping.canonical_stop_id) : null;
@@ -171,12 +198,12 @@ export async function loadPresetRoutePayload(routeId: string, cityHint?: string 
           pickStopImage(canonicalImage, placeIdPhoto, routeImage, "/images/salem/placeholder.png")
         ) ||
         "/images/salem/placeholder.png",
-      script_adult: assetsForStop?.script_adult ?? null,
-      script_preteen: assetsForStop?.script_preteen ?? null,
-      script_ghost: assetsForStop?.script_ghost ?? null,
-      audio_url_adult: assetsForStop?.audio_url_adult ?? null,
-      audio_url_preteen: assetsForStop?.audio_url_preteen ?? null,
-      audio_url_ghost: assetsForStop?.audio_url_ghost ?? null,
+      script_adult: includeAssets ? assetsForStop?.script_adult ?? null : null,
+      script_preteen: includeAssets ? assetsForStop?.script_preteen ?? null : null,
+      script_ghost: includeAssets ? assetsForStop?.script_ghost ?? null : null,
+      audio_url_adult: includeAssets ? assetsForStop?.audio_url_adult ?? null : null,
+      audio_url_preteen: includeAssets ? assetsForStop?.audio_url_preteen ?? null : null,
+      audio_url_ghost: includeAssets ? assetsForStop?.audio_url_ghost ?? null : null,
       is_overview: Boolean(stop.isOverview),
       position: index,
     };
@@ -192,4 +219,22 @@ export async function loadPresetRoutePayload(routeId: string, cityHint?: string 
     },
     stops,
   };
+}
+
+export async function loadPresetRoutePreviewStops(routeId: string, cityHint?: string | null) {
+  const payload = await loadPresetRouteStops(routeId, cityHint, { includeAssets: false });
+  if (!payload) return null;
+  return payload.stops
+    .filter((stop) => !stop.is_overview)
+    .map((stop) => ({
+      stop_id: stop.stop_id,
+      title: stop.title,
+      image_url: stop.image_url,
+      position: stop.position,
+      is_overview: stop.is_overview,
+    }));
+}
+
+export async function loadPresetRoutePayload(routeId: string, cityHint?: string | null) {
+  return loadPresetRouteStops(routeId, cityHint, { includeAssets: true });
 }

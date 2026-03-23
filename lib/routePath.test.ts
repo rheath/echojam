@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildGoogleMapsDirectionsUrl,
   buildRouteLookupPlan,
   buildRoutePathRequest,
   resolveVisibleRouteCoords,
@@ -111,6 +112,75 @@ test("buildRoutePathRequest removes duplicate boundary points before creating in
     travelMode: "WALKING",
     fields: ["path"],
   });
+});
+
+test("buildGoogleMapsDirectionsUrl uses only interior stops as waypoints", () => {
+  const url = new URL(
+    buildGoogleMapsDirectionsUrl({
+      stops: [
+        { lat: 42.3601, lng: -71.0589 },
+        { lat: 42.3615, lng: -71.055 },
+        { lat: 42.363, lng: -71.052 },
+      ],
+      routeTravelMode: "walk",
+    })
+  );
+
+  assert.equal(url.searchParams.get("origin"), "42.3601,-71.0589");
+  assert.equal(url.searchParams.get("destination"), "42.363,-71.052");
+  assert.equal(url.searchParams.get("waypoints"), "42.3615,-71.055");
+  assert.equal(url.searchParams.get("travelmode"), "walking");
+});
+
+test("buildGoogleMapsDirectionsUrl omits duplicate endpoint waypoints when explicit endpoints match stops", () => {
+  const url = new URL(
+    buildGoogleMapsDirectionsUrl({
+      stops: [
+        { lat: 42.36, lng: -71.06 },
+        { lat: 42.365, lng: -71.055 },
+        { lat: 42.37, lng: -71.05 },
+      ],
+      endpoints: {
+        origin: { lat: 42.36, lng: -71.06 },
+        destination: { lat: 42.37, lng: -71.05 },
+      },
+      routeTravelMode: "drive",
+    })
+  );
+
+  assert.equal(url.searchParams.get("origin"), "42.36,-71.06");
+  assert.equal(url.searchParams.get("destination"), "42.37,-71.05");
+  assert.equal(url.searchParams.get("waypoints"), "42.365,-71.055");
+  assert.equal(url.searchParams.get("travelmode"), "driving");
+});
+
+test("buildGoogleMapsDirectionsUrl keeps an arrival stop as the destination instead of a waypoint", () => {
+  const url = new URL(
+    buildGoogleMapsDirectionsUrl({
+      stops: [
+        { lat: 42.36, lng: -71.06 },
+        { lat: 42.365, lng: -71.055 },
+        { lat: 42.37, lng: -71.05 },
+      ],
+      endpoints: {
+        destination: { lat: 42.37, lng: -71.05 },
+      },
+      routeTravelMode: "walk",
+    })
+  );
+
+  assert.equal(url.searchParams.get("origin"), "42.36,-71.06");
+  assert.equal(url.searchParams.get("destination"), "42.37,-71.05");
+  assert.equal(url.searchParams.get("waypoints"), "42.365,-71.055");
+});
+
+test("buildGoogleMapsDirectionsUrl falls back when there are not enough route points", () => {
+  const url = buildGoogleMapsDirectionsUrl({
+    stops: [{ lat: 42.36, lng: -71.06 }],
+    routeTravelMode: "walk",
+  });
+
+  assert.equal(url, "#");
 });
 
 test("buildRouteLookupPlan falls back when routed paths cannot be requested", () => {

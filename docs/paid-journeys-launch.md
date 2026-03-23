@@ -32,6 +32,7 @@ In Supabase Auth settings:
 - Configure custom SMTP for production delivery
 - Set sender name to `Wandrful Support`
 - Set from address to `support@wandrful.app`
+- Set email OTP / magic link expiry to `300` seconds (`5 minutes`)
 - Update the Magic Link email subject to `Your Wandrful sign-in link`
 - Paste the branded HTML from [`magic-link.html`](/Users/robertheath/echojam/supabase/templates/magic-link.html)
 - Keep the plain-text fallback copy in [`magic-link.txt`](/Users/robertheath/echojam/supabase/templates/magic-link.txt)

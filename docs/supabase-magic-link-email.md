@@ -15,6 +15,7 @@ In Supabase, open `Authentication -> Email Templates -> Magic Link` and apply:
 
 - Subject: `Your Wandrful sign-in link`
 - HTML content: paste [`supabase/templates/magic-link.html`](/Users/robertheath/echojam/supabase/templates/magic-link.html)
+- Link copy should describe the link as private, one-time use, and valid for 5 minutes
 
 Supabase does not expose a separate plain-text field in the hosted dashboard. Keep [`supabase/templates/magic-link.txt`](/Users/robertheath/echojam/supabase/templates/magic-link.txt) as the fallback copy reference for providers or workflows that support multipart text bodies outside the dashboard UI.
 
@@ -26,6 +27,8 @@ In Supabase, open `Authentication -> SMTP Settings` and configure:
 - Link tracking disabled if the provider rewrites URLs
 
 Supabase's shared SMTP service is only suitable for limited testing. Production delivery should use your own authenticated SMTP provider.
+
+In Supabase Auth settings, set the email OTP / magic-link expiry to `300` seconds (`5 minutes`). This repo does not enforce that hosted setting automatically, so treat the dashboard value as part of launch configuration.
 
 ## Required Template Variables
 
@@ -41,10 +44,12 @@ Do not replace `{{ .ConfirmationURL }}` with a hard-coded app URL. The current s
 1. Request a magic link from a signed-out paid journey page.
 2. Confirm the email arrives from `Wandrful Support <support@wandrful.app>`.
 3. Confirm the subject is `Your Wandrful sign-in link`.
-4. Open the email in desktop and mobile clients to verify the button and fallback link are readable.
-5. Click the CTA and confirm the user lands on `/auth/callback`, is signed in, and returns to the intended journey page.
-6. Repeat with an expired or already-used link and confirm the callback page shows a clear failure message.
-7. Verify entitlement and checkout behavior still match the paid-journey flow after sign-in.
+4. Confirm the body says the link is private, one-time use, and expires in 5 minutes.
+5. Open the email in desktop and mobile clients to verify the button and fallback link are readable.
+6. Click the CTA and confirm the user lands on `/auth/callback`, is signed in, and returns to the intended journey page with any original `utm_*` params preserved.
+7. Repeat with an expired or already-used link and confirm the callback page shows a clear failure message.
+8. Start checkout from a URL containing `utm_*` params and confirm the success or cancelled return URL preserves them.
+9. Verify entitlement and checkout behavior still match the paid-journey flow after sign-in.
 
 ## Notes
 

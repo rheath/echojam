@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { buildPathWithUtm, pickUtmParamsFromSearchParams } from "@/lib/utm";
+import styles from "./JourneyAccessClient.module.css";
 
 type JourneyOfferingSummary = {
   id: string;
@@ -29,6 +32,7 @@ type JourneyApiResponse =
   | {
       access: "locked";
       teaser: JourneyOfferingSummary;
+      previewStops: JourneyStopPreview[];
     }
   | {
       access: "granted";
@@ -37,11 +41,16 @@ type JourneyApiResponse =
         title: string;
         length_minutes: number;
       };
-      stops: Array<{
-        stop_id: string;
-        title: string;
-      }>;
+      stops: JourneyStopPreview[];
     };
+
+type JourneyStopPreview = {
+  stop_id: string;
+  title: string;
+  image_url: string | null;
+  position: number;
+  is_overview?: boolean;
+};
 
 type JourneyAccessClientProps = {
   slug: string;
@@ -58,10 +67,27 @@ async function withAuthHeaders() {
   return headers;
 }
 
+function buildFallbackStopPreview(teaser: JourneyOfferingSummary): JourneyStopPreview[] {
+  if (!teaser.firstStopTitle) return [];
+  return [
+    {
+      stop_id: "teaser-first-stop",
+      title: teaser.firstStopTitle,
+      image_url: teaser.coverImageUrl,
+      position: 0,
+      is_overview: false,
+    },
+  ];
+}
+
+const MAGIC_LINK_SUCCESS_MESSAGE =
+  "Check your inbox for a private Wandrful sign-in link from Wandrful Support. It expires in 5 minutes.";
+
 export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAccessClientProps) {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [magicLinkMessage, setMagicLinkMessage] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(() => {
     const checkoutStatus = (searchParams.get("checkout") || "").trim();
     if (checkoutStatus === "success") return "Payment received. Refreshing your access...";
@@ -116,6 +142,7 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
         if (!cancelled) {
           setPayload(body);
           if (body.access === "granted") {
+            setMagicLinkMessage(null);
             setMessage("Journey unlocked.");
           }
         }
@@ -140,22 +167,36 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
   const stopCountLabel = typeof teaser.stopCount === "number" ? `${teaser.stopCount} stops` : null;
   const durationLabel = typeof teaser.durationMinutes === "number" ? `${teaser.durationMinutes} mins` : null;
   const metadataLabel = [durationLabel, stopCountLabel].filter(Boolean).join(" • ");
+  const utmParams = useMemo(() => pickUtmParamsFromSearchParams(searchParams), [searchParams]);
+  const journeyReturnPath = useMemo(() => buildPathWithUtm(`/journeys/${slug}`, utmParams), [slug, utmParams]);
   const canOpenJourney =
     payload?.access === "granted" &&
     Boolean(payload.teaser?.sourceKind === "preset" && payload.teaser.sourceId);
   const openJourneyHref = canOpenJourney
     ? `/?startPresetRoute=${encodeURIComponent(payload!.teaser!.sourceId)}`
     : null;
-  const stopPreviewTitles = useMemo(() => {
-    if (payload?.access !== "granted") return [];
-    return payload.stops.slice(0, 5).map((stop) => stop.title);
-  }, [payload]);
+  const hasHeroImage = Boolean(teaser.coverImageUrl?.trim());
+  const isGranted = payload?.access === "granted";
+  const stopPreviews = useMemo(() => {
+    const fallbackStops = buildFallbackStopPreview(teaser);
+    if (payload?.access === "granted") {
+      return payload.stops.filter((stop) => !stop.is_overview);
+    }
+    if (payload?.access === "locked") {
+      return payload.previewStops.filter((stop) => !stop.is_overview);
+    }
+    return fallbackStops;
+  }, [payload, teaser]);
+  const firstVisibleStop = stopPreviews[0] ?? null;
+  const remainingStops = stopPreviews.slice(1);
+  const shouldOverlayLockedStops = !isGranted && remainingStops.length > 0;
 
   async function handleSendMagicLink(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSendingMagicLink(true);
     setError(null);
     setMessage(null);
+    setMagicLinkMessage(null);
 
     try {
       const response = await fetch("/api/auth/magic-link", {
@@ -165,14 +206,14 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
         },
         body: JSON.stringify({
           email,
-          next: `/journeys/${slug}`,
+          next: journeyReturnPath,
         }),
       });
       const body = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!response.ok) {
         throw new Error(body.error || "Failed to send magic link.");
       }
-      setMessage("Check your inbox for a Wandrful sign-in link from Wandrful Support.");
+      setMagicLinkMessage(MAGIC_LINK_SUCCESS_MESSAGE);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to send magic link.");
     } finally {
@@ -184,6 +225,7 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
     setIsStartingCheckout(true);
     setError(null);
     setMessage(null);
+    setMagicLinkMessage(null);
 
     try {
       const headers = await withAuthHeaders();
@@ -191,6 +233,7 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
       const response = await fetch(`/api/journey-offerings/${encodeURIComponent(slug)}/checkout`, {
         method: "POST",
         headers,
+        body: JSON.stringify({ utm: utmParams }),
       });
       const body = (await response.json().catch(() => ({}))) as { error?: string; url?: string | null };
       if (!response.ok || !body.url) {
@@ -207,161 +250,248 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
     await supabase.auth.signOut();
     setUserEmail(null);
     setPayload(null);
+    setMagicLinkMessage(null);
     setMessage("Signed out.");
   }
 
-  return (
-    <main style={{ minHeight: "100vh", background: "#f6f2ea", color: "#17130e", padding: "32px 20px" }}>
-      <div style={{ maxWidth: 960, margin: "0 auto" }}>
-        <Link href="/" style={{ color: "#5f4c34", textDecoration: "none", fontWeight: 600 }}>
-          Back to EchoJam
-        </Link>
+  function renderLockedOverlayIntro() {
+    return (
+      <div className={styles.overlayIntro}>
+        <p className={styles.actionTitle}>Unlock this journey</p>
+        {teaser.teaserDescription ? (
+          <p className={styles.overlayQuote}>
+            Step into the {teaser.teaserDescription}
+          </p>
+        ) : null}
+        <p className={styles.actionText}>
+          Enter your email to receive your private access link and continue the full journey.
+        </p>
+      </div>
+    );
+  }
 
-        <section
-          style={{
-            marginTop: 20,
-            borderRadius: 28,
-            overflow: "hidden",
-            background: "#fffaf2",
-            border: "1px solid rgba(60, 44, 24, 0.12)",
-            boxShadow: "0 20px 50px rgba(54, 37, 14, 0.12)",
-          }}
-        >
-          {teaser.coverImageUrl ? (
-            <div
-              style={{
-                minHeight: 280,
-                backgroundImage: `linear-gradient(rgba(20, 16, 12, 0.22), rgba(20, 16, 12, 0.48)), url("${teaser.coverImageUrl}")`,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
+  function renderActionPanel() {
+    if (isGranted) {
+      return (
+        <div className={styles.actionCard}>
+          <div>
+            <p className={styles.actionTitle}>Journey unlocked</p>
+            <p className={styles.actionText}>
+              This journey is unlocked for {userEmail || "your account"}.
+            </p>
+          </div>
+          {openJourneyHref ? (
+            <Link href={openJourneyHref} className={styles.primaryLink}>
+              Open in EchoJam
+            </Link>
+            ) : null}
+        </div>
+      );
+    }
+
+    if (userEmail) {
+      return (
+        <div className={styles.actionCard}>
+          {renderLockedOverlayIntro()}
+          <div className={styles.overlayMetaBlock}>
+            <p className={styles.actionText}>
+              Signed in as {userEmail}. Unlock the full walk to open every stop in EchoJam.
+            </p>
+          </div>
+          <div className={styles.buttonRow}>
+            <button
+              type="button"
+              onClick={() => {
+                void handleStartCheckout();
               }}
+              disabled={isStartingCheckout}
+              className={styles.primaryButton}
+            >
+              {isStartingCheckout ? "Opening checkout..." : `Unlock for ${teaser.pricing.displayLabel}`}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void handleSignOut();
+              }}
+              className={styles.secondaryButton}
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (magicLinkMessage) {
+      return null;
+    }
+
+    return (
+      <form onSubmit={handleSendMagicLink} className={styles.actionCard}>
+        {renderLockedOverlayIntro()}
+        <label htmlFor="journey-email" className={styles.actionLabel}>
+          Email address
+          <input
+            id="journey-email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.com"
+            autoComplete="email"
+            disabled={isSendingMagicLink}
+            className={styles.input}
+          />
+        </label>
+        <button type="submit" disabled={isSendingMagicLink} className={styles.primaryButton}>
+          {isSendingMagicLink ? "Sending magic link..." : "Email me a magic link"}
+        </button>
+      </form>
+    );
+  }
+
+  function renderStatusContent() {
+    return (
+      <>
+        {magicLinkMessage ? (
+          <div className={styles.statusMessage}>
+            {magicLinkMessage}{" "}
+            <button
+              type="button"
+              className={styles.inlineResetLink}
+              onClick={() => {
+                setMagicLinkMessage(null);
+                setError(null);
+              }}
+            >
+              Need another link?
+            </button>
+          </div>
+        ) : null}
+        {message ? <div className={styles.statusMessage}>{message}</div> : null}
+        {error ? <div className={styles.statusError}>{error}</div> : null}
+        {isLoading ? <div className={styles.loadingState}>Checking access...</div> : null}
+      </>
+    );
+  }
+
+  function renderStopRow(stop: JourneyStopPreview, index: number, options?: { highlight?: boolean }) {
+    const stopNumber = index + 1;
+    const subtitle = options?.highlight
+      ? isGranted
+        ? `Stop ${stopNumber}`
+        : "First stop"
+      : `Stop ${stopNumber}`;
+
+    return (
+      <div key={stop.stop_id} className={`${styles.stopItem} ${options?.highlight ? styles.stopItemHighlight : ""}`}>
+        <div className={styles.stopThumbWrap}>
+          {stop.image_url ? (
+            <Image
+              src={stop.image_url}
+              alt={stop.title}
+              fill
+              className={styles.stopThumb}
+              unoptimized
             />
           ) : null}
+        </div>
+        <div className={styles.stopText}>
+          <div className={styles.stopSubtitle}>{subtitle}</div>
+          <div className={`${styles.stopTitle} ${options?.highlight ? styles.stopTitleActive : ""}`}>
+            {`${stopNumber}. ${stop.title}`}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-          <div style={{ padding: 28 }}>
-            <div style={{ display: "inline-block", padding: "8px 12px", borderRadius: 999, background: "#17130e", color: "#fffaf2", fontSize: 13, fontWeight: 700 }}>
-              {teaser.pricing.displayLabel}
-            </div>
-            <h1 style={{ fontSize: "2.25rem", lineHeight: 1.05, margin: "16px 0 10px" }}>{teaser.title}</h1>
-            {metadataLabel ? <p style={{ margin: "0 0 8px", color: "#69553b" }}>{metadataLabel}</p> : null}
-            {teaser.creatorLabel ? <p style={{ margin: "0 0 16px", color: "#69553b" }}>Story by {teaser.creatorLabel}</p> : null}
-            {teaser.teaserDescription ? <p style={{ margin: "0 0 16px", maxWidth: 640, fontSize: "1.05rem" }}>{teaser.teaserDescription}</p> : null}
-            {teaser.firstStopTitle ? (
-              <p style={{ margin: "0 0 20px", color: "#5f4c34" }}>
-                First stop preview: <strong>{teaser.firstStopTitle}</strong>
-              </p>
-            ) : null}
+  return (
+    <main className={styles.page}>
+      <div className={styles.layout}>
+        <section className={`${styles.heroPane} ${hasHeroImage ? styles.heroPaneWithImage : ""}`}>
+          {hasHeroImage ? (
+            <Image
+              src={teaser.coverImageUrl!}
+              alt={teaser.title}
+              fill
+              priority
+              className={styles.heroImage}
+              unoptimized
+            />
+          ) : null}
+          <Link href="/" className={styles.heroBackButton} aria-label="Back to EchoJam">
+            <Image
+              src="/icons/x.svg"
+              alt=""
+              width={26}
+              height={26}
+              className={styles.heroBackIcon}
+              aria-hidden="true"
+            />
+          </Link>
+        </section>
 
-            {message ? <div style={{ marginBottom: 12, color: "#1f6b35", fontWeight: 600 }}>{message}</div> : null}
-            {error ? <div style={{ marginBottom: 12, color: "#a12d1f", fontWeight: 600 }}>{error}</div> : null}
-
-            {isLoading ? <p style={{ margin: "0 0 12px" }}>Checking access...</p> : null}
-
-            {payload?.access === "granted" ? (
-              <div>
-                <p style={{ margin: "0 0 16px", fontWeight: 600 }}>
-                  This journey is unlocked for {userEmail || "your account"}.
-                </p>
-                {stopPreviewTitles.length > 0 ? (
-                  <p style={{ margin: "0 0 16px", color: "#5f4c34" }}>
-                    Included stops: {stopPreviewTitles.join(" • ")}
-                    {payload.stops.length > stopPreviewTitles.length ? " • ..." : ""}
-                  </p>
-                ) : null}
-                {openJourneyHref ? (
-                  <Link
-                    href={openJourneyHref}
-                    style={{
-                      display: "inline-block",
-                      padding: "14px 18px",
-                      borderRadius: 14,
-                      background: "#17130e",
-                      color: "#fffaf2",
-                      textDecoration: "none",
-                      fontWeight: 700,
-                    }}
-                  >
-                    Open in EchoJam
-                  </Link>
-                ) : null}
-              </div>
-            ) : userEmail ? (
-              <div>
-                <p style={{ margin: "0 0 16px" }}>Signed in as {userEmail}</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleStartCheckout();
-                  }}
-                  disabled={isStartingCheckout}
-                  style={{
-                    padding: "14px 18px",
-                    borderRadius: 14,
-                    border: "none",
-                    background: "#17130e",
-                    color: "#fffaf2",
-                    fontWeight: 700,
-                    cursor: isStartingCheckout ? "progress" : "pointer",
-                  }}
-                >
-                  {isStartingCheckout ? "Opening checkout..." : `Unlock for ${teaser.pricing.displayLabel}`}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleSignOut();
-                  }}
-                  style={{
-                    marginLeft: 12,
-                    padding: "14px 18px",
-                    borderRadius: 14,
-                    border: "1px solid rgba(60, 44, 24, 0.18)",
-                    background: "transparent",
-                    color: "#17130e",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  Sign out
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleSendMagicLink} style={{ display: "grid", gap: 12, maxWidth: 420 }}>
-                <label htmlFor="journey-email" style={{ fontWeight: 600 }}>
-                  Sign in with email to unlock this journey
-                </label>
-                <input
-                  id="journey-email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="you@example.com"
-                  autoComplete="email"
-                  disabled={isSendingMagicLink}
-                  style={{
-                    padding: "14px 16px",
-                    borderRadius: 14,
-                    border: "1px solid rgba(60, 44, 24, 0.18)",
-                    fontSize: 16,
-                  }}
+        <section className={styles.rail}>
+          <div className={styles.railCard}>
+            <div className={styles.metaRow}>
+              <div className={styles.avatarWrap}>
+                <Image
+                  src="/icons/stars.svg"
+                  alt=""
+                  width={24}
+                  height={24}
+                  className={styles.avatarIcon}
+                  aria-hidden="true"
                 />
-                <button
-                  type="submit"
-                  disabled={isSendingMagicLink}
-                  style={{
-                    padding: "14px 18px",
-                    borderRadius: 14,
-                    border: "none",
-                    background: "#17130e",
-                    color: "#fffaf2",
-                    fontWeight: 700,
-                    cursor: isSendingMagicLink ? "progress" : "pointer",
-                  }}
-                >
-                  {isSendingMagicLink ? "Sending magic link..." : "Email me a magic link"}
-                </button>
-              </form>
-            )}
+              </div>
+              <div className={styles.metaText}>
+                <span>Story by</span>
+                <span className={styles.metaActiveName}>{teaser.creatorLabel || "Wandrful"}</span>
+              </div>
+              <div className={styles.pricePill}>{teaser.pricing.displayLabel}</div>
+            </div>
+
+            <h2 className={styles.headline}>{teaser.title}</h2>
+            {metadataLabel ? <div className={styles.subline}>{metadataLabel}</div> : null}
+            
+
+            <section className={styles.stopSection}>
+             
+
+              {firstVisibleStop ? renderStopRow(firstVisibleStop, 0, { highlight: true }) : null}
+
+              {remainingStops.length > 0 ? (
+                shouldOverlayLockedStops ? (
+                  <div className={styles.lockedStopsArea}>
+                    <div className={styles.lockedStopsBlur} aria-hidden="true">
+                      <div className={styles.stopList}>
+                        {remainingStops.map((stop, index) => renderStopRow(stop, index + 1))}
+                      </div>
+                    </div>
+                    <div className={styles.lockedOverlay}>
+                      <div className={styles.lockedOverlayCard}>
+                        <div className={styles.statusStack}>
+                          {renderStatusContent()}
+                          {renderActionPanel()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className={styles.stopList}>
+                    {remainingStops.map((stop, index) => renderStopRow(stop, index + 1))}
+                  </div>
+                )
+              ) : null}
+            </section>
+
+            {!shouldOverlayLockedStops ? (
+              <div className={styles.statusStack}>
+                {renderStatusContent()}
+                {renderActionPanel()}
+              </div>
+            ) : null}
           </div>
         </section>
       </div>
