@@ -51,7 +51,7 @@ export default function AuthCallbackPage() {
 
   return (
     <main style={{ padding: 24, fontFamily: "sans-serif", lineHeight: 1.5 }}>
-      <h1 style={{ fontSize: "1.25rem", margin: "0 0 8px" }}>EchoJam sign-in</h1>
+      <h1 style={{ fontSize: "1.25rem", margin: "0 0 8px" }}>Wandrful sign-in</h1>
       <p style={{ margin: 0 }}>{message}</p>
     </main>
   );

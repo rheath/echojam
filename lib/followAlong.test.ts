@@ -13,6 +13,7 @@ import {
   type FollowAlongLocation,
 } from "@/lib/followAlong";
 import {
+  fetchDirectionsRoutePath,
   isValidFollowAlongLocation,
   fetchDrivingRoutePreview,
   normalizeDestinationQuery,
@@ -313,4 +314,45 @@ test("fetchDrivingRoutePreview fills origin subtitle from start_address when mis
   assert.equal(preview.origin.label, "10 Beacon St, Boston, MA 02108, USA");
   assert.equal(preview.origin.subtitle, "Current location");
   assert.equal(preview.destination.subtitle, "1 Charles St, Boston, MA 02114, USA");
+});
+
+test("fetchDirectionsRoutePath requests walking directions with waypoints", async (t) => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.GOOGLE_PLACES_API_KEY;
+
+  process.env.GOOGLE_PLACES_API_KEY = "test-key";
+  global.fetch = (async (input) => {
+    const url = new URL(String(input));
+    assert.equal(url.origin + url.pathname, "https://maps.googleapis.com/maps/api/directions/json");
+    assert.equal(url.searchParams.get("mode"), "walking");
+    assert.equal(url.searchParams.get("waypoints"), "42.361,-71.058|42.362,-71.057");
+    return new Response(
+      JSON.stringify({
+        status: "OK",
+        routes: [
+          {
+            overview_polyline: { points: "_p~iF~ps|U_ulLnnqC_mqNvxq`@" },
+          },
+        ],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }) as typeof fetch;
+
+  t.after(() => {
+    global.fetch = originalFetch;
+    process.env.GOOGLE_PLACES_API_KEY = originalApiKey;
+  });
+
+  const coords = await fetchDirectionsRoutePath({
+    origin: { lat: 42.36, lng: -71.059 },
+    destination: { lat: 42.363, lng: -71.056 },
+    intermediates: [
+      { lat: 42.361, lng: -71.058 },
+      { lat: 42.362, lng: -71.057 },
+    ],
+    mode: "walk",
+  });
+
+  assert.equal(coords.length > 1, true);
 });

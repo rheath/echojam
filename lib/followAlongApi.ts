@@ -64,6 +64,15 @@ export type FollowAlongDestinationSearchResult = FollowAlongLocation & {
   types: string[];
 };
 
+export type DirectionsRouteMode = "walk" | "drive";
+
+type DirectionsRoutePathRequest = {
+  origin: { lat: number; lng: number };
+  destination: { lat: number; lng: number };
+  intermediates?: Array<{ lat: number; lng: number }>;
+  mode: DirectionsRouteMode;
+};
+
 const GOOGLE_GEOCODE_ENDPOINT = "https://maps.googleapis.com/maps/api/geocode/json";
 const OSM_REVERSE_GEOCODE_ENDPOINT = "https://nominatim.openstreetmap.org/reverse";
 const CURRENT_LOCATION_LABEL = "Current location";
@@ -263,6 +272,62 @@ export async function searchFollowAlongDestinations(
 
 function encodeLocation(value: FollowAlongLocation) {
   return `${value.lat},${value.lng}`;
+}
+
+function encodeLatLng(value: { lat: number; lng: number }) {
+  return `${value.lat},${value.lng}`;
+}
+
+export async function fetchDirectionsRoutePath(
+  input: DirectionsRoutePathRequest
+): Promise<[number, number][]> {
+  if (!isFiniteCoord(input.origin.lat, input.origin.lng)) {
+    throw new Error("Valid origin coordinates are required.");
+  }
+  if (!isFiniteCoord(input.destination.lat, input.destination.lng)) {
+    throw new Error("Valid destination coordinates are required.");
+  }
+
+  const apiKey = (process.env.GOOGLE_PLACES_API_KEY || "").trim();
+  if (!apiKey) {
+    throw new Error("Google route preview is not configured.");
+  }
+
+  const params = new URLSearchParams({
+    origin: encodeLatLng(input.origin),
+    destination: encodeLatLng(input.destination),
+    mode: input.mode === "walk" ? "walking" : "driving",
+    key: apiKey,
+  });
+
+  const waypoints = (input.intermediates ?? [])
+    .filter((point) => isFiniteCoord(point.lat, point.lng))
+    .map(encodeLatLng);
+  if (waypoints.length) {
+    params.set("waypoints", waypoints.join("|"));
+  }
+
+  const res = await fetch(
+    `https://maps.googleapis.com/maps/api/directions/json?${params.toString()}`,
+    { cache: "no-store" }
+  );
+
+  if (!res.ok) {
+    throw new Error("Route preview failed.");
+  }
+
+  const payload = (await res.json()) as GoogleDirectionsResponse;
+  if (payload.status !== "OK") {
+    throw new Error(payload.error_message || "Route preview failed.");
+  }
+
+  const polyline = (payload.routes?.[0]?.overview_polyline?.points || "").trim();
+  const routeCoords = polyline ? decodeGooglePolyline(polyline) : [];
+  if (routeCoords.length < 2) {
+    throw new Error("Route preview failed.");
+  }
+
+  return routeCoords;
 }
 
 export async function reverseGeocodeFollowAlongOrigin(

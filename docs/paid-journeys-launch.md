@@ -29,6 +29,13 @@ In Supabase Auth settings:
 - Set `Site URL` to your production app URL
 - Add redirect URL: `https://your-domain.com/auth/callback`
 - Add preview or staging callback URLs if you use them
+- Configure custom SMTP for production delivery
+- Set sender name to `Wandrful Support`
+- Set from address to `support@wandrful.app`
+- Update the Magic Link email subject to `Your Wandrful sign-in link`
+- Paste the branded HTML from [`magic-link.html`](/Users/robertheath/echojam/supabase/templates/magic-link.html)
+- Keep the plain-text fallback copy in [`magic-link.txt`](/Users/robertheath/echojam/supabase/templates/magic-link.txt)
+- Disable provider link tracking if your SMTP provider rewrites email links
 
 The app sends magic links from:
 
@@ -37,6 +44,10 @@ The app sends magic links from:
 The callback page is:
 
 - [`page.tsx`](/Users/robertheath/echojam/app/auth/callback/page.tsx)
+
+Detailed branding notes live in:
+
+- [`supabase-magic-link-email.md`](/Users/robertheath/echojam/docs/supabase-magic-link-email.md)
 
 ## 3. Add production env vars
 

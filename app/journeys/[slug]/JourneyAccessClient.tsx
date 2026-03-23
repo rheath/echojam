@@ -172,7 +172,7 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
       if (!response.ok) {
         throw new Error(body.error || "Failed to send magic link.");
       }
-      setMessage("Magic link sent. Open it from your email to continue.");
+      setMessage("Check your inbox for a Wandrful sign-in link from Wandrful Support.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to send magic link.");
     } finally {

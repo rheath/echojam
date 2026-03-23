@@ -4,8 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   getGoogleMapsMapId,
   loadGoogleMapsLibraries,
-  loadGoogleRoutesLibrary,
 } from "@/lib/googleMapsLoader";
+import {
+  buildRouteLookupPlan,
+  resolveVisibleRouteCoords,
+  type RouteStatus,
+} from "@/lib/routePath";
 import styles from "./RouteMap.module.css";
 
 type Stop = {
@@ -41,7 +45,6 @@ type Props = {
   } | null;
 };
 
-type RouteStatus = "loading" | "ready" | "failed";
 type StopVisualStatus = "visited" | "current" | "upcoming" | "arrival";
 type RouteMarker = google.maps.marker.AdvancedMarkerElement;
 type MarkerVisual = {
@@ -106,46 +109,50 @@ export default function RouteMap({
   useEffect(() => {
     let cancelled = false;
 
-    async function loadWalkingRoute() {
-      if (providedRouteCoords?.length) {
-        setRouteCoords(providedRouteCoords);
+    async function loadRoutePath() {
+      const plan = buildRouteLookupPlan({
+        providedRouteCoords,
+        showRoutePath,
+        routeTravelMode,
+        stops,
+        endpoints,
+      });
+
+      if (plan.kind === "provided") {
+        setRouteCoords(plan.coords);
         setRouteStatus("ready");
         return;
       }
 
-      if (!showRoutePath || routeTravelMode !== "walk") {
+      if (plan.kind === "fallback") {
         setRouteCoords(null);
         setRouteStatus("failed");
         return;
       }
 
       setRouteStatus("loading");
-      if (stops.length < 2) {
-        setRouteCoords(null);
-        setRouteStatus("failed");
-        return;
-      }
 
       try {
-        const { Route } = await loadGoogleRoutesLibrary();
-        const result = await Route.computeRoutes({
-          origin: { lat: stops[0].lat, lng: stops[0].lng },
-          destination: {
-            lat: stops[stops.length - 1].lat,
-            lng: stops[stops.length - 1].lng,
+        const response = await fetch("/api/route-path", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
           },
-          intermediates: stops.slice(1, -1).map((stop) => ({
-            lat: stop.lat,
-            lng: stop.lng,
-          })),
-          travelMode: "WALKING",
-          fields: ["path"],
+          body: JSON.stringify({
+            origin: plan.request.origin,
+            destination: plan.request.destination,
+            intermediates: plan.request.intermediates?.map((waypoint) => waypoint.location) ?? [],
+            mode: routeTravelMode,
+          }),
         });
-
         if (cancelled) return;
-        const coords =
-          result.routes?.[0]?.path?.map((point) => [point.lng, point.lat] as [number, number]) ??
-          [];
+        if (!response.ok) {
+          throw new Error(`Route path request failed with status ${response.status}`);
+        }
+        const payload = (await response.json()) as {
+          routeCoords?: [number, number][];
+        };
+        const coords = Array.isArray(payload.routeCoords) ? payload.routeCoords : [];
 
         if (coords.length > 1) {
           setRouteCoords(coords);
@@ -153,7 +160,7 @@ export default function RouteMap({
           return;
         }
       } catch (error) {
-        console.error("Walking route lookup failed.", error);
+        console.error("Route path lookup failed.", error);
       }
 
       if (!cancelled) {
@@ -162,12 +169,12 @@ export default function RouteMap({
       }
     }
 
-    void loadWalkingRoute();
+    void loadRoutePath();
 
     return () => {
       cancelled = true;
     };
-  }, [providedRouteCoords, routeTravelMode, showRoutePath, stops]);
+  }, [endpoints, providedRouteCoords, routeTravelMode, showRoutePath, stops]);
 
   useEffect(() => {
     let cancelled = false;
@@ -361,16 +368,6 @@ export default function RouteMap({
       <div ref={containerRef} className={styles.mapContainer} />
     </div>
   );
-}
-
-function resolveVisibleRouteCoords(
-  stops: Stop[],
-  routedCoords?: [number, number][] | null,
-  routeStatus: RouteStatus = "loading"
-) {
-  if (routedCoords?.length) return routedCoords;
-  if (routeStatus !== "failed") return [];
-  return stops.map((stop) => [stop.lng, stop.lat] as [number, number]);
 }
 
 function offsetCoordinates(lat: number, lng: number, index: number, total: number) {

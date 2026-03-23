@@ -1,0 +1,10 @@
+Your Wandrful sign-in link is ready.
+
+Use the secure link below to sign in and continue where you left off:
+{{ .ConfirmationURL }}
+
+This link is meant for {{ .Email }} and will expire automatically.
+
+If you did not request this email, you can safely ignore it.
+
+Need help? Reply to this email and Wandrful Support will take a look.
