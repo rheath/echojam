@@ -44,6 +44,8 @@ import {
 } from "@/lib/jamRuntime";
 import { buildGoogleMapsDirectionsUrl } from "@/lib/routePath";
 import dynamic from "next/dynamic";
+import WalkScreen from "./components/WalkScreen";
+import walkStyles from "./components/WalkScreen.module.css";
 import styles from "./HomeClient.module.css";
 
 const RouteMap = dynamic(() => import("./components/RouteMap"), { ssr: false });
@@ -3663,7 +3665,7 @@ async function startStopNarration() {
               <div className={styles.landingCopyBlock}>
                 <h1 className={styles.landingHeading}>A mixtape for&nbsp;the&nbsp;streets.</h1>
                 <p className={styles.landingCopy}>
-                  Experience places through a curated lens. <strong>More story. Less directions.</strong>
+                  Turn the real world into story-driven journeys.
                 </p>
                 <div className={styles.landingHeroCtaWrap}>
                   <button
@@ -5039,43 +5041,48 @@ You choose where to go — each stop shapes what unfolds next.                  
 
       {/* WALK */}
       {step === "walk" && route && (
-        <main className={styles.walkLayout}>
-          <div className={styles.mapHero}>
-            <RouteMap
-              stops={route.stops}
-              currentStopIndex={currentStopIndex ?? -1}
-              myPos={myPos}
-              initialFitRoute
-              showRoutePath
-              routeTravelMode="walk"
-            />
-            <button onClick={goHome} className={styles.mapBackButton} aria-label="Close">
-              <Image
-                src="/icons/x.svg"
-                alt=""
-                width={26}
-                height={26}
-                className={styles.mapBackIcon}
-                aria-hidden="true"
+        <>
+          <WalkScreen
+            mode="interactive"
+            map={(
+              <RouteMap
+                stops={route.stops}
+                currentStopIndex={currentStopIndex ?? -1}
+                myPos={myPos}
+                initialFitRoute
+                showRoutePath
+                routeTravelMode="walk"
               />
-            </button>
-            <a href={mapsUrl} target="_blank" rel="noreferrer" className={styles.mapViewButton}>
-              View Directions
-            </a>
-          </div>
-          <div className={styles.rightRail}>
-            <div className={styles.walkCard}>
-              <div className={styles.walkMetaRow}>
+            )}
+            backControl={(
+              <button onClick={goHome} className={walkStyles.mapBackButton} aria-label="Close">
+                <Image
+                  src="/icons/x.svg"
+                  alt=""
+                  width={26}
+                  height={26}
+                  className={walkStyles.mapBackIcon}
+                  aria-hidden="true"
+                />
+              </button>
+            )}
+            mapAction={(
+              <a href={mapsUrl} target="_blank" rel="noreferrer" className={walkStyles.mapViewButton}>
+                View Directions
+              </a>
+            )}
+            metaRow={(
+              <>
                 {isPresetWalkRoute ? (
                   <>
-                    <div className={styles.walkNarratorAvatarWrap}>
+                    <div className={walkStyles.walkNarratorAvatarWrap}>
                       {usesNarratorIcon(persona) ? (
                         <Image
                           src="/icons/stars.svg"
                           alt=""
                           width={22}
                           height={22}
-                          className={styles.walkNarratorIcon}
+                          className={walkStyles.walkNarratorIcon}
                           aria-hidden="true"
                         />
                       ) : (
@@ -5083,12 +5090,12 @@ You choose where to go — each stop shapes what unfolds next.                  
                           src={personaCatalog[persona].avatarSrc}
                           alt={personaCatalog[persona].avatarAlt}
                           fill
-                          className={styles.walkNarratorAvatar}
+                          className={walkStyles.walkNarratorAvatar}
                         />
                       )}
                     </div>
-                    <div className={styles.walkNarrator}>
-                      Story by <span className={styles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
+                    <div className={walkStyles.walkNarrator}>
+                      Story by <span className={walkStyles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
                     </div>
                   </>
                 ) : (
@@ -5100,7 +5107,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                             href={instagramStoryByUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className={styles.walkNarratorAvatarWrap}
+                            className={walkStyles.walkNarratorAvatarWrap}
                             aria-label={`Open ${instagramStoryByLabel} on Instagram`}
                           >
                             {shouldShowInstagramStoryAvatar ? (
@@ -5109,7 +5116,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                                 alt={`${instagramStoryByLabel} avatar`}
                                 fill
                                 unoptimized
-                                className={styles.walkNarratorAvatar}
+                                className={walkStyles.walkNarratorAvatar}
                                 onError={() => setDidInstagramAvatarFail(true)}
                               />
                             ) : (
@@ -5118,20 +5125,20 @@ You choose where to go — each stop shapes what unfolds next.                  
                                 alt=""
                                 width={22}
                                 height={22}
-                                className={styles.walkNarratorIcon}
+                                className={walkStyles.walkNarratorIcon}
                                 aria-hidden="true"
                               />
                             )}
                           </a>
                         ) : (
-                          <div className={styles.walkNarratorAvatarWrap}>
+                          <div className={walkStyles.walkNarratorAvatarWrap}>
                             {shouldShowInstagramStoryAvatar ? (
                               <Image
                                 src={instagramStoryByAvatarUrl || DEFAULT_STOP_IMAGE}
                                 alt={`${instagramStoryByLabel} avatar`}
                                 fill
                                 unoptimized
-                                className={styles.walkNarratorAvatar}
+                                className={walkStyles.walkNarratorAvatar}
                                 onError={() => setDidInstagramAvatarFail(true)}
                               />
                             ) : (
@@ -5140,34 +5147,34 @@ You choose where to go — each stop shapes what unfolds next.                  
                                 alt=""
                                 width={22}
                                 height={22}
-                                className={styles.walkNarratorIcon}
+                                className={walkStyles.walkNarratorIcon}
                                 aria-hidden="true"
                               />
                             )}
                           </div>
                         )}
-                        <div className={styles.walkNarrator}>
+                        <div className={walkStyles.walkNarrator}>
                           Story by{" "}
                           {instagramStoryByUrl ? (
                             <a
                               href={instagramStoryByUrl}
                               target="_blank"
                               rel="noreferrer"
-                              className={styles.walkNarratorActiveName}
+                              className={walkStyles.walkNarratorActiveName}
                             >
                               {instagramStoryByLabel}
                             </a>
                           ) : (
-                            <span className={styles.walkNarratorActiveName}>{instagramStoryByLabel}</span>
+                            <span className={walkStyles.walkNarratorActiveName}>{instagramStoryByLabel}</span>
                           )}
-                          <span className={styles.walkNarratorRemixPill}>AI Remix</span>
+                          <span className={walkStyles.walkNarratorRemixPill}>AI Remix</span>
                         </div>
                       </>
                     ) : (
                       <>
                         <button
                           type="button"
-                          className={`${styles.walkNarratorAvatarWrap} ${styles.walkNarratorAvatarButton}`}
+                          className={`${walkStyles.walkNarratorAvatarWrap} ${walkStyles.walkNarratorAvatarButton}`}
                           onClick={() => {
                             setReturnToWalkOnClose(true);
                             if (!isPresetWalkRoute) setSelectedPersona("custom");
@@ -5183,7 +5190,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                               alt=""
                               width={22}
                               height={22}
-                              className={styles.walkNarratorIcon}
+                              className={walkStyles.walkNarratorIcon}
                               aria-hidden="true"
                             />
                           ) : (
@@ -5191,12 +5198,12 @@ You choose where to go — each stop shapes what unfolds next.                  
                               src={personaCatalog[persona].avatarSrc}
                               alt={personaCatalog[persona].avatarAlt}
                               fill
-                              className={styles.walkNarratorAvatar}
+                              className={walkStyles.walkNarratorAvatar}
                             />
                           )}
                         </button>
                         <button
-                          className={`${styles.walkNarrator} ${styles.walkNarratorButton}`}
+                          className={`${walkStyles.walkNarrator} ${walkStyles.walkNarratorButton}`}
                           type="button"
                           onClick={() => {
                             setReturnToWalkOnClose(true);
@@ -5206,24 +5213,27 @@ You choose where to go — each stop shapes what unfolds next.                  
                             setStep("pickDuration");
                           }}
                         >
-                          Narrated by <span className={styles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
+                          Narrated by <span className={walkStyles.walkNarratorActiveName}>{activePersonaDisplayName}</span>
                         </button>
                       </>
                     )}
                   </>
                 )}
-              </div>
-            <h1 className={styles.walkHeadline}>{route.title}</h1>
-              <div className={styles.walkSubline}>
-                <span>{displayListenerCount} {displayListenerCount === 1 ? "listener" : "listeners"}  •  {routeMilesLabel}</span>
-              </div>
-
-              <div className={styles.walkActionRow}>
-                <button className={styles.pillButton} type="button" onClick={copyShareLink}>Share</button>
+              </>
+            )}
+            title={route.title}
+            subline={(
+              <span>
+                {displayListenerCount} {displayListenerCount === 1 ? "listener" : "listeners"} • {routeMilesLabel}
+              </span>
+            )}
+            actions={(
+              <>
+                <button className={walkStyles.pillButton} type="button" onClick={copyShareLink}>Share</button>
 
                 {activeInstagramCustomRouteId ? (
                   <button
-                    className={styles.pillButton}
+                    className={walkStyles.pillButton}
                     type="button"
                     onClick={() => {
                       router.push(`/import/instagram?route=${encodeURIComponent(activeInstagramCustomRouteId)}`);
@@ -5235,7 +5245,7 @@ You choose where to go — each stop shapes what unfolds next.                  
 
                 {activePresetWalkRouteId && showPresetWalkRefresh && (
                   <button
-                    className={styles.pillButton}
+                    className={walkStyles.pillButton}
                     type="button"
                     onClick={() => {
                       void regeneratePresetRoute(activePresetWalkRouteId);
@@ -5249,7 +5259,7 @@ You choose where to go — each stop shapes what unfolds next.                  
 
                 {!activeInstagramCustomRouteId ? (
                   <button
-                    className={styles.pillButton}
+                    className={walkStyles.pillButton}
                     type="button"
                     onClick={openEditStopsFromWalk}
                   >
@@ -5257,7 +5267,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                   </button>
                 ) : null}
                 <button
-                  className={styles.nowPlayingButton}
+                  className={walkStyles.nowPlayingButton}
                   type="button"
                   onClick={() => void playPauseFromWalkAction()}
                   disabled={route.stops.length === 0 || (currentStopIndex !== null && !hasCurrentAudio)}
@@ -5268,102 +5278,78 @@ You choose where to go — each stop shapes what unfolds next.                  
                     alt=""
                     width={28}
                     height={28}
-                    className={styles.nowPlayingIcon}
+                    className={walkStyles.nowPlayingIcon}
                     aria-hidden="true"
                   />
                 </button>
-              </div>
-
-              <div className={styles.stopList}>
-                {stopList.map((stop, idx) => {
-                  const displayNumber = idx + 1;
-                  return (
-                  <button
-                    key={stop.id}
-                    onClick={() => void handleStopSelect(idx, { autoPlay: currentStopIndex !== idx })}
-                    className={`${styles.stopItem} ${stop.isActive ? styles.stopItemActive : ""}`}
-                    type="button"
-                  >
-                    <div className={styles.stopThumbWrap}>
-                      <WalkStepImage
-                        src={toSafeStopImage(stop.image)}
-                        alt={stop.title}
-                        fill
-                        className={styles.stopThumb}
-                        unoptimized
-                      />
-                    </div>
-                    <div className={styles.stopText}>
-                      <div className={`${styles.stopTitle} ${stop.isActive ? styles.stopTitleActive : ""}`}>
-                        {`${displayNumber}. ${stop.title}`}
-                      </div>
-                      <div className={styles.stopSubtitle}>{stop.subtitle}</div>
-                      {stop.sourceLabel ? (
-                        <div className={styles.stopSourceMeta}>{stop.sourceLabel}</div>
-                      ) : null}
-                    </div>
-                  </button>
-                  );
-                })}
-              </div>
-
-              {isWalkDiscoveryRoute && (walkDiscoverySuggestion || isResolvingWalkDiscoverySuggestion) && (
+              </>
+            )}
+            stops={stopList.map((stop, idx) => ({
+              id: stop.id,
+              title: `${idx + 1}. ${stop.title}`,
+              subtitle: stop.subtitle,
+              imageSrc: stop.image,
+              sourceLabel: stop.sourceLabel,
+              isActive: stop.isActive,
+              onSelect: () => void handleStopSelect(idx, { autoPlay: currentStopIndex !== idx }),
+              ariaLabel: `Open ${stop.title}`,
+            }))}
+            afterStops={
+              isWalkDiscoveryRoute && (walkDiscoverySuggestion || isResolvingWalkDiscoverySuggestion) ? (
                 <div className={styles.walkDiscoveryPanel}>
                   <div className={styles.walkDiscoveryCard}>
                     {walkDiscoverySuggestion ? (
-                      <>
-                        <div className={styles.walkDiscoveryContent}>
-                          <div className={styles.walkDiscoveryImageWrap}>
-                            <WalkStepImage
-                              src={toSafeStopImage(walkDiscoverySuggestion.image)}
-                              alt={walkDiscoverySuggestion.title}
-                              fill
-                              className={styles.walkDiscoveryImage}
-                              unoptimized
-                            />
-                          </div>
-                          <div className={styles.walkDiscoveryBody}>
-                            <div className={styles.walkDiscoveryEyebrow}>Suggested Stop</div>
-                            <div className={styles.walkDiscoveryTitle}>
-                              {walkDiscoverySuggestion.title}
-                            </div>
-                          </div>
-                          <div className={styles.walkDiscoveryActions}>
-                            <button
-                              type="button"
-                              className={styles.walkDiscoverySkipButton}
-                              onClick={() => void rejectWalkDiscoverySuggestion()}
-                              disabled={isAcceptingWalkDiscoverySuggestion}
-                              aria-label="Skip suggested stop"
-                            >
-                              <Image
-                                src="/icons/x.svg"
-                                alt=""
-                                width={18}
-                                height={18}
-                                className={styles.walkDiscoverySkipIcon}
-                                aria-hidden="true"
-                              />
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.walkDiscoveryAddButton}
-                              onClick={() => void acceptWalkDiscoverySuggestion()}
-                              disabled={isAcceptingWalkDiscoverySuggestion}
-                              aria-label={isAcceptingWalkDiscoverySuggestion ? "Adding suggested stop" : "Add suggested stop"}
-                            >
-                              <Image
-                                src="/icons/plus-circle.svg"
-                                alt=""
-                                width={28}
-                                height={28}
-                                className={styles.walkDiscoveryAddIcon}
-                                aria-hidden="true"
-                              />
-                            </button>
+                      <div className={styles.walkDiscoveryContent}>
+                        <div className={styles.walkDiscoveryImageWrap}>
+                          <WalkStepImage
+                            src={toSafeStopImage(walkDiscoverySuggestion.image)}
+                            alt={walkDiscoverySuggestion.title}
+                            fill
+                            className={styles.walkDiscoveryImage}
+                            unoptimized
+                          />
+                        </div>
+                        <div className={styles.walkDiscoveryBody}>
+                          <div className={styles.walkDiscoveryEyebrow}>Suggested Stop</div>
+                          <div className={styles.walkDiscoveryTitle}>
+                            {walkDiscoverySuggestion.title}
                           </div>
                         </div>
-                      </>
+                        <div className={styles.walkDiscoveryActions}>
+                          <button
+                            type="button"
+                            className={styles.walkDiscoverySkipButton}
+                            onClick={() => void rejectWalkDiscoverySuggestion()}
+                            disabled={isAcceptingWalkDiscoverySuggestion}
+                            aria-label="Skip suggested stop"
+                          >
+                            <Image
+                              src="/icons/x.svg"
+                              alt=""
+                              width={18}
+                              height={18}
+                              className={styles.walkDiscoverySkipIcon}
+                              aria-hidden="true"
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.walkDiscoveryAddButton}
+                            onClick={() => void acceptWalkDiscoverySuggestion()}
+                            disabled={isAcceptingWalkDiscoverySuggestion}
+                            aria-label={isAcceptingWalkDiscoverySuggestion ? "Adding suggested stop" : "Add suggested stop"}
+                          >
+                            <Image
+                              src="/icons/plus-circle.svg"
+                              alt=""
+                              width={28}
+                              height={28}
+                              className={styles.walkDiscoveryAddIcon}
+                              aria-hidden="true"
+                            />
+                          </button>
+                        </div>
+                      </div>
                     ) : (
                       <div className={styles.walkDiscoveryLoading}>
                         Looking for your next nearby story...
@@ -5371,84 +5357,85 @@ You choose where to go — each stop shapes what unfolds next.                  
                     )}
                   </div>
                 </div>
-              )}
-              
-            </div>
-
-            {currentStop && (
-              <div className={styles.nowPlayingBar}>
-                <audio ref={audioRef} preload="none" src={hasCurrentAudio ? currentStopAudio : undefined} hidden />
-                <input
-                  type="range"
-                  min={0}
-                  max={audioDuration || 0}
-                  step={0.1}
-                  value={Math.min(audioTime, audioDuration || audioTime)}
-                  onChange={(e) => seekAudio(Number(e.target.value))}
-                  disabled={!hasCurrentAudio}
-                  className={`${styles.audioSeek} ${styles.nowPlayingSeek}`}
-                />
-                <div className={`${styles.nowPlayingContent} ${styles.nowPlayingContentEnter}`}>
-                  <div className={styles.nowPlayingMetaGroup}>
-                    <button
-                      type="button"
-                      className={styles.nowPlayingMetaButton}
-                      onClick={openScriptModal}
-                    >
-                      <div className={styles.nowPlayingThumbWrap}>
-                        <WalkStepImage
-                          src={toSafeStopImage(currentStop.images[0])}
-                          alt={currentStop.title}
-                          fill
-                          className={styles.nowPlayingThumb}
-                          unoptimized
-                        />
-                      </div>
-                      <div className={styles.nowPlayingMeta}>
-                        <div className={styles.nowPlayingTitleText}>{currentStop.title}</div>
-                        <div className={styles.nowPlayingSubtitle}>
-                          {isGeneratingScriptForModal
-                            ? "Generating script..."
-                            : isGeneratingAudioForCurrentStop
-                              ? "Generating audio..."
-                              : hasCurrentAudio
-                                ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
-                                : "Audio not generated yet"}
-                        </div>
-                        {currentStopSourceLabel ? (
-                          <div className={styles.nowPlayingSourceMeta}>{currentStopSourceLabel}</div>
-                        ) : null}
-                      </div>
-                    </button>
-                    {hasCurrentAudio ? (
-                      <a
-                        className={styles.nowPlayingInlineLink}
-                        href={currentStopAudio}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        View audio
-                      </a>
-                    ) : null}
-                  </div>
-                  <button
-                    className={`${styles.nowPlayingButton} ${styles.nowPlayingBarButton}`}
-                    onClick={toggleAudio}
+              ) : null
+            }
+            nowPlayingBar={
+              currentStop ? (
+                <div className={walkStyles.nowPlayingBar}>
+                  <audio ref={audioRef} preload="none" src={hasCurrentAudio ? currentStopAudio : undefined} hidden />
+                  <input
+                    type="range"
+                    min={0}
+                    max={audioDuration || 0}
+                    step={0.1}
+                    value={Math.min(audioTime, audioDuration || audioTime)}
+                    onChange={(e) => seekAudio(Number(e.target.value))}
                     disabled={!hasCurrentAudio}
-                    aria-label={isPlaying ? "Pause current stop" : "Play current stop"}
-                  >
-                    <Image
-                      src={isPlaying ? "/icons/pause-fill.svg" : "/icons/play-fill.svg"}
-                      alt=""
-                      width={28}
-                      height={28}
-                      className={`${styles.nowPlayingIcon} ${styles.nowPlayingBarIcon}`}
-                      aria-hidden="true"
-                    />
-                  </button>
+                    className={`${styles.audioSeek} ${styles.nowPlayingSeek}`}
+                  />
+                  <div className={`${walkStyles.nowPlayingContent} ${walkStyles.nowPlayingContentEnter}`}>
+                    <div className={walkStyles.nowPlayingMetaGroup}>
+                      <button
+                        type="button"
+                        className={walkStyles.nowPlayingMetaButton}
+                        onClick={openScriptModal}
+                      >
+                        <div className={walkStyles.nowPlayingThumbWrap}>
+                          <WalkStepImage
+                            src={toSafeStopImage(currentStop.images[0])}
+                            alt={currentStop.title}
+                            fill
+                            className={walkStyles.nowPlayingThumb}
+                            unoptimized
+                          />
+                        </div>
+                        <div className={walkStyles.nowPlayingMeta}>
+                          <div className={walkStyles.nowPlayingTitleText}>{currentStop.title}</div>
+                          <div className={walkStyles.nowPlayingSubtitle}>
+                            {isGeneratingScriptForModal
+                              ? "Generating script..."
+                              : isGeneratingAudioForCurrentStop
+                                ? "Generating audio..."
+                                : hasCurrentAudio
+                                  ? `${formatAudioTime(audioTime)} / ${formatAudioTime(audioDuration)}`
+                                  : "Audio not generated yet"}
+                          </div>
+                          {currentStopSourceLabel ? (
+                            <div className={walkStyles.nowPlayingSourceMeta}>{currentStopSourceLabel}</div>
+                          ) : null}
+                        </div>
+                      </button>
+                      {hasCurrentAudio ? (
+                        <a
+                          className={walkStyles.nowPlayingInlineLink}
+                          href={currentStopAudio}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          View audio
+                        </a>
+                      ) : null}
+                    </div>
+                    <button
+                      className={`${walkStyles.nowPlayingButton} ${walkStyles.nowPlayingBarButton}`}
+                      onClick={toggleAudio}
+                      disabled={!hasCurrentAudio}
+                      aria-label={isPlaying ? "Pause current stop" : "Play current stop"}
+                    >
+                      <Image
+                        src={isPlaying ? "/icons/pause-fill.svg" : "/icons/play-fill.svg"}
+                        alt=""
+                        width={28}
+                        height={28}
+                        className={`${walkStyles.nowPlayingIcon} ${walkStyles.nowPlayingBarIcon}`}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              ) : null
+            }
+          />
             {(isScriptModalOpen || isScriptModalClosing) && currentStop && (
               <div
                 className={`${styles.scriptModalOverlay} ${isScriptModalClosing ? styles.scriptModalOverlayClosing : ""}`}
@@ -5487,11 +5474,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                 </div>
               </div>
             )}
-          </div>
-
-          
-        </main>
-        
+        </>
       )}
 
       {/* END */}

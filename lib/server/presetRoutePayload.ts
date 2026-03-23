@@ -229,6 +229,8 @@ export async function loadPresetRoutePreviewStops(routeId: string, cityHint?: st
     .map((stop) => ({
       stop_id: stop.stop_id,
       title: stop.title,
+      lat: stop.lat,
+      lng: stop.lng,
       image_url: stop.image_url,
       position: stop.position,
       is_overview: stop.is_overview,

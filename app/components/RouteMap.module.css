@@ -12,6 +12,10 @@
   width: 100%;
 }
 
+.mapContainerStatic {
+  pointer-events: none;
+}
+
 .popupCard {
   min-width: 160px;
   max-width: 220px;

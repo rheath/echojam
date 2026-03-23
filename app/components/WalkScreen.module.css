@@ -1,0 +1,791 @@
+.walkLayout {
+  margin-top: 0;
+  border-radius: 0;
+  overflow: visible;
+  background: #0f0f16;
+  color: #f4f4f6;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+}
+
+.walkLayoutLocked {
+  min-height: 100vh;
+}
+
+.mapHero {
+  position: relative;
+  height: 360px;
+}
+
+.mapBackButton {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(24, 24, 31, 0.82);
+  color: #fff;
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+}
+
+.mapBackIcon {
+  width: 26px;
+  height: 26px;
+  filter: invert(1);
+}
+
+.mapViewButton {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  border-radius: 999px;
+  background: rgba(24, 24, 31, 0.82);
+  color: #fff;
+  padding: 8px 12px;
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 400;
+  z-index: 3;
+}
+
+.rightRail {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  position: relative;
+  background: #11111a;
+}
+
+.rightRailWithModal {
+  overflow: hidden;
+}
+
+.walkCard {
+  padding: 24px;
+  background: radial-gradient(110% 140% at 0% 0%, #262631 0%, #171722 55%, #101019 100%);
+  min-height: 100%;
+}
+
+.walkMetaRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 0;
+  flex-wrap: wrap;
+}
+
+.walkNarratorIcon {
+  width: 24px;
+  height: 24px;
+  filter: invert(1);
+  opacity: 0.9;
+}
+
+.walkNarratorAvatarWrap {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 999px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.walkNarratorAvatarButton {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.walkNarratorAvatar {
+  object-fit: cover;
+}
+
+.walkNarrator {
+  font-size: 16px;
+  opacity: 0.86;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.walkNarratorButton {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.walkNarratorActiveName {
+  color: #ff5f92;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.walkNarratorRemixPill,
+.metaPill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  padding: 6px 10px;
+}
+
+.walkNarratorRemixPill {
+  background: #333;
+  border-color: transparent;
+}
+
+.walkHeadline {
+  margin: 10px 0 0;
+  font-size: 44px;
+  font-weight: 500;
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+}
+
+.walkSubline {
+  margin-top: 10px;
+  display: flex;
+  gap: 22px;
+  flex-wrap: wrap;
+  opacity: 0.86;
+  font-size: 16px;
+}
+
+.walkActionRow {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.walkActionRow .nowPlayingButton {
+  margin-left: auto;
+}
+
+.pillButton {
+  flex: 0 0 auto;
+  width: auto;
+  border: 0;
+  border-radius: 999px;
+  background: #4a4a52;
+  color: #fff;
+  padding: 8px 20px;
+  font-size: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pillButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.stopList {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.featuredStopSection {
+  margin-top: 20px;
+}
+
+.stopListRegion {
+  position: relative;
+}
+
+.stopListLocked {
+  opacity: 0.82;
+}
+
+.stopListBlurred {
+  position: relative;
+  filter: blur(8px);
+  opacity: 0.72;
+  pointer-events: none;
+  user-select: none;
+}
+
+.stopListBlurred::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(16, 16, 25, 0.16) 0%, rgba(16, 16, 25, 0.52) 100%);
+}
+
+.stopListModalLayer {
+  position: absolute;
+  inset: 20px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px 16px;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.stopListModalBackdrop {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10, 10, 16, 0.08) 0%, rgba(10, 10, 16, 0.42) 100%);
+}
+
+.stopListModalCard {
+  position: relative;
+  width: min(420px, 100%);
+  pointer-events: auto;
+  transform: translateY(-60px);
+}
+
+.stopItem {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+}
+
+.stopItemStatic {
+  cursor: default;
+}
+
+.stopItemActive {
+  opacity: 1;
+}
+
+.stopThumbWrap {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  border-radius: 12px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.stopThumb {
+  object-fit: cover;
+}
+
+.stopText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.stopTitle {
+  font-size: 24px;
+  font-weight: 700;
+  opacity: 0.9;
+  min-width: 0;
+}
+
+.stopTitleActive {
+  color: #ff79a8;
+}
+
+.stopSubtitle {
+  font-size: 16px;
+  opacity: 0.84;
+}
+
+.stopSourceMeta,
+.nowPlayingSourceMeta {
+  font-size: 13px;
+  color: rgba(244, 244, 246, 0.68);
+}
+
+.nowPlayingBar {
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border-top: 1px solid #2b2b33;
+  background: #0a0a10;
+}
+
+.nowPlayingContent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 24px 16px;
+}
+
+.nowPlayingMetaButton {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  margin: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nowPlayingMetaGroup {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nowPlayingContentEnter {
+  animation: nowPlayingSlideUp 220ms ease-out;
+}
+
+@keyframes nowPlayingSlideUp {
+  from {
+    transform: translateY(18px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.nowPlayingThumbWrap {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nowPlayingThumb {
+  object-fit: cover;
+}
+
+.nowPlayingTitleText {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.nowPlayingSubtitle {
+  font-size: 16px;
+  opacity: 0.85;
+}
+
+.nowPlayingMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.nowPlayingInlineLink {
+  border: 0;
+  background: transparent;
+  color: #f4f4f6;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  display: none;
+}
+
+.nowPlayingButton {
+  width: 60px;
+  height: 60px;
+  border-radius: 999px;
+  border: 0;
+  background: #ff5f92;
+  color: #16161d;
+  font-size: 30px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nowPlayingButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nowPlayingIcon {
+  width: 28px;
+  height: 28px;
+}
+
+.nowPlayingBarButton {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  padding: 0;
+}
+
+.nowPlayingBarIcon {
+  filter: invert(1);
+}
+
+.railModalLayer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  z-index: 35;
+  pointer-events: none;
+}
+
+.railModalBackdrop {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10, 10, 16, 0.18) 0%, rgba(10, 10, 16, 0.56) 100%);
+}
+
+.railModalCard {
+  position: relative;
+  width: min(420px, 100%);
+  pointer-events: auto;
+}
+
+.pageOverlayLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.pageOverlayBackdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 8, 12, 0.78);
+  backdrop-filter: blur(8px);
+}
+
+.pageOverlayCard {
+  position: relative;
+  width: min(460px, 100%);
+}
+
+.statusStack {
+  display: grid;
+  gap: 12px;
+}
+
+.statusMessage,
+.statusError,
+.loadingState,
+.unlockCard,
+.pageModalCard {
+  padding: 16px 18px;
+  border-radius: 20px;
+}
+
+.statusMessage {
+  background: #fff;
+  border: 1px solid #333;
+  color: #000;
+}
+
+.statusError {
+  background: rgba(207, 84, 67, 0.18);
+  border: 1px solid rgba(207, 84, 67, 0.34);
+  color: #ffd8d1;
+}
+
+.loadingState {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(244, 244, 246, 0.8);
+}
+
+.unlockCard,
+.pageModalCard {
+  display: grid;
+  gap: 16px;
+  background: #000;
+  border: 1px solid #666;
+}
+
+.overlayIntro {
+  display: grid;
+  gap: 12px;
+}
+
+.overlayQuote {
+  margin: 0;
+  color: #f4f4f6;
+  font-size: 18px; 
+}
+
+.overlayMetaBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.actionTitle {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  line-height: normal;
+}
+
+.actionText {
+  margin: 0;
+  color: #c7cad4;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.actionLabel {
+  display: grid;
+  gap: 8px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.input {
+  width: 100%;
+  min-height: 52px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  padding: 0 16px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 16px;
+}
+
+.input::placeholder {
+  color: rgba(244, 244, 246, 0.5);
+}
+
+.buttonRow {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.primaryButton,
+.secondaryButton,
+.primaryLink {
+  min-height: 52px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 160ms ease, opacity 160ms ease, background 160ms ease;
+}
+
+.primaryButton,
+.primaryLink {
+  border: 0;
+  background: #ff5f92;
+  color: #16161d;
+}
+
+.secondaryButton {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: #fff;
+}
+
+.primaryButton:hover,
+.secondaryButton:hover,
+.primaryLink:hover {
+  transform: translateY(-1px);
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.inlineResetLink {
+  display: inline;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.14em;
+  cursor: pointer;
+  opacity: 0.92;
+}
+
+.inlineResetLink:hover {
+  opacity: 1;
+}
+
+.inlineResetLink:focus-visible {
+  outline: 2px solid rgba(215, 244, 222, 0.85);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+@media (max-width: 1023px) {
+  .walkLayout {
+    border-radius: 0;
+    margin-inline: 0;
+    padding-bottom: 92px;
+  }
+
+  .mapHero {
+    height: 300px;
+  }
+
+  .walkSubline {
+    gap: 10px;
+  }
+
+  .nowPlayingBar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: 100%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .walkLayout {
+    display: grid;
+    grid-template-columns: minmax(0, 59%) minmax(380px, 41%);
+    grid-template-areas: "map rail";
+    height: 100vh;
+    margin-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+
+  .mapHero {
+    grid-area: map;
+    height: 100%;
+  }
+
+  .rightRail {
+    grid-area: rail;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .walkCard {
+    min-height: auto;
+    overflow: visible;
+    padding: 28px 30px;
+  }
+
+  .walkActionRow {
+    align-items: center;
+  }
+
+  .nowPlayingBar {
+    position: sticky;
+    bottom: 0;
+    left: auto;
+    right: auto;
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .mapBackButton {
+    top: 14px;
+    left: 14px;
+  }
+
+  .walkCard {
+    padding: 22px 18px 28px;
+  }
+
+  .walkHeadline {
+    font-size: 38px;
+  }
+
+  .stopTitle {
+    font-size: 20px;
+  }
+
+  .stopSubtitle {
+    font-size: 15px;
+  }
+
+  .railModalLayer {
+    align-items: flex-start;
+    padding-top: 18px;
+  }
+
+  .buttonRow {
+    flex-direction: column;
+  }
+
+  .primaryButton,
+  .secondaryButton,
+  .primaryLink {
+    width: 100%;
+  }
+}

@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import WalkScreen from "@/app/components/WalkScreen";
+import walkStyles from "@/app/components/WalkScreen.module.css";
 import { supabase } from "@/lib/supabaseClient";
-import { buildPathWithUtm, pickUtmParamsFromSearchParams } from "@/lib/utm";
-import styles from "./JourneyAccessClient.module.css";
+import { buildPathWithUtm, pickUtmParamsFromSearchParams, appendUtmParams } from "@/lib/utm";
+
+const RouteMap = dynamic(() => import("@/app/components/RouteMap"), { ssr: false });
 
 type JourneyOfferingSummary = {
   id: string;
@@ -28,6 +32,16 @@ type JourneyOfferingSummary = {
   published: boolean;
 };
 
+type JourneyStopPreview = {
+  stop_id: string;
+  title: string;
+  lat?: number;
+  lng?: number;
+  image_url: string | null;
+  position: number;
+  is_overview?: boolean;
+};
+
 type JourneyApiResponse =
   | {
       access: "locked";
@@ -43,14 +57,6 @@ type JourneyApiResponse =
       };
       stops: JourneyStopPreview[];
     };
-
-type JourneyStopPreview = {
-  stop_id: string;
-  title: string;
-  image_url: string | null;
-  position: number;
-  is_overview?: boolean;
-};
 
 type JourneyAccessClientProps = {
   slug: string;
@@ -80,10 +86,19 @@ function buildFallbackStopPreview(teaser: JourneyOfferingSummary): JourneyStopPr
   ];
 }
 
+function buildJourneyOpenHref(sourceId: string, utmParams: ReturnType<typeof pickUtmParamsFromSearchParams>) {
+  const searchParams = new URLSearchParams();
+  searchParams.set("startPresetRoute", sourceId);
+  appendUtmParams(searchParams, utmParams);
+  const query = searchParams.toString();
+  return query ? `/?${query}` : "/";
+}
+
 const MAGIC_LINK_SUCCESS_MESSAGE =
   "Check your inbox for a private Wandrful sign-in link from Wandrful Support. It expires in 5 minutes.";
 
 export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAccessClientProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -98,6 +113,7 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
   const [isLoading, setIsLoading] = useState(true);
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
+  const [isRedirectingToWalk, setIsRedirectingToWalk] = useState(false);
   const [payload, setPayload] = useState<JourneyApiResponse | null>(null);
 
   useEffect(() => {
@@ -166,17 +182,25 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
   const teaser = payload?.teaser ?? initialTeaser;
   const stopCountLabel = typeof teaser.stopCount === "number" ? `${teaser.stopCount} stops` : null;
   const durationLabel = typeof teaser.durationMinutes === "number" ? `${teaser.durationMinutes} mins` : null;
-  const metadataLabel = [durationLabel, stopCountLabel].filter(Boolean).join(" • ");
   const utmParams = useMemo(() => pickUtmParamsFromSearchParams(searchParams), [searchParams]);
   const journeyReturnPath = useMemo(() => buildPathWithUtm(`/journeys/${slug}`, utmParams), [slug, utmParams]);
-  const canOpenJourney =
-    payload?.access === "granted" &&
-    Boolean(payload.teaser?.sourceKind === "preset" && payload.teaser.sourceId);
-  const openJourneyHref = canOpenJourney
-    ? `/?startPresetRoute=${encodeURIComponent(payload!.teaser!.sourceId)}`
-    : null;
-  const hasHeroImage = Boolean(teaser.coverImageUrl?.trim());
+  const grantedSourceId =
+    payload?.access === "granted"
+      ? payload.teaser?.sourceKind === "preset"
+        ? payload.teaser.sourceId
+        : initialTeaser.sourceKind === "preset"
+          ? initialTeaser.sourceId
+          : null
+      : null;
+  const openJourneyHref = grantedSourceId ? buildJourneyOpenHref(grantedSourceId, utmParams) : null;
   const isGranted = payload?.access === "granted";
+
+  useEffect(() => {
+    if (!isGranted || !openJourneyHref) return;
+    setIsRedirectingToWalk(true);
+    router.replace(openJourneyHref);
+  }, [isGranted, openJourneyHref, router]);
+
   const stopPreviews = useMemo(() => {
     const fallbackStops = buildFallbackStopPreview(teaser);
     if (payload?.access === "granted") {
@@ -187,9 +211,34 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
     }
     return fallbackStops;
   }, [payload, teaser]);
-  const firstVisibleStop = stopPreviews[0] ?? null;
-  const remainingStops = stopPreviews.slice(1);
-  const shouldOverlayLockedStops = !isGranted && remainingStops.length > 0;
+
+  const mapStops = useMemo(
+    () =>
+      stopPreviews
+        .filter((stop): stop is JourneyStopPreview & { lat: number; lng: number } => typeof stop.lat === "number" && typeof stop.lng === "number")
+        .map((stop) => ({
+          id: stop.stop_id,
+          title: stop.title,
+          lat: stop.lat,
+          lng: stop.lng,
+          images: stop.image_url ? [stop.image_url] : [],
+        })),
+    [stopPreviews]
+  );
+
+  const walkStops = useMemo(
+    () =>
+      stopPreviews.map((stop, index) => ({
+        id: stop.stop_id,
+        title: `${index + 1}. ${stop.title}`,
+        subtitle: index === 0 ? "First stop" : `Stop ${index + 1}`,
+        imageSrc: stop.image_url,
+        isActive: index === 0,
+      })),
+    [stopPreviews]
+  );
+  const featuredStop = walkStops[0] ?? null;
+  const remainingStops = walkStops.slice(1);
 
   async function handleSendMagicLink(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -256,56 +305,53 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
 
   function renderLockedOverlayIntro() {
     return (
-      <div className={styles.overlayIntro}>
-        <p className={styles.actionTitle}>Unlock this journey</p>
+      <div className={walkStyles.overlayIntro}> 
         {teaser.teaserDescription ? (
-          <p className={styles.overlayQuote}>
-            Step into the {teaser.teaserDescription}
-          </p>
+          <p className={walkStyles.actionTitle}>Listen to the story of {teaser.teaserDescription}</p>
         ) : null}
-        <p className={styles.actionText}>
-          Enter your email to receive your private access link and continue the full journey.
-        </p>
+        
       </div>
     );
   }
 
   function renderActionPanel() {
     if (isGranted) {
-      return (
-        <div className={styles.actionCard}>
+      return openJourneyHref ? (
+        <div className={walkStyles.unlockCard}>
           <div>
-            <p className={styles.actionTitle}>Journey unlocked</p>
-            <p className={styles.actionText}>
+            <p className={walkStyles.actionTitle}>Journey unlocked</p>
+            <p className={walkStyles.actionText}>Redirecting you into the full walk now.</p>
+          </div>
+        </div>
+      ) : (
+        <div className={walkStyles.unlockCard}>
+          <div>
+            <p className={walkStyles.actionTitle}>Journey unlocked</p>
+            <p className={walkStyles.actionText}>
               This journey is unlocked for {userEmail || "your account"}.
             </p>
           </div>
-          {openJourneyHref ? (
-            <Link href={openJourneyHref} className={styles.primaryLink}>
-              Open in EchoJam
-            </Link>
-            ) : null}
         </div>
       );
     }
 
     if (userEmail) {
       return (
-        <div className={styles.actionCard}>
+        <div className={walkStyles.unlockCard}>
           {renderLockedOverlayIntro()}
-          <div className={styles.overlayMetaBlock}>
-            <p className={styles.actionText}>
+          <div className={walkStyles.overlayMetaBlock}>
+            <p className={walkStyles.actionText}>
               Signed in as {userEmail}. Unlock the full walk to open every stop in EchoJam.
             </p>
           </div>
-          <div className={styles.buttonRow}>
+          <div className={walkStyles.buttonRow}>
             <button
               type="button"
               onClick={() => {
                 void handleStartCheckout();
               }}
               disabled={isStartingCheckout}
-              className={styles.primaryButton}
+              className={walkStyles.primaryButton}
             >
               {isStartingCheckout ? "Opening checkout..." : `Unlock for ${teaser.pricing.displayLabel}`}
             </button>
@@ -314,7 +360,7 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
               onClick={() => {
                 void handleSignOut();
               }}
-              className={styles.secondaryButton}
+              className={walkStyles.secondaryButton}
             >
               Sign out
             </button>
@@ -328,10 +374,10 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
     }
 
     return (
-      <form onSubmit={handleSendMagicLink} className={styles.actionCard}>
+      <form onSubmit={handleSendMagicLink} className={walkStyles.unlockCard}>
         {renderLockedOverlayIntro()}
-        <label htmlFor="journey-email" className={styles.actionLabel}>
-          Email address
+        <label htmlFor="journey-email" className={walkStyles.actionLabel}>
+          Enter email address to unlock journey
           <input
             id="journey-email"
             type="email"
@@ -340,11 +386,11 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
             placeholder="you@example.com"
             autoComplete="email"
             disabled={isSendingMagicLink}
-            className={styles.input}
+            className={walkStyles.input}
           />
         </label>
-        <button type="submit" disabled={isSendingMagicLink} className={styles.primaryButton}>
-          {isSendingMagicLink ? "Sending magic link..." : "Email me a magic link"}
+        <button type="submit" disabled={isSendingMagicLink} className={walkStyles.primaryButton}>
+          {isSendingMagicLink ? "Sending email..." : "Get started"}
         </button>
       </form>
     );
@@ -354,11 +400,11 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
     return (
       <>
         {magicLinkMessage ? (
-          <div className={styles.statusMessage}>
+          <div className={walkStyles.statusMessage}>
             {magicLinkMessage}{" "}
             <button
               type="button"
-              className={styles.inlineResetLink}
+              className={walkStyles.inlineResetLink}
               onClick={() => {
                 setMagicLinkMessage(null);
                 setError(null);
@@ -368,133 +414,104 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
             </button>
           </div>
         ) : null}
-        {message ? <div className={styles.statusMessage}>{message}</div> : null}
-        {error ? <div className={styles.statusError}>{error}</div> : null}
-        {isLoading ? <div className={styles.loadingState}>Checking access...</div> : null}
+        {message ? <div className={walkStyles.statusMessage}>{message}</div> : null}
+        {error ? <div className={walkStyles.statusError}>{error}</div> : null}
+        {isLoading ? <div className={walkStyles.loadingState}>Checking access...</div> : null}
       </>
     );
   }
 
-  function renderStopRow(stop: JourneyStopPreview, index: number, options?: { highlight?: boolean }) {
-    const stopNumber = index + 1;
-    const subtitle = options?.highlight
-      ? isGranted
-        ? `Stop ${stopNumber}`
-        : "First stop"
-      : `Stop ${stopNumber}`;
-
+  function renderRailModal() {
     return (
-      <div key={stop.stop_id} className={`${styles.stopItem} ${options?.highlight ? styles.stopItemHighlight : ""}`}>
-        <div className={styles.stopThumbWrap}>
-          {stop.image_url ? (
-            <Image
-              src={stop.image_url}
-              alt={stop.title}
-              fill
-              className={styles.stopThumb}
-              unoptimized
-            />
-          ) : null}
-        </div>
-        <div className={styles.stopText}>
-          <div className={styles.stopSubtitle}>{subtitle}</div>
-          <div className={`${styles.stopTitle} ${options?.highlight ? styles.stopTitleActive : ""}`}>
-            {`${stopNumber}. ${stop.title}`}
-          </div>
-        </div>
+      <div className={walkStyles.statusStack}>
+        {renderStatusContent()}
+        {renderActionPanel()}
       </div>
     );
   }
 
+  function renderPageOverlay(): ReactNode {
+    if (isStartingCheckout) {
+      return (
+        <div className={walkStyles.pageModalCard}>
+          <p className={walkStyles.actionTitle}>Opening secure checkout</p>
+          <p className={walkStyles.actionText}>
+            We&apos;re taking you to our hosted payment screen now.
+          </p>
+        </div>
+      );
+    }
+
+    if (isRedirectingToWalk) {
+      return (
+        <div className={walkStyles.pageModalCard}>
+          <p className={walkStyles.actionTitle}>Journey unlocked</p>
+          <p className={walkStyles.actionText}>Opening your full walk in EchoJam.</p>
+        </div>
+      );
+    }
+
+    return null;
+  }
+
   return (
-    <main className={styles.page}>
-      <div className={styles.layout}>
-        <section className={`${styles.heroPane} ${hasHeroImage ? styles.heroPaneWithImage : ""}`}>
-          {hasHeroImage ? (
+    <WalkScreen
+      mode="locked"
+      map={(
+        <RouteMap
+          stops={mapStops}
+          currentStopIndex={0}
+          initialFitRoute
+          showRoutePath
+          routeTravelMode="walk"
+          interactive={false}
+        />
+      )}
+      backControl={(
+        <Link href="/" className={walkStyles.mapBackButton} aria-label="Back to EchoJam">
+          <Image
+            src="/icons/x.svg"
+            alt=""
+            width={26}
+            height={26}
+            className={walkStyles.mapBackIcon}
+            aria-hidden="true"
+          />
+        </Link>
+      )}
+      metaRow={(
+        <>
+          <div className={walkStyles.walkNarratorAvatarWrap}>
             <Image
-              src={teaser.coverImageUrl!}
-              alt={teaser.title}
-              fill
-              priority
-              className={styles.heroImage}
-              unoptimized
-            />
-          ) : null}
-          <Link href="/" className={styles.heroBackButton} aria-label="Back to EchoJam">
-            <Image
-              src="/icons/x.svg"
+              src="/icons/stars.svg"
               alt=""
-              width={26}
-              height={26}
-              className={styles.heroBackIcon}
+              width={24}
+              height={24}
+              className={walkStyles.walkNarratorIcon}
               aria-hidden="true"
             />
-          </Link>
-        </section>
-
-        <section className={styles.rail}>
-          <div className={styles.railCard}>
-            <div className={styles.metaRow}>
-              <div className={styles.avatarWrap}>
-                <Image
-                  src="/icons/stars.svg"
-                  alt=""
-                  width={24}
-                  height={24}
-                  className={styles.avatarIcon}
-                  aria-hidden="true"
-                />
-              </div>
-              <div className={styles.metaText}>
-                <span>Story by</span>
-                <span className={styles.metaActiveName}>{teaser.creatorLabel || "Wandrful"}</span>
-              </div>
-              <div className={styles.pricePill}>{teaser.pricing.displayLabel}</div>
-            </div>
-
-            <h2 className={styles.headline}>{teaser.title}</h2>
-            {metadataLabel ? <div className={styles.subline}>{metadataLabel}</div> : null}
-            
-
-            <section className={styles.stopSection}>
-             
-
-              {firstVisibleStop ? renderStopRow(firstVisibleStop, 0, { highlight: true }) : null}
-
-              {remainingStops.length > 0 ? (
-                shouldOverlayLockedStops ? (
-                  <div className={styles.lockedStopsArea}>
-                    <div className={styles.lockedStopsBlur} aria-hidden="true">
-                      <div className={styles.stopList}>
-                        {remainingStops.map((stop, index) => renderStopRow(stop, index + 1))}
-                      </div>
-                    </div>
-                    <div className={styles.lockedOverlay}>
-                      <div className={styles.lockedOverlayCard}>
-                        <div className={styles.statusStack}>
-                          {renderStatusContent()}
-                          {renderActionPanel()}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className={styles.stopList}>
-                    {remainingStops.map((stop, index) => renderStopRow(stop, index + 1))}
-                  </div>
-                )
-              ) : null}
-            </section>
-
-            {!shouldOverlayLockedStops ? (
-              <div className={styles.statusStack}>
-                {renderStatusContent()}
-                {renderActionPanel()}
-              </div>
-            ) : null}
           </div>
-        </section>
-      </div>
-    </main>
+          <div className={walkStyles.walkNarrator}>
+            <span>Story by</span>
+            <span className={walkStyles.walkNarratorActiveName}>{teaser.creatorLabel || "Wandrful"}</span>
+          </div>
+          <div className={walkStyles.metaPill}>{teaser.pricing.displayLabel}</div>
+        </>
+      )}
+      title={teaser.title}
+      subline={
+        <>
+          {durationLabel ? <span>{durationLabel}</span> : null}
+          {stopCountLabel ? <span>{stopCountLabel}</span> : null}
+        </>
+      }
+      stops={[]}
+      featuredStop={featuredStop}
+      remainingStops={remainingStops}
+      blurRemainingStops={!isGranted && remainingStops.length > 0}
+      stopsInteractive={false}
+      railModal={!isGranted ? renderRailModal() : null}
+      pageOverlay={renderPageOverlay()}
+    />
   );
 }

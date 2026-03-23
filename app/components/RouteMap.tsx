@@ -43,6 +43,7 @@ type Props = {
     origin?: Endpoint | null;
     destination?: Endpoint | null;
   } | null;
+  interactive?: boolean;
 };
 
 type StopVisualStatus = "visited" | "current" | "upcoming" | "arrival";
@@ -85,6 +86,7 @@ export default function RouteMap({
   routeTravelMode = null,
   showRoutePath = false,
   endpoints = null,
+  interactive = true,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -194,6 +196,7 @@ export default function RouteMap({
           streetViewControl: false,
           fullscreenControl: false,
           clickableIcons: false,
+          keyboardShortcuts: true,
           gestureHandling: "greedy",
         });
 
@@ -231,6 +234,17 @@ export default function RouteMap({
     const map = mapRef.current;
     if (!map || !isMapReady) return;
 
+    map.setOptions({
+      clickableIcons: false,
+      keyboardShortcuts: interactive,
+      gestureHandling: interactive ? "greedy" : "none",
+    });
+  }, [interactive, isMapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) return;
+
     const displayStops = buildDisplayStops(stops, currentStopIndex, spreadOverlappingStops);
     const visibleRouteCoords = resolveVisibleRouteCoords(
       stops,
@@ -246,15 +260,17 @@ export default function RouteMap({
         title: stop.title,
         visual: buildStopMarkerIcon(stop.status, stop.label),
         zIndex: stop.status === "current" ? 30 : 20 + idx,
-        clickable: true,
+        clickable: interactive,
       });
 
-      marker.addListener("click", () => {
-        const infoWindow = infoWindowRef.current;
-        if (!infoWindow) return;
-        infoWindow.setContent(buildStopPopupContent(stop.title, stop.subtitle, stop.image));
-        infoWindow.open({ map, anchor: marker });
-      });
+      if (interactive) {
+        marker.addListener("click", () => {
+          const infoWindow = infoWindowRef.current;
+          if (!infoWindow) return;
+          infoWindow.setContent(buildStopPopupContent(stop.title, stop.subtitle, stop.image));
+          infoWindow.open({ map, anchor: marker });
+        });
+      }
 
       return marker;
     });
@@ -299,6 +315,7 @@ export default function RouteMap({
     showRoutePath,
     spreadOverlappingStops,
     stops,
+    interactive,
   ]);
 
   useEffect(() => {
@@ -365,7 +382,10 @@ export default function RouteMap({
 
   return (
     <div className={styles.mapShell}>
-      <div ref={containerRef} className={styles.mapContainer} />
+      <div
+        ref={containerRef}
+        className={`${styles.mapContainer} ${!interactive ? styles.mapContainerStatic : ""}`}
+      />
     </div>
   );
 }
