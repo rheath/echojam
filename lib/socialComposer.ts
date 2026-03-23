@@ -208,6 +208,42 @@ export function mapGooglePlaceDraftToComposerStop(
   } satisfies ComposerStop;
 }
 
+export function mapComposerStopToGooglePlaceDraft(
+  stop: ComposerStop
+) {
+  if (stop.provider !== "google_places") return null;
+  return {
+    place: {
+      id: stop.sourceId || stop.id.replace(/^google_places:/, ""),
+      title: stop.title,
+      lat: stop.lat,
+      lng: stop.lng,
+      image: stop.image,
+      googlePlaceId: stop.googlePlaceId || null,
+    },
+    title: stop.title,
+    script: toNullableTrimmed(stop.script),
+    status: "ready" as const,
+    error: null,
+    scriptEditedByUser: Boolean(stop.scriptEditedByUser),
+    generatedNarratorSignature: toNullableTrimmed(stop.generatedNarratorSignature),
+    generatedRouteSignature: toNullableTrimmed(stop.generatedRouteSignature),
+  } satisfies GooglePlaceDraft;
+}
+
+export function mapGooglePlaceDraftOntoComposerStop(
+  stop: ComposerStop,
+  draft: GooglePlaceDraft
+) {
+  if (stop.provider !== "google_places") return null;
+  const updated = mapGooglePlaceDraftToComposerStop(draft);
+  return {
+    ...updated,
+    id: stop.id,
+    sourceId: stop.sourceId || updated.sourceId,
+  } satisfies ComposerStop;
+}
+
 export function isGooglePlaceStopScriptStale(
   stop: ComposerStop,
   narratorSignature: string,
@@ -257,8 +293,13 @@ export function deriveComposerRouteAttribution(stops: ComposerStop[]) {
     };
   }
 
+  const storyBy = Array.from(uniqueCreators.values())
+    .map((creator) => toNullableTrimmed(creator.creatorName))
+    .filter((creatorName): creatorName is string => Boolean(creatorName))
+    .join(", ");
+
   return {
-    storyBy: "Social creators",
+    storyBy: storyBy || null,
     storyByUrl: null,
     storyByAvatarUrl: null,
     storyBySource: uniqueProviders.size > 1 || uniqueCreators.size > 1 ? "social" : socialStops[0]?.provider || null,

@@ -1,6 +1,5 @@
-import type { PresetCity, PresetContentPriority, Stop } from "@/app/content/salemRoutes";
+import type { PresetCity, PresetContentPriority, Stop } from "@/app/content/routeTypes";
 import type { StopInput } from "@/lib/mixGeneration";
-import { presetRouteData } from "@/app/content/generated/presetRoutes.generated";
 
 type CityMeta = {
   label: string;
@@ -16,25 +15,12 @@ const FALLBACK_CITY_META: Record<PresetCity, CityMeta> = {
   nyc: { label: "New York City", lat: 40.7527, lng: -73.9772, fallbackImage: "/images/salem/placeholder.png" },
 };
 
-const GENERATED_CITY_META = presetRouteData.cityMeta as Partial<
-  Record<PresetCity, { label: string; lat: number; lng: number; fallbackImage: string }>
->;
-
 export function normalizePresetCity(city: string | null | undefined): PresetCity {
   if (city === "boston" || city === "concord" || city === "nyc" || city === "salem") return city;
   return "salem";
 }
 
 export function getPresetCityMeta(city: PresetCity) {
-  const generated = GENERATED_CITY_META[city];
-  if (generated) {
-    return {
-      label: generated.label,
-      lat: generated.lat,
-      lng: generated.lng,
-      fallbackImage: generated.fallbackImage || FALLBACK_CITY_META[city].fallbackImage,
-    };
-  }
   return FALLBACK_CITY_META[city];
 }
 

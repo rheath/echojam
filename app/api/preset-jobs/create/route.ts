@@ -1,6 +1,8 @@
 import { after, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRouteById } from "@/app/content/salemRoutes";
+import { getJourneyAccess } from "@/lib/server/journeyAccess";
+import { getRequestAuthUser } from "@/lib/server/requestAuth";
 import { ensureCanonicalStopForPreset, upsertRouteStopMapping } from "@/lib/canonicalStops";
 import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
 import {
@@ -232,6 +234,18 @@ export async function POST(req: Request) {
         const body = (await req.json()) as CreateBody;
         const route = getRouteById(body.routeId);
         if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
+        const authUser = await getRequestAuthUser(req);
+        const access = await getJourneyAccess({
+          userId: authUser?.id ?? null,
+          sourceKind: "preset",
+          sourceId: route.id,
+        });
+        if (access.requiresPurchase && access.accessState !== "granted") {
+          return NextResponse.json(
+            { error: "Purchase required before you can start this journey." },
+            { status: 403 }
+          );
+        }
         const city = route.city ?? normalizePresetCity(body.city);
         const persona = body.persona;
         if (persona === "custom") {

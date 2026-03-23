@@ -96,3 +96,19 @@ When adding a new city:
 2. Add `<city>.routes.json` with `stopPlaceIds`.
 3. Run `npm run presets:build`.
 4. Optionally run `POST /api/canonical-stops/sync-images` scoped to that city to refresh Google-backed images.
+
+## Paid Journey Launch
+
+The paid preset flow uses:
+
+- Supabase Auth magic links
+- Stripe Checkout
+- webhook-based entitlement creation
+
+Launch checklist:
+
+- [`docs/paid-journeys-launch.md`](/Users/robertheath/echojam/docs/paid-journeys-launch.md)
+
+Production env template:
+
+- [`.env.production`](/Users/robertheath/echojam/.env.production)

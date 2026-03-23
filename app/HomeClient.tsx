@@ -5,14 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import {
-  getPresetRoutesByCity,
-  getRouteById,
-  getRouteNarratorLabel,
-  type Persona,
-  type PresetCity,
-  type RouteDef,
-  type RoutePricing,
-} from "@/app/content/salemRoutes";
+  getPresetRouteSummariesByCity,
+  getPresetRouteSummaryById,
+  getPresetRouteSummaryImage,
+  getPresetRouteSummaryNarratorLabel,
+  getPresetRouteSummaryStopCount,
+} from "@/app/content/presetRouteSummaries";
+import type { Persona, PresetCity, PresetRouteSummary, RouteDef, RoutePricing } from "@/app/content/routeTypes";
 import { getPresetCityMeta, isPresetOverviewStopId } from "@/lib/presetOverview";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { getMaxStops, validateMixSelection } from "@/lib/mixConstraints";
@@ -251,6 +250,7 @@ type StartCustomMixOptions = {
 
 type StartPresetTourOptions = {
   forceRegenerateAll?: boolean;
+  allowPaidStart?: boolean;
 };
 
 const GENERATION_STATUS_LABELS: Record<MixJobResponse["status"], string> = {
@@ -381,27 +381,21 @@ function getRoutePricingLabel(pricing: RoutePricing | undefined) {
   return "TBD";
 }
 
-function getPresetRouteNarratorLabel(route: Pick<RouteDef, "storyBy" | "defaultPersona">) {
-  return getRouteNarratorLabel(route, route.defaultPersona);
+function getRouteNarratorLabel(
+  route: Pick<RouteDef, "storyBy"> | Pick<PresetRouteSummary, "storyBy"> | null | undefined,
+  persona: Persona
+) {
+  const override = typeof route?.storyBy === "string" ? route.storyBy.trim() : "";
+  if (override) return override;
+  return personaCatalog[persona].displayName;
 }
 
-function getPresetRouteStopCount(route: Pick<RouteDef, "city" | "stops">) {
-  if (route.stops.some((stop) => Boolean(stop.isOverview) || isPresetOverviewStopId(stop.id))) {
-    return route.stops.length;
-  }
-  return route.city ? route.stops.length + 1 : route.stops.length;
+function getPresetRouteNarratorLabel(route: Pick<PresetRouteSummary, "storyBy" | "defaultPersona">) {
+  return getPresetRouteSummaryNarratorLabel(route);
 }
 
 function getPresetRouteIcon() {
   return "/icons/stars.svg";
-}
-
-function hashString(value: string) {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
-  }
-  return hash;
 }
 
 function getLandingTitleFontClass(routeId: string) {
@@ -426,22 +420,11 @@ function getLandingTitleStyleClass(routeId: string) {
   return "";
 }
 
-function getLandingRouteImage(route: RouteDef) {
-  const stopsWithPlaceIds = route.stops.filter((stop) => (stop.googlePlaceId || "").trim().length > 0);
-  if (stopsWithPlaceIds.length > 0) {
-    const index = hashString(route.id) % stopsWithPlaceIds.length;
-    const placeId = (stopsWithPlaceIds[index]?.googlePlaceId || "").trim();
-    if (placeId) {
-      return `/api/google-image?kind=place-id-photo&placeId=${encodeURIComponent(placeId)}&maxWidthPx=1400`;
-    }
-  }
-  if (route.city) {
-    return getPresetCityMeta(route.city).fallbackImage;
-  }
-  return DEFAULT_STOP_IMAGE;
+function getLandingRouteImage(route: PresetRouteSummary) {
+  return getPresetRouteSummaryImage(route);
 }
 
-function toKnownCityOption(value: string | null | undefined): RouteDef["city"] | undefined {
+function toKnownCityOption(value: string | null | undefined): PresetCity | undefined {
   const normalized = (value || "").trim().toLowerCase();
   if (normalized === "salem" || normalized === "boston" || normalized === "concord" || normalized === "nyc") return normalized;
   return undefined;
@@ -564,6 +547,16 @@ async function fetchJsonWithTimeout<T>(
   } finally {
     window.clearTimeout(timeoutId);
   }
+}
+
+async function withSupabaseAuthHeaders(headersInit?: HeadersInit) {
+  const headers = new Headers(headersInit);
+  const { data } = await supabase.auth.getSession();
+  const accessToken = data.session?.access_token?.trim();
+  if (accessToken && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
+  }
+  return headers;
 }
 
 async function requestCurrentGeoPosition(timeoutMs = 8000): Promise<{ lat: number; lng: number }> {
@@ -720,6 +713,7 @@ export default function HomeClient() {
   const [err, setErr] = useState<string | null>(null);
   const [jam, setJam] = useState<JamRow | null>(null);
   const countedJamOpenRef = useRef<Set<string>>(new Set());
+  const attemptedPresetAutoStartRef = useRef<string | null>(null);
 
   const [step, setStep] = useState<FlowStep>("landing");
   const [documentVisibility, setDocumentVisibility] = useState<JamVisibilityState>(() =>
@@ -735,6 +729,7 @@ export default function HomeClient() {
   const [isNearbyStoryEnabled, setIsNearbyStoryEnabled] = useState(DEFAULT_NEARBY_STORY_ENABLED);
 
   const jamIdFromUrl = searchParams.get("jam");
+  const startPresetRouteFromUrl = searchParams.get("startPresetRoute");
   const debugStepFromUrl = searchParams.get("debugStep");
   const debugPerfEnabled = searchParams.get("debugPerf") === "1";
   const showPresetWalkRefresh = TRUTHY_FLAG_VALUES.includes(
@@ -744,10 +739,7 @@ export default function HomeClient() {
   const nextLandingTheme = landingTheme === "dark" ? "light" : "dark";
 
   // Derive route + stop from jam
-  const route: RouteDef | null = useMemo(
-    () => customRoute ?? getRouteById(jam?.route_id ?? null),
-    [customRoute, jam?.route_id]
-  );
+  const route: RouteDef | null = useMemo(() => customRoute, [customRoute]);
   const persona: Persona = (jam?.persona ?? "adult") as Persona;
   const isWalkDiscoveryRoute = route?.experienceKind === "walk_discovery";
   const isPresetWalkRoute = Boolean(jam?.route_id && !jam.route_id.startsWith("custom:"));
@@ -783,14 +775,14 @@ export default function HomeClient() {
       FEATURED_PRESET_SECTIONS.map((section) => ({
         title: section.title,
         routes: section.routeIds
-          .map((routeId) => getRouteById(routeId))
-          .filter((route): route is RouteDef => Boolean(route)),
+          .map((routeId) => getPresetRouteSummaryById(routeId))
+          .filter((route): route is PresetRouteSummary => Boolean(route)),
       })).filter((section) => section.routes.length > 0),
     []
   );
-  const routesForSelectedCity = useMemo(() => getPresetRoutesByCity(selectedCity), [selectedCity]);
+  const routesForSelectedCity = useMemo(() => getPresetRouteSummariesByCity(selectedCity), [selectedCity]);
   const selectedRoute = useMemo(
-    () => (selectedRouteId ? getRouteById(selectedRouteId) : null),
+    () => (selectedRouteId ? getPresetRouteSummaryById(selectedRouteId) : null),
     [selectedRouteId]
   );
   const selectedCityLabel = useMemo(
@@ -954,7 +946,7 @@ export default function HomeClient() {
       if (stopWithImage) return toSafeStopImage(stopWithImage.image);
     }
 
-    const presetRoute = selectedRouteId ? getRouteById(selectedRouteId) : selectedRoute;
+    const presetRoute = selectedRouteId ? getPresetRouteSummaryById(selectedRouteId) : selectedRoute;
     if (presetRoute) return getLandingRouteImage(presetRoute);
 
     const routeStopWithImage = route?.stops.find((stop) => (stop.images[0] || "").trim().length > 0);
@@ -1552,15 +1544,16 @@ export default function HomeClient() {
     perfTrackerRef.current.count("route_reloads");
     const customRouteId = getCustomRouteId(routeRef);
     const isCustom = Boolean(customRouteId);
-    const presetRoute = getRouteById(routeRef);
-    if (!isCustom && !presetRoute) {
+    const presetRouteSummary = getPresetRouteSummaryById(routeRef);
+    if (!isCustom && !presetRouteSummary) {
       setCustomRoute(null);
       return null;
     }
     const endpoint = isCustom
       ? `/api/custom-routes/${customRouteId}`
       : `/api/preset-routes/${routeRef}`;
-    const res = await fetch(endpoint, { cache: "no-store" });
+    const headers = await withSupabaseAuthHeaders();
+    const res = await fetch(endpoint, { cache: "no-store", headers });
     if (!res.ok) {
       let detail: string | null = null;
       try {
@@ -1571,10 +1564,25 @@ export default function HomeClient() {
       }
       throw new Error(detail || `Failed to load ${isCustom ? "custom" : "preset"} route`);
     }
-    const payload = (await res.json()) as CustomRouteResponse;
+    const payload = (await res.json()) as
+      | (CustomRouteResponse & { access?: "granted" })
+      | {
+          access: "locked";
+          teaser?: {
+            slug?: string;
+          } | null;
+        };
+    if ("access" in payload && payload.access === "locked") {
+      const teaserSlug = payload.teaser?.slug?.trim();
+      if (teaserSlug) {
+        router.replace(`/journeys/${encodeURIComponent(teaserSlug)}`);
+      }
+      setCustomRoute(null);
+      return null;
+    }
     const resolvedCity = isCustom
       ? (payload.route.city || "").trim().toLowerCase() || instantDiscoveryCity || "nearby"
-      : (presetRoute?.city ?? selectedCity);
+      : (presetRouteSummary?.city ?? selectedCity);
     const mappedStops: RouteDef["stops"] = payload.stops.map((s, idx) => {
       const stopId = s.stop_id || `custom-${idx}`;
       return {
@@ -1621,16 +1629,18 @@ export default function HomeClient() {
       durationLabel: `${payload.route.length_minutes} mins`,
       durationMinutes: payload.route.length_minutes,
       description: `${payload.route.transport_mode === "drive" ? "Drive" : "Walk"} • ${formatStopCount(mappedStops.length)}`,
-      defaultPersona: isCustom ? ((payload.route.narrator_default ?? jam?.persona ?? "adult") as RouteDef["defaultPersona"]) : (presetRoute?.defaultPersona ?? "adult"),
-      storyBy: isCustom ? (payload.route.story_by || undefined) : presetRoute?.storyBy,
-      storyByUrl: isCustom ? (payload.route.story_by_url ?? null) : (presetRoute?.storyByUrl ?? null),
+      defaultPersona: isCustom
+        ? ((payload.route.narrator_default ?? jam?.persona ?? "adult") as RouteDef["defaultPersona"])
+        : (presetRouteSummary?.defaultPersona ?? "adult"),
+      storyBy: isCustom ? (payload.route.story_by || undefined) : presetRouteSummary?.storyBy,
+      storyByUrl: isCustom ? (payload.route.story_by_url ?? null) : null,
       storyByAvatarUrl: isCustom
         ? (payload.route.story_by_avatar_url ?? null)
-        : (presetRoute?.storyByAvatarUrl ?? null),
-      storyBySource: isCustom ? (payload.route.story_by_source ?? null) : (presetRoute?.storyBySource ?? null),
-      narratorGuidance: isCustom ? (payload.route.narrator_guidance || "").trim() || null : (presetRoute?.narratorGuidance ?? null),
-      pricing: isCustom ? undefined : presetRoute?.pricing,
-      city: isCustom ? toKnownCityOption(resolvedCity) : presetRoute?.city,
+        : null,
+      storyBySource: isCustom ? (payload.route.story_by_source ?? null) : null,
+      narratorGuidance: isCustom ? (payload.route.narrator_guidance || "").trim() || null : null,
+      pricing: isCustom ? undefined : presetRouteSummary?.pricing,
+      city: isCustom ? toKnownCityOption(resolvedCity) : presetRouteSummary?.city,
       transportMode: payload.route.transport_mode,
       experienceKind: isCustom ? (payload.route.experience_kind ?? "mix") : "preset",
       routePathCoords:
@@ -1683,7 +1693,7 @@ export default function HomeClient() {
         : Date.now()) - startedAt
     );
     return nextRoute;
-  }, [selectedCity, jam?.persona, instantDiscoveryCity]);
+  }, [selectedCity, jam?.persona, instantDiscoveryCity, router]);
 
   // ---------- "Start stop” handler ----------
 async function startStopNarration() {
@@ -2194,7 +2204,17 @@ async function startStopNarration() {
     personaSelection: Persona,
     options?: StartPresetTourOptions
   ) {
-    const routeCity = (getRouteById(routeId)?.city ?? selectedCity) as CityOption;
+    const presetSummary = getPresetRouteSummaryById(routeId);
+    if (!presetSummary) {
+      setErr("Unknown preset route");
+      return;
+    }
+    if (presetSummary.requiresPurchase && !options?.allowPaidStart) {
+      router.push(`/journeys/${encodeURIComponent(routeId)}`);
+      return;
+    }
+
+    const routeCity = (presetSummary.city ?? selectedCity) as CityOption;
     const isForceRegenerate = Boolean(options?.forceRegenerateAll);
     if (
       !isForceRegenerate &&
@@ -2237,9 +2257,10 @@ async function startStopNarration() {
 
       const controller = new AbortController();
       const timeoutId = window.setTimeout(() => controller.abort(), START_JOB_TIMEOUT_MS);
+      const headers = await withSupabaseAuthHeaders({ "Content-Type": "application/json" });
       const res = await fetch("/api/preset-jobs/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           jamId,
           routeId,
@@ -2279,7 +2300,7 @@ async function startStopNarration() {
     if (isCreateOwnSelected) {
       setIsCreateOwnSelected(false);
     }
-    const selectedRoute = getRouteById(routeId);
+    const selectedRoute = getPresetRouteSummaryById(routeId);
     if (!selectedRoute) {
       setErr("Unknown preset route");
       return null;
@@ -2323,13 +2344,20 @@ async function startStopNarration() {
   async function startPresetTourFromRoute(routeId: RouteDef["id"]) {
     const selectedRoute = selectPresetRoute(routeId);
     if (!selectedRoute) return;
+    if (selectedRoute.requiresPurchase) {
+      router.push(`/journeys/${encodeURIComponent(routeId)}`);
+      return;
+    }
     await startPresetTour(routeId, selectedRoute.defaultPersona);
   }
 
   async function regeneratePresetRoute(routeId: RouteDef["id"]) {
     const selectedRoute = selectPresetRoute(routeId);
     if (!selectedRoute) return;
-    await startPresetTour(routeId, selectedRoute.defaultPersona, { forceRegenerateAll: true });
+    await startPresetTour(routeId, selectedRoute.defaultPersona, {
+      forceRegenerateAll: true,
+      allowPaidStart: true,
+    });
   }
 
   function toggleBuilderStop(stop: CustomMixStop) {
@@ -2619,6 +2647,25 @@ async function startStopNarration() {
     }
     loadJamById(jamIdFromUrl);
   }, [jamIdFromUrl, debugStepFromUrl, loadJamById]);
+
+  useEffect(() => {
+    if (jamIdFromUrl) return;
+    const routeId = (startPresetRouteFromUrl || "").trim();
+    if (!routeId) return;
+    if (attemptedPresetAutoStartRef.current === routeId) return;
+    const presetRoute = getPresetRouteSummaryById(routeId);
+    if (!presetRoute) return;
+
+    attemptedPresetAutoStartRef.current = routeId;
+    if (presetRoute.city) {
+      setSelectedCity(presetRoute.city);
+    }
+    setSelectedRouteId(routeId);
+    setSelectedPersona(presetRoute.defaultPersona);
+    void startPresetTour(routeId, presetRoute.defaultPersona, { allowPaidStart: true });
+  // `startPresetTour` is recreated per render; the ref guard above keeps this one-shot URL action stable.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jamIdFromUrl, startPresetRouteFromUrl]);
 
   useEffect(() => {
     const jamId = jam?.id;
@@ -3246,7 +3293,7 @@ async function startStopNarration() {
   useEffect(() => {
     if (step !== "pickDuration") return;
     if (returnToWalkOnClose && jam?.route_id) {
-      const presetRoute = getRouteById(jam.route_id);
+      const presetRoute = getPresetRouteSummaryById(jam.route_id);
       const routeId = presetRoute ? jam.route_id : null;
       if (presetRoute?.city) {
         setSelectedCity(presetRoute.city);
@@ -3598,7 +3645,7 @@ async function startStopNarration() {
                 <div className={styles.landingFeaturedGrid}>
                   {section.routes.map((r) => {
                     const pricingLabel = getRoutePricingLabel(r.pricing);
-                    const stopCountLabel = formatStopCount(getPresetRouteStopCount(r));
+                    const stopCountLabel = formatStopCount(getPresetRouteSummaryStopCount(r));
                     const narratorLabel = getPresetRouteNarratorLabel(r);
                     const isRoutePending = pendingPresetRouteAction?.routeId === r.id;
 
@@ -3731,7 +3778,7 @@ async function startStopNarration() {
                 <button
                   type="button"
                   onClick={() => {
-                    router.push("/import/instagram/access");
+                    router.push("/import/mixed");
                   }}
                   className={styles.landingHeroCta}
                 >
@@ -4037,7 +4084,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                   {routesForSelectedCity.map((r) => {
                     const isRoutePending = pendingPresetRouteAction?.routeId === r.id;
                     const pricingLabel = getRoutePricingLabel(r.pricing);
-                    const stopCountLabel = formatStopCount(getPresetRouteStopCount(r));
+                    const stopCountLabel = formatStopCount(getPresetRouteSummaryStopCount(r));
                     const narratorLabel = getPresetRouteNarratorLabel(r);
 
                     return (
@@ -4149,7 +4196,7 @@ You choose where to go — each stop shapes what unfolds next.                  
 
               <section className={styles.pickImagePane}>
                 <RouteMap
-                  stops={selectedRoute ? selectedRoute.stops : []}
+                  stops={[]}
                   currentStopIndex={0}
                   myPos={myPos}
                   cityCenter={selectedCityCenter}

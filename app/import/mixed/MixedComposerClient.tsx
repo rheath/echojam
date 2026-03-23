@@ -26,6 +26,8 @@ import {
   createGooglePlaceNarratorSignature,
   createGooglePlaceRouteSignature,
   isGooglePlaceStopScriptStale,
+  mapComposerStopToGooglePlaceDraft,
+  mapGooglePlaceDraftOntoComposerStop,
   mapGooglePlaceDraftToComposerStop,
   mapSocialDraftToComposerStop,
   moveComposerStop,
@@ -192,6 +194,7 @@ export default function MixedComposerClient({
   const [isSavingTikTokDraft, setIsSavingTikTokDraft] = useState(false);
   const [isSearchingTikTokPlaces, setIsSearchingTikTokPlaces] = useState(false);
   const [editingStopId, setEditingStopId] = useState<string | null>(null);
+  const [editingGooglePlaceStopId, setEditingGooglePlaceStopId] = useState<string | null>(null);
   const [editingInstagramDraft, setEditingInstagramDraft] = useState<InstagramDraftResponse | null>(null);
   const [editingInstagramTitleInput, setEditingInstagramTitleInput] = useState("");
   const [editingInstagramScriptInput, setEditingInstagramScriptInput] = useState("");
@@ -535,6 +538,12 @@ export default function MixedComposerClient({
     void persistMixedComposerSession({ googlePlaceDraft: null }, { createIfMissing: true });
   }
 
+  function closeEditingGooglePlaceModal() {
+    googlePlaceGenerationRequestRef.current += 1;
+    setEditingGooglePlaceStopId(null);
+    setGooglePlaceDraft(null);
+  }
+
   function closeEditingInstagramModal() {
     setEditingStopId(null);
     setEditingInstagramDraft(null);
@@ -549,7 +558,11 @@ export default function MixedComposerClient({
     } else if (modalMode === "edit_instagram") {
       closeEditingInstagramModal();
     } else if (modalMode === "google_place_editor") {
-      clearGooglePlaceDraftEditor();
+      if (editingGooglePlaceStopId) {
+        closeEditingGooglePlaceModal();
+      } else {
+        clearGooglePlaceDraftEditor();
+      }
     }
 
     setImportJobState(null);
@@ -655,10 +668,13 @@ export default function MixedComposerClient({
                 jobId: importJobState.jobId,
               }
             : null),
-        googlePlaceDraft: overrides?.googlePlaceDraft ?? googlePlaceDraft,
+        googlePlaceDraft:
+          overrides?.googlePlaceDraft ??
+          (editingGooglePlaceStopId ? null : googlePlaceDraft),
       }),
     [
       customNarratorGuidance,
+      editingGooglePlaceStopId,
       googlePlaceDraft,
       importJobState,
       instagramDraft?.id,
@@ -769,8 +785,16 @@ export default function MixedComposerClient({
     async (
       draft: GooglePlaceDraft,
       nextNarratorSignature: string,
-      nextRouteSignature: string
+      nextRouteSignature: string,
+      options?: {
+        stopIndex?: number;
+        totalStops?: number;
+        persistSession?: boolean;
+      }
     ) => {
+      const stopIndex = options?.stopIndex ?? stops.length;
+      const totalStops = options?.totalStops ?? (stops.length + 1);
+      const persistSession = options?.persistSession ?? true;
       const requestId = googlePlaceGenerationRequestRef.current + 1;
       googlePlaceGenerationRequestRef.current = requestId;
       const pendingDraft: GooglePlaceDraft = {
@@ -781,19 +805,21 @@ export default function MixedComposerClient({
         generatedRouteSignature: nextRouteSignature,
       };
       setGooglePlaceDraft(pendingDraft);
-      await persistMixedComposerSession(
-        {
-          activeProvider: "google_places",
-          googlePlaceDraft: pendingDraft,
-        },
-        { createIfMissing: true }
-      );
+      if (persistSession) {
+        await persistMixedComposerSession(
+          {
+            activeProvider: "google_places",
+            googlePlaceDraft: pendingDraft,
+          },
+          { createIfMissing: true }
+        );
+      }
 
       try {
         const script = await requestGooglePlaceScript(
           pendingDraft.place,
-          stops.length,
-          stops.length + 1
+          stopIndex,
+          totalStops
         );
         if (googlePlaceGenerationRequestRef.current !== requestId) return;
 
@@ -804,13 +830,15 @@ export default function MixedComposerClient({
           error: null,
         };
         setGooglePlaceDraft(readyDraft);
-        await persistMixedComposerSession(
-          {
-            activeProvider: "google_places",
-            googlePlaceDraft: readyDraft,
-          },
-          { createIfMissing: true }
-        );
+        if (persistSession) {
+          await persistMixedComposerSession(
+            {
+              activeProvider: "google_places",
+              googlePlaceDraft: readyDraft,
+            },
+            { createIfMissing: true }
+          );
+        }
       } catch (generationError) {
         if (googlePlaceGenerationRequestRef.current !== requestId) return;
 
@@ -823,20 +851,22 @@ export default function MixedComposerClient({
               : "Failed to generate Google place script",
         };
         setGooglePlaceDraft(failedDraft);
-        await persistMixedComposerSession(
-          {
-            activeProvider: "google_places",
-            googlePlaceDraft: failedDraft,
-          },
-          { createIfMissing: true }
-        );
+        if (persistSession) {
+          await persistMixedComposerSession(
+            {
+              activeProvider: "google_places",
+              googlePlaceDraft: failedDraft,
+            },
+            { createIfMissing: true }
+          );
+        }
       }
     },
     [persistMixedComposerSession, requestGooglePlaceScript, stops.length]
   );
 
   async function handleSaveGooglePlaceDraft() {
-    if (!googlePlaceDraft) return;
+    if (!googlePlaceDraft || editingGooglePlaceStopId) return;
     setIsSavingGooglePlaceDraft(true);
     try {
       await persistMixedComposerSession(
@@ -1517,16 +1547,84 @@ export default function MixedComposerClient({
     }
   }
 
+  async function handleEditGooglePlaceStop(stop: ComposerStop) {
+    setError(null);
+    const draft = mapComposerStopToGooglePlaceDraft(stop);
+    if (!draft) {
+      setError("Only Google Place stops can be edited here.");
+      return;
+    }
+    setEditingGooglePlaceStopId(stop.id);
+    setGooglePlaceDraft(draft);
+    setStopEntryMode("google_places");
+    setModalMode("google_place_editor");
+  }
+
+  async function handleUpdateGooglePlaceStop() {
+    if (!googlePlaceDraft || !editingGooglePlaceStopId) return;
+    setError(null);
+    const title = toNullableTrimmed(googlePlaceDraft.title);
+    const script = toNullableTrimmed(googlePlaceDraft.script);
+    if (!title || !script) {
+      setError("Google place draft needs a title and script before it can be updated.");
+      return;
+    }
+
+    const stop = stops.find((candidate) => candidate.id === editingGooglePlaceStopId);
+    if (!stop) {
+      setError("Google place stop could not be found.");
+      return;
+    }
+
+    const updatedStop = mapGooglePlaceDraftOntoComposerStop(stop, {
+      ...googlePlaceDraft,
+      title,
+      script,
+    });
+    if (!updatedStop) {
+      setError("Failed to map the updated Google place stop.");
+      return;
+    }
+
+    try {
+      const nextStops = stops.map((candidate) =>
+        candidate.id === editingGooglePlaceStopId ? updatedStop : candidate
+      );
+      await persistMixedComposerSession(
+        {
+          stops: nextStops,
+        },
+        { createIfMissing: true }
+      );
+      setStops(nextStops);
+      closeEditingGooglePlaceModal();
+      setModalMode("closed");
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "Failed to update Google place stop");
+    }
+  }
+
   async function handleRetryGooglePlaceScript() {
     if (!googlePlaceDraft) return;
     setError(null);
+    const editingStopIndex = editingGooglePlaceStopId
+      ? stops.findIndex((stop) => stop.id === editingGooglePlaceStopId)
+      : -1;
+    const stopIndex = editingStopIndex >= 0 ? editingStopIndex : stops.length;
+    const totalStops = editingStopIndex >= 0 ? stops.length : stops.length + 1;
+    const routeSignature = createGooglePlaceRouteSignature(stopIndex, totalStops);
     await generateGooglePlaceDraftScript(
       {
         ...googlePlaceDraft,
         scriptEditedByUser: false,
       },
       narratorSignature,
-      draftRouteSignature
+      routeSignature,
+      {
+        stopIndex,
+        totalStops,
+        persistSession: !editingGooglePlaceStopId,
+      }
     );
   }
 
@@ -1634,6 +1732,7 @@ export default function MixedComposerClient({
 
   useEffect(() => {
     if (!googlePlaceDraft) return;
+    if (editingGooglePlaceStopId) return;
     if (googlePlaceDraft.scriptEditedByUser) return;
     if (googlePlaceDraft.status === "generating_script") return;
     if (
@@ -1653,6 +1752,7 @@ export default function MixedComposerClient({
     );
   }, [
     draftRouteSignature,
+    editingGooglePlaceStopId,
     generateGooglePlaceDraftScript,
     googlePlaceDraft,
     narratorSignature,
@@ -2163,6 +2263,7 @@ export default function MixedComposerClient({
       );
     }
 
+    const mode = editingGooglePlaceStopId ? "edit" : "add";
     const isGeneratingScript = googlePlaceDraft.status === "generating_script";
     const trimmedScript = toNullableTrimmed(googlePlaceDraft.script);
 
@@ -2171,7 +2272,7 @@ export default function MixedComposerClient({
         <section className={styles.entryPanel}>
           <div className={styles.panelHeader}>
             <h3 className={styles.panelTitle}>Google Place</h3>
-            <span className={styles.metaLabel}>Selected stop</span>
+            <span className={styles.metaLabel}>{mode === "edit" ? "Existing stop" : "Selected stop"}</span>
           </div>
           {googlePlaceDraft.place.image ? (
             <div className={styles.preview}>
@@ -2204,7 +2305,7 @@ export default function MixedComposerClient({
         <section className={styles.entryPanel}>
           <div className={styles.panelHeader}>
             <h3 className={styles.panelTitle}>Stop/Story editor</h3>
-            <span className={styles.metaLabel}>Generated draft</span>
+            <span className={styles.metaLabel}>{mode === "edit" ? "Draft editor" : "Generated draft"}</span>
           </div>
           <label className={styles.fieldLabel}>
             Title of Stop
@@ -2248,14 +2349,16 @@ export default function MixedComposerClient({
             />
           </label>
           <div className={styles.actionRow}>
-            <button
-              type="button"
-              onClick={() => void handleSaveGooglePlaceDraft()}
-              disabled={isSavingGooglePlaceDraft}
-              className={styles.secondaryButton}
-            >
-              {isSavingGooglePlaceDraft ? "Saving..." : "Save changes"}
-            </button>
+            {mode === "add" ? (
+              <button
+                type="button"
+                onClick={() => void handleSaveGooglePlaceDraft()}
+                disabled={isSavingGooglePlaceDraft}
+                className={styles.secondaryButton}
+              >
+                {isSavingGooglePlaceDraft ? "Saving..." : "Save changes"}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void handleRetryGooglePlaceScript()}
@@ -2301,11 +2404,15 @@ export default function MixedComposerClient({
           <div className={styles.actionRow}>
             <button
               type="button"
-              onClick={() => void handleAddGooglePlaceDraftToRoute()}
+              onClick={() =>
+                void (mode === "edit"
+                  ? handleUpdateGooglePlaceStop()
+                  : handleAddGooglePlaceDraftToRoute())
+              }
               disabled={isGeneratingScript || !trimmedScript}
               className={styles.primaryButton}
             >
-              Add stop to route
+              {mode === "edit" ? "Update stop" : "Add stop to route"}
             </button>
           </div>
         </section>
@@ -2452,6 +2559,9 @@ export default function MixedComposerClient({
                       {stop.provider === "instagram" && stop.originalDraftId ? (
                         <button type="button" onClick={() => void handleEditInstagramStop(stop)}>Edit</button>
                       ) : null}
+                      {stop.provider === "google_places" ? (
+                        <button type="button" onClick={() => void handleEditGooglePlaceStop(stop)}>Edit</button>
+                      ) : null}
                       <button type="button" onClick={() => void handleMoveStop(index, index - 1)} disabled={index === 0}>Up</button>
                       <button type="button" onClick={() => void handleMoveStop(index, index + 1)} disabled={index === stops.length - 1}>Down</button>
                       <button type="button" onClick={() => void handleRemoveStop(stop.id)}>Remove</button>
@@ -2487,9 +2597,11 @@ export default function MixedComposerClient({
                         : "Review Instagram import"
                       : modalMode === "tiktok_editor"
                         ? "Review TikTok import"
-                        : modalMode === "google_place_editor"
-                          ? "Review Google Place draft"
-                          : "Edit Instagram stop"}
+                      : modalMode === "google_place_editor"
+                        ? editingGooglePlaceStopId
+                          ? "Edit Google Place stop"
+                          : "Review Google Place draft"
+                        : "Edit Instagram stop"}
                 </h2>
                 <button type="button" className={styles.linkButton} onClick={() => closeActiveModal()}>
                   Close

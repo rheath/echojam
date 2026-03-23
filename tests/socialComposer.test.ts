@@ -8,7 +8,9 @@ import {
   createGooglePlaceRouteSignature,
   deriveComposerRouteAttribution,
   isGooglePlaceStopScriptStale,
+  mapComposerStopToGooglePlaceDraft,
   mapGooglePlaceCandidateToComposerStop,
+  mapGooglePlaceDraftOntoComposerStop,
   mapGooglePlaceDraftToComposerStop,
   mapSocialDraftToComposerStop,
 } from "../lib/socialComposer.ts";
@@ -114,7 +116,7 @@ test("mapSocialDraftToComposerStop keeps Instagram stops from the same reel dist
   assert.equal(second?.sourceId, "ABC123");
 });
 
-test("deriveComposerRouteAttribution collapses multiple creators into a social label", () => {
+test("deriveComposerRouteAttribution lists multiple creators in first-seen order", () => {
   const attribution = deriveComposerRouteAttribution([
     {
       id: "instagram:1",
@@ -149,7 +151,52 @@ test("deriveComposerRouteAttribution collapses multiple creators into a social l
   ]);
 
   assert.deepEqual(attribution, {
-    storyBy: "Social creators",
+    storyBy: "@alpha, @beta",
+    storyByUrl: null,
+    storyByAvatarUrl: null,
+    storyBySource: "social",
+  });
+});
+
+test("deriveComposerRouteAttribution dedupes repeated creators while preserving order", () => {
+  const attribution = deriveComposerRouteAttribution([
+    {
+      id: "instagram:1",
+      kind: "social_import",
+      provider: "instagram",
+      title: "A",
+      lat: 1,
+      lng: 1,
+      image: "a",
+      creatorName: "@alpha",
+      creatorUrl: "https://www.instagram.com/alpha/",
+    },
+    {
+      id: "instagram:2",
+      kind: "social_import",
+      provider: "instagram",
+      title: "B",
+      lat: 2,
+      lng: 2,
+      image: "b",
+      creatorName: "@alpha",
+      creatorUrl: "https://www.instagram.com/alpha/",
+    },
+    {
+      id: "tiktok:3",
+      kind: "social_import",
+      provider: "tiktok",
+      title: "C",
+      lat: 3,
+      lng: 3,
+      image: "c",
+      creatorName: "@beta",
+      creatorUrl: "https://www.tiktok.com/@beta",
+    },
+  ]);
+
+  assert.deepEqual(attribution, {
+    storyBy: "@alpha, @beta",
     storyByUrl: null,
     storyByAvatarUrl: null,
     storyBySource: "social",
@@ -183,6 +230,89 @@ test("google place draft helpers create signatures and preserve generated metada
   assert.equal(stop.scriptEditedByUser, false);
   assert.equal(stop.generatedNarratorSignature, narratorSignature);
   assert.equal(stop.generatedRouteSignature, routeSignature);
+});
+
+test("google place edit helpers map an existing stop into a locked-place draft", () => {
+  const stop = {
+    id: "google_places:place-1",
+    kind: "place_search" as const,
+    provider: "google_places" as const,
+    title: "Custom Garden Intro",
+    lat: 42.354,
+    lng: -71.07,
+    image: "/placeholder.jpg",
+    googlePlaceId: "g-1",
+    sourceId: "place-1",
+    script: "A custom script for the garden.",
+    scriptEditedByUser: true,
+    generatedNarratorSignature: "custom:young history guide",
+    generatedRouteSignature: "2:4",
+  };
+
+  const draft = mapComposerStopToGooglePlaceDraft(stop);
+
+  assert.deepEqual(draft, {
+    place: {
+      id: "place-1",
+      title: "Custom Garden Intro",
+      lat: 42.354,
+      lng: -71.07,
+      image: "/placeholder.jpg",
+      googlePlaceId: "g-1",
+    },
+    title: "Custom Garden Intro",
+    script: "A custom script for the garden.",
+    status: "ready",
+    error: null,
+    scriptEditedByUser: true,
+    generatedNarratorSignature: "custom:young history guide",
+    generatedRouteSignature: "2:4",
+  });
+});
+
+test("google place edit helpers map an edited draft back onto the same stop", () => {
+  const stop = {
+    id: "google_places:place-1",
+    kind: "place_search" as const,
+    provider: "google_places" as const,
+    title: "Boston Public Garden",
+    lat: 42.354,
+    lng: -71.07,
+    image: "/placeholder.jpg",
+    googlePlaceId: "g-1",
+    sourceId: "place-1",
+    script: "Old script",
+    scriptEditedByUser: true,
+    generatedNarratorSignature: "custom:old",
+    generatedRouteSignature: "0:1",
+  };
+
+  const updated = mapGooglePlaceDraftOntoComposerStop(stop, {
+    place: {
+      id: "place-1",
+      title: "Boston Public Garden",
+      lat: 42.354,
+      lng: -71.07,
+      image: "/placeholder.jpg",
+      googlePlaceId: "g-1",
+    },
+    title: "Garden at Dusk",
+    script: "New regenerated script",
+    status: "ready",
+    error: null,
+    scriptEditedByUser: false,
+    generatedNarratorSignature: "custom:young history guide",
+    generatedRouteSignature: "1:3",
+  });
+
+  assert.deepEqual(updated, {
+    ...stop,
+    title: "Garden at Dusk",
+    script: "New regenerated script",
+    scriptEditedByUser: false,
+    generatedNarratorSignature: "custom:young history guide",
+    generatedRouteSignature: "1:3",
+  });
 });
 
 test("google place stale detection only refreshes untouched AI drafts", () => {

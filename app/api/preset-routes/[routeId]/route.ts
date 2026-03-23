@@ -1,197 +1,59 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getRouteById } from "@/app/content/salemRoutes";
-import { toNullableTrimmed } from "@/lib/mixGeneration";
-import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
-import { listPresetRouteStopAssets, mapPresetAssetsByStop } from "@/lib/presetRouteAssets";
-import { buildGooglePlaceIdPhotoUrl, isValidGooglePlaceId, proxyGoogleImageUrl } from "@/lib/placesImages";
-
-function getAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_URL");
-  return createClient(url, key, { auth: { persistSession: false } });
-}
-
-type MappingRow = {
-  stop_id: string;
-  canonical_stop_id: string;
-  position: number;
-};
-
-type CanonicalImageRow = {
-  id: string;
-  image_url: string | null;
-};
-
-function isNonPlaceholderImage(value: string | null | undefined) {
-  const normalized = toNullableTrimmed(value);
-  if (!normalized) return false;
-  return !normalized.toLowerCase().includes("/placeholder");
-}
-
-function pickStopImage(
-  canonicalImage: string | null | undefined,
-  placeIdPhoto: string | null | undefined,
-  routeImage: string | null | undefined,
-  placeholder: string
-) {
-  const strongCandidates = [canonicalImage, placeIdPhoto, routeImage]
-    .map((value) => toNullableTrimmed(value))
-    .filter((value): value is string => Boolean(value) && isNonPlaceholderImage(value));
-
-  if (strongCandidates[0]) return strongCandidates[0];
-  return toNullableTrimmed(routeImage) || placeholder;
-}
+import { getPresetRouteSummaryById } from "@/app/content/presetRouteSummaries";
+import { getJourneyAccess } from "@/lib/server/journeyAccess";
+import { loadPresetRoutePayload } from "@/lib/server/presetRoutePayload";
+import { getRequestAuthUser } from "@/lib/server/requestAuth";
 
 export async function GET(req: Request, ctx: { params: Promise<{ routeId: string }> }) {
   try {
     const { routeId } = await ctx.params;
-    const route = getRouteById(routeId);
-    if (!route) return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
-    const city = route.city ?? normalizePresetCity(new URL(req.url).searchParams.get("city"));
-    const presetStops = buildPresetStopsWithOverview(route.stops, city, route.contentPriority);
-
-    let admin: ReturnType<typeof getAdmin> | null = null;
-    try {
-      admin = getAdmin();
-    } catch (e) {
-      console.error("preset-routes: admin client unavailable", e);
+    const summary = getPresetRouteSummaryById(routeId);
+    if (!summary) {
+      return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
     }
 
-    if (!admin) {
-      const stops = presetStops.map((stop, index) => ({
-        stop_id: stop.id,
-        title: stop.title,
-        lat: stop.lat,
-        lng: stop.lng,
-        image_url: proxyGoogleImageUrl(toNullableTrimmed(stop.image)) || "/images/salem/placeholder.png",
-        script_adult: null,
-        script_preteen: null,
-        script_ghost: null,
-        audio_url_adult: null,
-        audio_url_preteen: null,
-        audio_url_ghost: null,
-        is_overview: Boolean(stop.isOverview),
-        position: index,
-      }));
-      return NextResponse.json({
-        route: {
-          id: route.id,
-          title: route.title,
-          length_minutes: route.durationMinutes || 30,
-          transport_mode: "walk",
-          status: "ready",
-        },
-        stops,
-      });
-    }
-
-    const { data: mappings, error: mapErr } = await admin
-      .from("route_stop_mappings")
-      .select("stop_id,canonical_stop_id,position")
-      .eq("route_kind", "preset")
-      .eq("route_id", routeId)
-      .order("position", { ascending: true });
-    if (mapErr) {
-      console.error("preset-routes: mapping query failed", mapErr);
-    }
-
-    const mappingByStop = new Map<string, MappingRow>();
-    const canonicalIds = new Set<string>();
-    for (const row of ((mappings ?? []) as MappingRow[])) {
-      mappingByStop.set(row.stop_id, row);
-      canonicalIds.add(row.canonical_stop_id);
-    }
-
-    let canonicalImages: CanonicalImageRow[] = [];
-    if (canonicalIds.size > 0) {
-      const { data: imageRows, error: imagesErr } = await admin
-        .from("canonical_stops")
-        .select("id,image_url")
-        .in("id", Array.from(canonicalIds));
-      if (imagesErr) {
-        console.error("preset-routes: canonical image query failed", imagesErr);
-      } else {
-        canonicalImages = (imageRows ?? []) as CanonicalImageRow[];
-      }
-    }
-    let assetsByStop = new Map<
-      string,
-      {
-        script_adult: string | null;
-        script_preteen: string | null;
-        script_ghost: string | null;
-        audio_url_adult: string | null;
-        audio_url_preteen: string | null;
-        audio_url_ghost: string | null;
-      }
-    >();
-    try {
-      const assetRows = await listPresetRouteStopAssets(
-        admin,
-        routeId,
-        presetStops.map((stop) => stop.id)
-      );
-      assetsByStop = mapPresetAssetsByStop(assetRows);
-    } catch (assetsErr) {
-      console.error("preset-routes: assets query failed", assetsErr);
-    }
-
-    const imageByCanonical = new Map<string, CanonicalImageRow>();
-    for (const row of canonicalImages) {
-      imageByCanonical.set(row.id, row);
-    }
-    const { data: latestJob } = await admin
-      .from("preset_generation_jobs")
-      .select("status")
-      .eq("preset_route_id", routeId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const stops = presetStops.map((stop, index) => {
-      const mapping = mappingByStop.get(stop.id);
-      const assetsForStop = assetsByStop.get(stop.id) ?? null;
-      const imageForStop = mapping ? imageByCanonical.get(mapping.canonical_stop_id) : null;
-      const canonicalImage = toNullableTrimmed(imageForStop?.image_url);
-      const placeIdPhoto = isValidGooglePlaceId(stop.googlePlaceId)
-        ? buildGooglePlaceIdPhotoUrl(stop.googlePlaceId!.trim())
-        : null;
-      const routeImage = toNullableTrimmed(stop.image);
-
-      return {
-        stop_id: stop.id,
-        title: stop.title,
-        lat: stop.lat,
-        lng: stop.lng,
-        image_url:
-          proxyGoogleImageUrl(
-            pickStopImage(canonicalImage, placeIdPhoto, routeImage, "/images/salem/placeholder.png")
-          ) ||
-          "/images/salem/placeholder.png",
-        script_adult: assetsForStop?.script_adult ?? null,
-        script_preteen: assetsForStop?.script_preteen ?? null,
-        script_ghost: assetsForStop?.script_ghost ?? null,
-        audio_url_adult: assetsForStop?.audio_url_adult ?? null,
-        audio_url_preteen: assetsForStop?.audio_url_preteen ?? null,
-        audio_url_ghost: assetsForStop?.audio_url_ghost ?? null,
-        is_overview: Boolean(stop.isOverview),
-        position: index,
-      };
+    const user = await getRequestAuthUser(req);
+    const access = await getJourneyAccess({
+      userId: user?.id ?? null,
+      sourceKind: "preset",
+      sourceId: routeId,
     });
+    if (access.accessState === "locked") {
+      return NextResponse.json(
+        {
+          access: "locked",
+          teaser: access.offering
+            ? {
+                slug: access.offering.slug,
+                title: access.offering.title,
+                creatorLabel: access.offering.creatorLabel,
+                coverImageUrl: access.offering.coverImageUrl,
+                teaserDescription: access.offering.teaserDescription,
+                durationMinutes: access.offering.durationMinutes,
+                stopCount: access.offering.stopCount,
+                firstStopTitle: access.offering.firstStopTitle,
+                pricing: access.offering.pricing,
+              }
+            : null,
+        },
+        { status: 402 }
+      );
+    }
+
+    const cityParam = new URL(req.url).searchParams.get("city");
+    const payload = await loadPresetRoutePayload(routeId, cityParam);
+    if (!payload) {
+      return NextResponse.json({ error: "Unknown preset route" }, { status: 404 });
+    }
 
     return NextResponse.json({
-      route: {
-        id: route.id,
-        title: route.title,
-        length_minutes: route.durationMinutes || 30,
-        transport_mode: "walk",
-        status: latestJob?.status ?? "ready",
-      },
-      stops,
+      access: "granted",
+      ...payload,
     });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to load preset route" }, { status: 500 });
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "Failed to load preset route" },
+      { status: 500 }
+    );
   }
 }

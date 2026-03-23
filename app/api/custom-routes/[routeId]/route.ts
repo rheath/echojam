@@ -5,6 +5,8 @@ import {
   deriveInstagramRouteAttribution,
   proxyInstagramImageUrl,
 } from "@/lib/instagramImport";
+import { getJourneyAccess } from "@/lib/server/journeyAccess";
+import { getRequestAuthUser } from "@/lib/server/requestAuth";
 import { toNullableAudioUrl, toNullableTrimmed } from "@/lib/mixGeneration";
 import { cityPlaceholderImage, proxyGoogleImageUrl } from "@/lib/placesImages";
 import { isPresetOverviewStopId } from "@/lib/presetOverview";
@@ -322,9 +324,37 @@ function prioritizeOverviewStopIds(stopIds: string[]) {
   return [...overview, ...rest];
 }
 
-export async function GET(_: Request, ctx: { params: Promise<{ routeId: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ routeId: string }> }) {
   try {
     const { routeId } = await ctx.params;
+    const authUser = await getRequestAuthUser(req);
+    const access = await getJourneyAccess({
+      userId: authUser?.id ?? null,
+      sourceKind: "custom",
+      sourceId: routeId,
+    });
+    if (access.accessState === "locked") {
+      return NextResponse.json(
+        {
+          access: "locked",
+          teaser: access.offering
+            ? {
+                slug: access.offering.slug,
+                title: access.offering.title,
+                creatorLabel: access.offering.creatorLabel,
+                coverImageUrl: access.offering.coverImageUrl,
+                teaserDescription: access.offering.teaserDescription,
+                durationMinutes: access.offering.durationMinutes,
+                stopCount: access.offering.stopCount,
+                firstStopTitle: access.offering.firstStopTitle,
+                pricing: access.offering.pricing,
+              }
+            : null,
+        },
+        { status: 402 }
+      );
+    }
+
     const admin = getAdmin();
     const routeSelectWithStoryBy =
       "id,title,length_minutes,transport_mode,status,city,narrator_default,narrator_guidance,narrator_voice,experience_kind,origin_label,origin_lat,origin_lng,destination_label,destination_lat,destination_lng,route_distance_meters,route_duration_seconds,route_polyline,story_by,story_by_url,story_by_avatar_url,story_by_source";

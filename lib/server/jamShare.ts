@@ -3,6 +3,7 @@ import "server-only";
 import { cache } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { getRouteById, getRouteNarratorLabel, type Persona } from "@/app/content/salemRoutes";
+import { getJourneyOfferingForPresetRoute } from "@/lib/server/journeyAccess";
 import { cityPlaceholderImage, proxyGoogleImageUrl } from "@/lib/placesImages";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { getPresetCityMeta } from "@/lib/presetOverview";
@@ -248,11 +249,18 @@ export const getJamSharePayload = cache(async (jamId: string): Promise<JamShareP
         storyBy?: string | null;
       }
     | null = null;
+  let canonicalPath = `/j/${encodeURIComponent(jamId)}`;
+  let deepLinkPath = `/?jam=${encodeURIComponent(jamId)}`;
 
   if (routeRef?.startsWith("custom:")) {
     summary = await resolveCustomRouteSummary(routeRef.slice("custom:".length));
   } else if (routeRef) {
     summary = await resolvePresetRouteSummary(routeRef);
+    const offering = await getJourneyOfferingForPresetRoute(routeRef);
+    if (offering?.published && offering.pricing.status === "paid") {
+      canonicalPath = `/journeys/${encodeURIComponent(offering.slug)}`;
+      deepLinkPath = canonicalPath;
+    }
   }
 
   if (!summary) {
@@ -261,6 +269,8 @@ export const getJamSharePayload = cache(async (jamId: string): Promise<JamShareP
       jamFound: true,
       title: "EchoJam tour",
       posterTitle: "EchoJam tour",
+      canonicalPath,
+      deepLinkPath,
     };
   }
 
@@ -284,7 +294,7 @@ export const getJamSharePayload = cache(async (jamId: string): Promise<JamShareP
     posterSubtitle,
     posterBackgroundImageUrl: isStrongImage(summary.imageUrl) ? summary.imageUrl : null,
     city: summary.city,
-    canonicalPath: `/j/${encodeURIComponent(jamId)}`,
-    deepLinkPath: `/?jam=${encodeURIComponent(jamId)}`,
+    canonicalPath,
+    deepLinkPath,
   };
 });

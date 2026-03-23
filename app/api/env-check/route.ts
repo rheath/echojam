@@ -13,6 +13,9 @@ const OPTIONAL_ENV_KEYS = [
   "OPENAI_API_KEY",
   "ENABLE_NEARBY_STORY",
   "SUPABASE_AUDIO_BUCKET",
+  "NEXT_PUBLIC_SITE_URL",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
 ] as const;
 
 function hasNonEmptyEnv(key: string) {
