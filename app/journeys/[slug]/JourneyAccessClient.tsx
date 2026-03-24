@@ -307,7 +307,7 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
     return (
       <div className={walkStyles.overlayIntro}> 
         {teaser.teaserDescription ? (
-          <p className={walkStyles.actionTitle}>Listen to the story of {teaser.teaserDescription}</p>
+          <p className={walkStyles.actionTitle}><strong>Unlock to listen to:</strong> {teaser.teaserDescription}</p>
         ) : null}
         
       </div>
