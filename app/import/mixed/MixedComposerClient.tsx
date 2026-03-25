@@ -20,6 +20,8 @@ import {
   type MixedComposerSessionSnapshot,
   type MixedComposerSessionProvider,
 } from "@/lib/mixedComposerSession";
+import { buildMixedRouteOpenerContext } from "@/lib/mixedRouteOpeners";
+import { formatEstimatedScriptDuration } from "@/lib/scriptDurationEstimate";
 import {
   deriveComposerRouteAttribution,
   createGooglePlaceDraft,
@@ -85,9 +87,14 @@ type ImportJobState = {
 
 const STORAGE_KEY = "mixed-composer:v1";
 const MIX_ROUTE_CITY = "nearby";
+const ROUTE_TITLE_MAX_CHARS = 40;
 const CUSTOM_NARRATOR_HELP_TEXT =
-  "You can personalize the tone, topic, or perspective. If you skip this, your narrator with be focused on history.";
-const CUSTOM_NARRATOR_PLACEHOLDER = "Describe your narrator...";
+  "This helps shape the tone and perspective of the narration. It is guidance, not the script itself.";
+const CUSTOM_NARRATOR_PLACEHOLDER = "I help people experience places by...";
+
+function clampRouteTitle(value: string) {
+  return value.slice(0, ROUTE_TITLE_MAX_CHARS);
+}
 
 function buildMixedComposerPath(sessionId?: string | null) {
   const normalizedSessionId = toNullableTrimmed(sessionId);
@@ -246,7 +253,7 @@ export default function MixedComposerClient({
           const snapshot = normalizeMixedComposerSessionSnapshot(restored);
           setSessionId(restored.id);
           setStopEntryMode(snapshot.activeProvider);
-          setRouteTitle(snapshot.routeTitle || "");
+          setRouteTitle(clampRouteTitle(snapshot.routeTitle || ""));
           setCustomNarratorGuidance(snapshot.customNarratorGuidance || "");
           setStops(snapshot.stops);
           setInstagramDraft(null);
@@ -752,8 +759,14 @@ export default function MixedComposerClient({
         googlePlaceId?: string | null;
       },
       stopIndex: number,
-      totalStops: number
+      totalStops: number,
+      priorScripts: Array<string | null | undefined>
     ) => {
+      const { openerFamily, blockedLeadIns } = buildMixedRouteOpenerContext(
+        resolveGooglePlaceDraftPersona(customNarratorGuidance),
+        stopIndex,
+        priorScripts
+      );
       const response = await fetchJson<GooglePlaceScriptResponse>(
         "/api/google-place-scripts/generate",
         {
@@ -768,6 +781,8 @@ export default function MixedComposerClient({
             stop,
             stopIndex,
             totalStops,
+            openerFamily,
+            blockedLeadIns,
           }),
         }
       );
@@ -819,7 +834,8 @@ export default function MixedComposerClient({
         const script = await requestGooglePlaceScript(
           pendingDraft.place,
           stopIndex,
-          totalStops
+          totalStops,
+          stops.map((candidate) => candidate.script)
         );
         if (googlePlaceGenerationRequestRef.current !== requestId) return;
 
@@ -862,7 +878,7 @@ export default function MixedComposerClient({
         }
       }
     },
-    [persistMixedComposerSession, requestGooglePlaceScript, stops.length]
+    [persistMixedComposerSession, requestGooglePlaceScript, stops]
   );
 
   async function handleSaveGooglePlaceDraft() {
@@ -895,7 +911,12 @@ export default function MixedComposerClient({
       const routeSignature = createGooglePlaceRouteSignature(index, refreshedStops.length);
       if (!isGooglePlaceStopScriptStale(stop, nextNarratorSignature, routeSignature)) continue;
 
-      const script = await requestGooglePlaceScript(stop, index, refreshedStops.length);
+      const script = await requestGooglePlaceScript(
+        stop,
+        index,
+        refreshedStops.length,
+        refreshedStops.slice(0, index).map((candidate) => candidate.script)
+      );
       refreshedStops[index] = {
         ...stop,
         script,
@@ -1804,6 +1825,7 @@ export default function MixedComposerClient({
             sourceCreatorUrl: stop.creatorUrl || null,
             sourceCreatorAvatarUrl: stop.creatorAvatarUrl || null,
             prefilledScript: stop.script || null,
+            scriptEditedByUser: stop.scriptEditedByUser ?? null,
           })),
         }),
       });
@@ -1854,6 +1876,7 @@ export default function MixedComposerClient({
           ? "Add selected stops to route"
           : "Add stop to route"
         : "Update stop";
+    const scriptEstimate = formatEstimatedScriptDuration(scriptInput);
 
     if (!draft) {
       return (
@@ -1972,7 +1995,10 @@ export default function MixedComposerClient({
             />
           </label>
           <label className={styles.fieldLabel}>
-            Script
+            <span className={styles.fieldLabelRow}>
+              <span>Script</span>
+              {scriptEstimate ? <span className={styles.fieldLabelEstimate}>Est. {scriptEstimate}</span> : null}
+            </span>
             <textarea
               value={scriptInput}
               onChange={(event) => onScriptChange(event.target.value)}
@@ -2091,6 +2117,8 @@ export default function MixedComposerClient({
       );
     }
 
+    const scriptEstimate = formatEstimatedScriptDuration(tiktokScriptInput);
+
     return (
       <div className={styles.instagramDraftGrid}>
         <section className={styles.entryPanel}>
@@ -2144,7 +2172,10 @@ export default function MixedComposerClient({
             />
           </label>
           <label className={styles.fieldLabel}>
-            Script
+            <span className={styles.fieldLabelRow}>
+              <span>Script</span>
+              {scriptEstimate ? <span className={styles.fieldLabelEstimate}>Est. {scriptEstimate}</span> : null}
+            </span>
             <textarea
               value={tiktokScriptInput}
               onChange={(event) => setTikTokScriptInput(event.target.value)}
@@ -2266,6 +2297,7 @@ export default function MixedComposerClient({
     const mode = editingGooglePlaceStopId ? "edit" : "add";
     const isGeneratingScript = googlePlaceDraft.status === "generating_script";
     const trimmedScript = toNullableTrimmed(googlePlaceDraft.script);
+    const scriptEstimate = formatEstimatedScriptDuration(googlePlaceDraft.script);
 
     return (
       <div className={styles.instagramDraftGrid}>
@@ -2326,7 +2358,12 @@ export default function MixedComposerClient({
             />
           </label>
           <label className={styles.fieldLabel}>
-            Script
+            <span className={styles.fieldLabelRow}>
+              <span>Script</span>
+              {!isGeneratingScript && scriptEstimate ? (
+                <span className={styles.fieldLabelEstimate}>Est. {scriptEstimate}</span>
+              ) : null}
+            </span>
             <textarea
               value={googlePlaceDraft.script || ""}
               onChange={(event) => {
@@ -2429,10 +2466,8 @@ export default function MixedComposerClient({
               Back
             </Link>
             <p className={styles.kicker}>Mixed Composer</p>
-            <h1 className={styles.title}>Build a route from Instagram, TikTok, and Google Places</h1>
-            <p className={styles.subtitle}>
-              This is the new mixed-source route builder. The original Instagram uploader stays live while we prove this flow.
-            </p>
+            <h1 className={styles.title}>Build a journey from Instagram, TikTok, and Google Places</h1>
+             
           </div>
           <div className={styles.headerLinks}>
             <Link href="/import/instagram" className={styles.headerLinkPill}>Instagram uploader</Link>
@@ -2442,13 +2477,21 @@ export default function MixedComposerClient({
 
         <section className={`${styles.card} ${styles.titleCard}`}>
           <div className={styles.formGrid}>
-            <label className={styles.field}>
-              <span>Route title</span>
-              <input value={routeTitle} onChange={(event) => setRouteTitle(event.target.value)} placeholder="Weekend food route" />
+            <label className={`${styles.field} ${styles.fieldFullWidth}`}>
+              <span>Name of Journey (seen by listeners)</span>
+              <input
+                value={routeTitle}
+                onChange={(event) => setRouteTitle(clampRouteTitle(event.target.value))}
+                placeholder="NYC’s Best Bad Ideas"
+                maxLength={ROUTE_TITLE_MAX_CHARS}
+              />
+              <div className={styles.fieldCount}>
+                {routeTitle.length}/{ROUTE_TITLE_MAX_CHARS}
+              </div>
             </label>
           </div>
           <div className={styles.customNarratorPanel}>
-            <div className={styles.customNarratorLabel}>Narrator</div>
+            <div className={styles.customNarratorLabel}>How do you help people experience places differently?</div>
             <p className={styles.customNarratorHelp}>{CUSTOM_NARRATOR_HELP_TEXT}</p>
             <textarea
               id="customNarratorGuidance"
@@ -2459,7 +2502,7 @@ export default function MixedComposerClient({
               }}
               className={styles.customNarratorTextarea}
               placeholder={CUSTOM_NARRATOR_PLACEHOLDER}
-              rows={6}
+              rows={4}
               maxLength={CUSTOM_NARRATOR_MAX_CHARS}
             />
             <div className={styles.customNarratorCount}>
@@ -2470,7 +2513,7 @@ export default function MixedComposerClient({
 
         <div className={styles.columns}>
           <section className={styles.card}>
-            <h2 className={styles.sectionTitle}>Enter a stop from...</h2>
+            <h2 className={styles.sectionTitle}>Select a place from...</h2>
             <div className={styles.segmented}>
               <button
                 type="button"
@@ -2491,7 +2534,7 @@ export default function MixedComposerClient({
                 className={stopEntryMode === "google_places" ? styles.segmentedActive : styles.segmentedButton}
                 onClick={() => setStopEntryMode("google_places")}
               >
-                Add Google Place stop
+                Maps
               </button>
             </div>
             {stopEntryMode === "google_places" ? (
@@ -2516,7 +2559,7 @@ export default function MixedComposerClient({
                         onClick={() => void handleAddGooglePlaceStop(result)}
                       >
                         <span className={styles.resultTitle}>{result.title}</span>
-                        <span className={styles.resultMeta}>Add place stop</span>
+                        <span className={styles.resultMeta}>Add</span>
                       </button>
                     ))}
                   </div>
@@ -2541,7 +2584,9 @@ export default function MixedComposerClient({
           <section className={styles.card}>
             <div className={styles.listHeader}>
               <h2 className={styles.sectionTitle}>Route stops</h2>
-              <button type="button" className={styles.secondaryButton} onClick={() => void handleClearStops()}>Clear</button>
+              <button type="button" className={styles.listHeaderAction} onClick={() => void handleClearStops()}>
+                Clear
+              </button>
             </div>
             {stops.length === 0 ? (
               <p className={styles.emptyState}>No stops added yet.</p>

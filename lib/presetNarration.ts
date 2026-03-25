@@ -102,9 +102,9 @@ const PERSONA_STORY_LENS: Record<PresetPersona, string> = {
 };
 
 const PERSONA_TRANSITION_STYLE: Record<PresetPersona, string> = {
-  adult: "Point clearly toward what the next stop reveals without sounding repetitive.",
-  preteen: "End with momentum and curiosity, like the listener is chasing the next clue.",
-  ghost: "End with a soft sense that the route is drawing the listener deeper.",
+  adult: "End with a reflective payoff that makes the meaning of this place feel immediate.",
+  preteen: "End with a satisfying sense of discovery that keeps the focus on this place.",
+  ghost: "End with a lingering reflection that lets the atmosphere stay with the listener.",
 };
 
 const PERSONA_OPENERS: Record<PresetPersona, string[]> = {
@@ -200,12 +200,12 @@ function openerInstruction(openerFamily: string, beat: PresetNarrationBeat) {
   return "Open with a concrete, specific detail instead of a generic scene-setting sentence.";
 }
 
-function transitionInstruction(transitionStyle: string, stopIndex: number, totalStops: number, isOverview: boolean) {
+function transitionInstruction(transitionStyle: string, _stopIndex: number, _totalStops: number, isOverview: boolean) {
   if (isOverview) {
-    return "End by launching the route and making the first landmark feel inevitable.";
+    return "End with a reflective launch that frames the route's promise without naming another stop.";
   }
-  if (stopIndex >= totalStops - 1) {
-    return "End with payoff and closure rather than teasing another stop.";
+  if (/\b(next stop|next clue|what comes next|continue|keep moving|onward)\b/i.test(transitionStyle)) {
+    return "End with a reflective payoff rooted in this place rather than another stop.";
   }
   return transitionStyle;
 }
@@ -378,7 +378,8 @@ export function buildPresetPrompt(
   userPromptLines.push(`- ${target.sentenceRange} sentences.`);
   userPromptLines.push(`- ${target.wordRange} words total.`);
   userPromptLines.push("- Mention the stop name once naturally.");
-  userPromptLines.push("- End with forward motion unless this is the final stop.");
+  userPromptLines.push("- End with a reflective close tied to this place, not a teaser for another stop.");
+  userPromptLines.push("- Do not mention the next stop, continuing onward, or what comes next.");
   userPromptLines.push("- Do not use placeholders, brackets, or stage directions.");
   userPromptLines.push("- Output plain text only.");
   if (factsFirst) {

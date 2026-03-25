@@ -193,6 +193,33 @@ test("prompt builder keeps route voice stable, rotates adjacent opener families,
   assert.match(promptA.userPrompt, /Times Square/);
   assert.match(promptA.userPrompt, /Marvel/);
   assert.match(promptA.userPrompt, /DC/);
+  assert.match(promptA.userPrompt, /End with a reflective close tied to this place/);
+  assert.doesNotMatch(promptA.userPrompt, /next clue/i);
+  assert.match(promptA.userPrompt, /reflective payoff rooted in this place rather than another stop/i);
+});
+
+test("overview preset prompts launch reflectively without naming another stop", () => {
+  const route = {
+    id: "overview-route",
+    title: "Boston Layers",
+    description: "A citywide story.",
+    durationMinutes: 30,
+    defaultPersona: "adult" as const,
+    narratorGuidance: "Keep it grounded and vivid.",
+  };
+  const stop = {
+    id: "overview-stop",
+    title: "Overview of Boston",
+    lat: 0,
+    lng: 0,
+    image: "/images/salem/placeholder.png",
+    isOverview: true,
+  };
+
+  const prompt = buildPresetPrompt(route, stop, "boston", 0, 5);
+
+  assert.match(prompt.userPrompt, /reflective launch that frames the route's promise without naming another stop/i);
+  assert.match(prompt.userPrompt, /Do not mention the next stop, continuing onward, or what comes next/i);
 });
 
 test("attachPresetStopNarration preserves overview stops and attaches authored narration by stop id", () => {

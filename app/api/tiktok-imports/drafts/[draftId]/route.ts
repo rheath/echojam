@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 import { getTikTokImportRequestAuthorizationState } from "@/lib/server/tiktokCreatorAccess";
 import {
+  regenerateTikTokDraftForConfirmedPlace,
   getTikTokDraftResponseById,
   updateTikTokDraftById,
 } from "@/lib/server/tiktokImportWorker";
+import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 
 type PatchBody = {
   editedTitle?: string | null;
   editedScript?: string | null;
   placeQuery?: string | null;
+  regenerateScript?: boolean | null;
   confirmedPlace?:
     | {
         label: string;
@@ -92,7 +95,17 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ draftId: stri
       }
     }
 
-    return NextResponse.json(await updateTikTokDraftById(draftId, patch));
+    const admin = getSupabaseAdminClient();
+    const updated = await updateTikTokDraftById(draftId, patch, admin);
+    if (body.confirmedPlace && (!updated.content.editedScript || body.regenerateScript === true)) {
+      return NextResponse.json(
+        await regenerateTikTokDraftForConfirmedPlace(draftId, admin, {
+          force: body.regenerateScript === true,
+        })
+      );
+    }
+
+    return NextResponse.json(updated);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to update TikTok draft" },

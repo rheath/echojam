@@ -101,6 +101,10 @@
   font-weight: 700;
 }
 
+.fieldFullWidth {
+  grid-column: 1 / -1;
+}
+
 .field span {
   display: block;
   margin-bottom: 8px;
@@ -117,6 +121,14 @@
   color: #1f1714;
   font-size: 16px;
   font-weight: normal;
+}
+
+.fieldCount {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: normal;
+  opacity: 0.7;
+  text-align: right;
 }
 
 .sectionTitle {
@@ -145,6 +157,26 @@
 .fieldLabel span {
   font-weight: normal;
   color: #666;
+}
+
+.fieldLabelRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.fieldLabel .fieldLabelRow {
+  font-weight: 700;
+  color: inherit;
+}
+
+.fieldLabelEstimate {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: normal;
+  color: #666;
+  text-align: right;
 }
 
 .textInput,
@@ -458,6 +490,7 @@
   background: transparent;
   color: #8d4326;
   font-size: 14px;
+  text-decoration: underline;
 }
 
 .listHeader {
@@ -466,6 +499,28 @@
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.listHeaderAction {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 160ms ease, opacity 160ms ease;
+}
+
+.listHeaderAction:hover,
+.listHeaderAction:focus-visible {
+  color: #1f1714;
+  text-decoration: underline;
+}
+
+.listHeaderAction:focus-visible {
+  outline: none;
 }
 
 .emptyState {
@@ -531,7 +586,7 @@
   resize: vertical;
   border: 1px solid #34353b;
   border-radius: 18px;
-  background: #f3f3f3;
+  background: #fff;
   color: #111;
   font: inherit;
   line-height: 1.5;
@@ -654,6 +709,10 @@
   .shell {
     width: min(100% - 24px, 1120px);
     padding-top: 28px;
+  }
+
+  .columns {
+    grid-template-columns: 1fr;
   }
 
   .headerRow,

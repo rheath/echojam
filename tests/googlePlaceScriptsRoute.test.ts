@@ -6,12 +6,49 @@ import { POST } from "../app/api/google-place-scripts/generate/route.ts";
 
 test("google place script route uses custom narrator guidance when provided", async () => {
   const originalApiKey = process.env.OPENAI_API_KEY;
+  const originalPlacesKey = process.env.GOOGLE_PLACES_API_KEY;
   process.env.OPENAI_API_KEY = "test-key";
+  process.env.GOOGLE_PLACES_API_KEY = "places-key";
   const originalFetch = global.fetch;
   let capturedInit: RequestInit | undefined;
 
   try {
-    global.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+    global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("places.googleapis.com/v1/places/")) {
+        return new Response(
+          JSON.stringify({
+            displayName: { text: "Boston Public Garden" },
+            formattedAddress: "4 Charles St, Boston, MA 02116, USA",
+            location: { latitude: 42.354, longitude: -71.07 },
+            types: ["park", "tourist_attraction"],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+      if (url.includes("maps.googleapis.com/maps/api/geocode/json")) {
+        return new Response(
+          JSON.stringify({
+            results: [
+              {
+                address_components: [
+                  { long_name: "Back Bay", types: ["neighborhood"] },
+                  { long_name: "Boston", types: ["locality"] },
+                  { long_name: "Massachusetts", types: ["administrative_area_level_1"] },
+                  { long_name: "United States", types: ["country"] },
+                ],
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
       capturedInit = init;
       return new Response(
         JSON.stringify({
@@ -39,6 +76,8 @@ test("google place script route uses custom narrator guidance when provided", as
           transportMode: "walk",
           lengthMinutes: 30,
           narratorGuidance: "Young history guide",
+          openerFamily: "look-closer",
+          blockedLeadIns: ["welcome to boston public", "look closer at the"],
           stop: {
             id: "place-1",
             title: "Boston Public Garden",
@@ -61,10 +100,22 @@ test("google place script route uses custom narrator guidance when provided", as
     const requestBody = JSON.parse(String(capturedInit?.body || "{}")) as {
       messages?: Array<{ content?: string }>;
     };
-    assert.match(requestBody.messages?.[1]?.content || "", /Narrator guidance: Young history guide/);
+    const prompt = requestBody.messages?.[1]?.content || "";
+    assert.match(prompt, /Narrator guidance: Young history guide/);
+    assert.match(prompt, /Opener family: look-closer/);
+    assert.match(prompt, /Do not begin with 'Welcome to'/);
+    assert.match(prompt, /welcome to boston public/);
+    assert.match(prompt, /End with a reflective close tied to this place/);
+    assert.match(prompt, /Do not mention the next stop, continuing onward, keeping moving, or what comes next/);
+    assert.match(prompt, /Confirmed place grounding:/);
+    assert.match(prompt, /Neighborhood or borough: Back Bay/);
+    assert.match(prompt, /City: Boston/);
+    assert.match(prompt, /Venue type: Park/);
+    assert.doesNotMatch(prompt, /42\.354|-71\.07/);
   } finally {
     global.fetch = originalFetch;
     process.env.OPENAI_API_KEY = originalApiKey;
+    process.env.GOOGLE_PLACES_API_KEY = originalPlacesKey;
   }
 });
 

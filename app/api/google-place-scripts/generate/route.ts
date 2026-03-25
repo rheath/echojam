@@ -4,6 +4,8 @@ import {
   toNullableTrimmed,
   type StopInput,
 } from "@/lib/mixGeneration";
+import type { MixedRouteOpenerFamily } from "@/lib/mixedRouteOpeners";
+import { resolvePlaceGrounding } from "@/lib/server/placeGroundingResolver";
 import { resolveGooglePlaceDraftPersona } from "@/lib/socialComposer";
 
 type Body = {
@@ -11,6 +13,8 @@ type Body = {
   transportMode?: string | null;
   lengthMinutes?: number | null;
   narratorGuidance?: string | null;
+  openerFamily?: MixedRouteOpenerFamily | null;
+  blockedLeadIns?: string[] | null;
   stop?: Pick<StopInput, "id" | "title" | "lat" | "lng" | "image" | "googlePlaceId"> | null;
   stopIndex?: number | null;
   totalStops?: number | null;
@@ -63,6 +67,12 @@ export async function POST(req: Request) {
       typeof body.totalStops === "number" && Number.isFinite(body.totalStops)
         ? Math.max(1, Math.trunc(body.totalStops))
         : 1;
+    const placeGrounding = await resolvePlaceGrounding({
+      title: stop.title,
+      googlePlaceId: stop.googlePlaceId,
+      lat: stop.lat,
+      lng: stop.lng,
+    });
 
     const script = toNullableTrimmed(
       await generateScriptWithOpenAI(
@@ -74,7 +84,14 @@ export async function POST(req: Request) {
         stop,
         stopIndex,
         totalStops,
-        narratorGuidance
+        narratorGuidance,
+        {
+          routeContextMode: "mixed",
+          openerFamily: body.openerFamily ?? null,
+          blockedLeadIns: Array.isArray(body.blockedLeadIns) ? body.blockedLeadIns : null,
+          endingStyle: "reflective_close",
+          placeGrounding,
+        }
       )
     );
 

@@ -3,6 +3,16 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Persona, PresetContentPriority } from "@/app/content/salemRoutes";
+import {
+  dedupeMixedRouteLeadIns,
+  describeMixedRouteOpenerFamily,
+  pickMixedRouteOpenerFamily,
+  type MixedRouteOpenerFamily,
+} from "@/lib/mixedRouteOpeners";
+import {
+  buildPlaceGroundingPromptLines,
+  type PlaceGrounding,
+} from "@/lib/placeGrounding";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { customNarratorPersonaPrompt } from "@/lib/personas/customNarrator";
 
@@ -38,10 +48,21 @@ export type StopInput = {
   sourceCreatorUrl?: string | null;
   sourceCreatorAvatarUrl?: string | null;
   prefilledScript?: string | null;
+  scriptEditedByUser?: boolean | null;
   narratorGuidance?: string | null;
   mustMention?: string[] | null;
   factBullets?: string[] | null;
   contentPriority?: PresetContentPriority | null;
+};
+
+export type EndingStyle = "reflective_close" | "transition";
+
+export type ScriptGenerationOptions = {
+  routeContextMode?: "mixed" | null;
+  openerFamily?: MixedRouteOpenerFamily | null;
+  blockedLeadIns?: string[] | null;
+  endingStyle?: EndingStyle | null;
+  placeGrounding?: PlaceGrounding | null;
 };
 
 const DEFAULT_SWITCH: Required<GenerationSwitch> = {
@@ -64,6 +85,31 @@ const FIXED_PERSONA_PROMPTS = {
 function getPersonaPrompt(persona: Persona) {
   if (persona === "custom") return customNarratorPersonaPrompt;
   return FIXED_PERSONA_PROMPTS[persona];
+}
+
+function resolveEndingStyle(value: EndingStyle | null | undefined): EndingStyle {
+  return value === "transition" ? "transition" : "reflective_close";
+}
+
+function buildEndingRequirements(endingStyle: EndingStyle) {
+  if (endingStyle === "transition") {
+    return [
+      "- End with a transition that carries the listener onward without using a stock phrase.",
+    ];
+  }
+
+  return [
+    "- End with a reflective close tied to this place rather than teasing what comes next.",
+    "- Let the final line land on meaning, atmosphere, or one concrete detail the listener can hold onto here.",
+    "- Do not mention the next stop, continuing onward, keeping moving, or what comes next.",
+  ];
+}
+
+function buildEndingDisallowedPatterns(endingStyle: EndingStyle) {
+  if (endingStyle !== "reflective_close") return [] as string[];
+  return [
+    "Do not end with phrases like 'next stop,' 'continue,' 'keep moving,' or 'what comes next.'",
+  ];
 }
 
 export function toCustomNarratorVoice(value: string | null | undefined): CustomNarratorVoice | null {
@@ -370,11 +416,23 @@ export async function generateScriptWithOpenAI(
   stop: StopInput,
   stopIndex: number,
   totalStops: number,
-  narratorGuidance?: string | null
+  narratorGuidance?: string | null,
+  options?: ScriptGenerationOptions | null
 ) {
   const personaPrompt = getPersonaPrompt(persona);
   const normalizedNarratorGuidance = toNullableTrimmed(narratorGuidance);
   const structuredPromptConfig = buildStructuredStopPromptConfig(stop, normalizedNarratorGuidance);
+  const endingStyle = resolveEndingStyle(options?.endingStyle);
+  const placeGrounding = options?.placeGrounding ?? null;
+  const routeContextMode = options?.routeContextMode === "mixed" ? "mixed" : null;
+  const openerFamily =
+    routeContextMode === "mixed"
+      ? options?.openerFamily ?? pickMixedRouteOpenerFamily(persona, stopIndex)
+      : null;
+  const blockedLeadIns =
+    routeContextMode === "mixed"
+      ? dedupeMixedRouteLeadIns(options?.blockedLeadIns ?? [])
+      : [];
   if (persona === "custom" && !normalizedNarratorGuidance) {
     throw new Error("Narrator guidance is required for custom narrator generation.");
   }
@@ -410,17 +468,40 @@ export async function generateScriptWithOpenAI(
     ...(normalizedNarratorGuidance ? [`Narrator guidance: ${normalizedNarratorGuidance}`] : []),
     `Target spoken duration for this stop: ${personaPrompt.lengthTarget.durationSeconds} seconds`,
     `Stop ${stopIndex + 1} of ${totalStops}: ${stop.title}`,
+    ...buildPlaceGroundingPromptLines(placeGrounding),
     ...structuredPromptConfig.promptSections,
+    ...(routeContextMode === "mixed" && openerFamily
+      ? [
+          "Mixed-route opener context:",
+          `- Opener family: ${openerFamily}. ${describeMixedRouteOpenerFamily(openerFamily)}`,
+          "- This stop is part of a mixed-source route, so its opening should feel distinct from prior stops.",
+          "- Do not begin with 'Welcome to'.",
+          ...(blockedLeadIns.length > 0
+            ? [
+                `- Do not reuse any of these opening lead-ins: ${blockedLeadIns
+                  .map((leadIn) => `"${leadIn}"`)
+                  .join(", ")}.`,
+              ]
+            : []),
+        ]
+      : []),
     "Style guidelines:",
     ...effectiveStyleGuidelines.map((line) => `- ${line}`),
     "Disallowed patterns:",
     ...personaPrompt.bannedPatterns.map((line) => `- ${line}`),
+    ...buildEndingDisallowedPatterns(endingStyle).map((line) => `- ${line}`),
+    ...(placeGrounding
+      ? [
+          "- Do not mention raw coordinates, latitude/longitude, or map pins.",
+          "- Do not mechanically recite the full street address unless the source material naturally depends on it.",
+        ]
+      : []),
     "Requirements:",
     `- ${personaPrompt.lengthTarget.sentenceRange} sentences.`,
     `- ${personaPrompt.lengthTarget.wordRange} words total.`,
     "- Mention the stop name once naturally.",
     "- Include one memorable hook line.",
-    "- End with a transition to keep moving.",
+    ...buildEndingRequirements(endingStyle),
     ...structuredPromptConfig.extraRequirements,
     ...(normalizedNarratorGuidance
       ? [
@@ -432,6 +513,17 @@ export async function generateScriptWithOpenAI(
     ...(structuredPromptConfig.mustMention.length > 0 && structuredPromptConfig.contentPriority !== "history_first"
       ? [
           `- Include at least one of these exact references verbatim if it fits naturally: ${structuredPromptConfig.mustMention.join(", ")}.`,
+        ]
+      : []),
+    ...(routeContextMode === "mixed"
+      ? [
+          "- Avoid generic tour-guide openings and repeated lead-ins from earlier stops.",
+          "- Make the opener feel specific to this stop instead of introducing the place with a stock phrase.",
+        ]
+      : []),
+    ...(placeGrounding
+      ? [
+          "- Make sure the place framing matches the confirmed neighborhood, city, and venue context when those are provided.",
         ]
       : []),
     "- Do not use placeholders, brackets, or stage directions.",
@@ -457,6 +549,95 @@ export async function generateScriptWithOpenAI(
 
   if (!response.ok) {
     throw new Error("OpenAI script generation failed");
+  }
+
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  return data.choices?.[0]?.message?.content?.trim() || "";
+}
+
+export async function rewriteScriptOpenerWithOpenAI(
+  apiKey: string,
+  city: string,
+  transportMode: string,
+  lengthMinutes: number,
+  persona: Persona,
+  stop: Pick<StopInput, "id" | "title" | "lat" | "lng" | "image" | "googlePlaceId">,
+  originalScript: string,
+  narratorGuidance?: string | null,
+  options?: ScriptGenerationOptions | null
+) {
+  const personaPrompt = getPersonaPrompt(persona);
+  const normalizedNarratorGuidance = toNullableTrimmed(narratorGuidance);
+  const routeContextMode = options?.routeContextMode === "mixed" ? "mixed" : null;
+  const openerFamily =
+    routeContextMode === "mixed" ? options?.openerFamily ?? pickMixedRouteOpenerFamily(persona, 0) : null;
+  const blockedLeadIns =
+    routeContextMode === "mixed"
+      ? dedupeMixedRouteLeadIns(options?.blockedLeadIns ?? [])
+      : [];
+  if (persona === "custom" && !normalizedNarratorGuidance) {
+    throw new Error("Narrator guidance is required for custom narrator generation.");
+  }
+
+  const systemPrompt = [
+    ...personaPrompt.system,
+    "You revise existing audio tour scripts with a light touch.",
+    "Preserve the original facts, named references, and ending.",
+    "Rewrite only the opening one or two sentences unless a tiny connective edit is required.",
+  ].join(" ");
+
+  const userPrompt = [
+    `City: ${city}`,
+    `Transport: ${transportMode}`,
+    `Tour length: ${lengthMinutes} minutes`,
+    `Narrator persona: ${personaPrompt.name}`,
+    ...(normalizedNarratorGuidance ? [`Narrator guidance: ${normalizedNarratorGuidance}`] : []),
+    `Stop: ${stop.title}`,
+    ...(routeContextMode === "mixed" && openerFamily
+      ? [
+          "Mixed-route opener context:",
+          `- Opener family: ${openerFamily}. ${describeMixedRouteOpenerFamily(openerFamily)}`,
+          "- Do not begin with 'Welcome to'.",
+          ...(blockedLeadIns.length > 0
+            ? [
+                `- Do not reuse any of these opening lead-ins: ${blockedLeadIns
+                  .map((leadIn) => `"${leadIn}"`)
+                  .join(", ")}.`,
+              ]
+            : []),
+        ]
+      : []),
+    "Rewrite requirements:",
+    "- Keep the body content, factual claims, named references, and ending aligned with the original script.",
+    "- Rewrite only the opening one or two sentences unless a tiny connective edit is required.",
+    "- Keep the total length and spoken rhythm close to the original.",
+    "- Return the full revised script as plain text only.",
+    "",
+    "Original script:",
+    originalScript,
+  ].join("\n");
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.5,
+      max_tokens: 520,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("OpenAI opener rewrite failed");
   }
 
   const data = (await response.json()) as {
@@ -581,8 +762,8 @@ export function fallbackScript(city: string, persona: Persona, stop: StopInput, 
   if (persona === "custom") {
     return [
       `You are at ${stop.title}, one of the places that gives ${city} its character.`,
-      "Take in the details around you and let this stop set the tone for the rest of the tour.",
-      "There is something worth noticing here before we move on.",
+      "Take in the details around you and let this stop settle into its own texture and rhythm.",
+      "There is something worth noticing here that lingers after the words are gone.",
     ].join(" ");
   }
 

@@ -56,8 +56,39 @@ test("mapSocialDraftToComposerStop uses confirmed place and final script for ins
     creatorUrl: "https://www.instagram.com/letsfamilystyle/",
     creatorAvatarUrl: null,
     script: "Walk into the North End and follow the smell of pastry.",
+    scriptEditedByUser: false,
     originalDraftId: "draft-1",
   });
+});
+
+test("mapSocialDraftToComposerStop marks user-edited social scripts", () => {
+  const stop = mapSocialDraftToComposerStop("tiktok", {
+    id: "draft-9",
+    source: {
+      url: "https://www.tiktok.com/@guide/video/123",
+      videoId: "123",
+      ownerTitle: "@guide",
+      thumbnailUrl: "https://example.com/thumb.jpg",
+    },
+    content: {
+      finalTitle: "Edited stop",
+      generatedTitle: "Generated stop",
+      editedScript: "Hand-tuned opener and script.",
+      finalScript: "Hand-tuned opener and script.",
+      generatedScript: "Generated script.",
+    },
+    location: {
+      confirmedPlace: {
+        label: "Place 9",
+        lat: 41.1,
+        lng: -70.2,
+        imageUrl: "https://example.com/place.jpg",
+        googlePlaceId: "place-9",
+      },
+    },
+  });
+
+  assert.equal(stop?.scriptEditedByUser, true);
 });
 
 test("mapSocialDraftToComposerStop keeps Instagram stops from the same reel distinct by draft id", () => {

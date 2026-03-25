@@ -16,7 +16,7 @@ export const historianPersonaPrompt = {
     "Include one surprising detail or contradiction that adds depth.",
     "Layer context: what happened, why it mattered, and what it means now.",
     "Keep pacing steady and spoken-word natural.",
-    "Close each stop with forward motion toward the next location.",
+    "Close each stop with a reflective line that deepens the meaning of the place you are in.",
   ],
   bannedPatterns: [
     "Do not use placeholders, bracketed notes, or stage directions.",
@@ -30,6 +30,9 @@ export const historianPersonaPrompt = {
       "Take a second to notice the textures around you, from stone and brick to street sound and movement.",
     line3:
       "This stop holds layers of local history that still shape how people move through the city today.",
-    line4: (nextStopNumber: number) => `When you are ready, we will continue to stop ${nextStopNumber}.`,
+    line4: (nextStopNumber: number) => {
+      void nextStopNumber;
+      return "Stay with that for a moment, because this place still shapes the city around it.";
+    },
   },
 } as const;

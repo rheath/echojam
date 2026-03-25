@@ -33,6 +33,6 @@ export const ghostWhispererPersonaPrompt = {
     line3:
       "The documents tell one version of events. The stories told quietly among neighbors suggest another layer.",
     line4:
-      "When you are ready, we will continue. Some histories are easier to leave than others.",
+      "Stay with that feeling a moment longer. Some histories never fully loosen their grip.",
   },
 } as const;

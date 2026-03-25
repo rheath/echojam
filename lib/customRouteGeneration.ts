@@ -4,6 +4,7 @@ import {
   upsertRouteStopMapping,
 } from "@/lib/canonicalStops";
 import {
+  rewriteScriptOpenerWithOpenAI,
   selectCustomNarratorVoice,
   type CustomNarratorVoice,
   generateScriptWithOpenAI,
@@ -18,6 +19,10 @@ import {
   type Persona,
   type StopInput,
 } from "@/lib/mixGeneration";
+import {
+  buildMixedRouteOpenerContext,
+  type MixedRouteOpenerFamily,
+} from "@/lib/mixedRouteOpeners";
 import {
   validateMixSelection,
   type TransportMode,
@@ -72,9 +77,25 @@ export type PreparedCustomRouteJob = {
   city: string;
   transportMode: TransportMode;
   lengthMinutes: number;
+  experienceKind: CustomRouteExperienceKind;
   persona: Persona;
   narratorGuidance: string | null;
   stops: PreparedCustomRouteStop[];
+};
+
+type MixedRouteOpenerRewriteInput = {
+  stop: PreparedCustomRouteStop;
+  script: string;
+  openerFamily: MixedRouteOpenerFamily;
+  blockedLeadIns: string[];
+  stopIndex: number;
+  totalStops: number;
+};
+
+type MixedRouteOpenerRewriteResult = {
+  scripts: Array<string | null>;
+  warningCount: number;
+  lastWarning: string;
 };
 
 type ActiveGenerationJobRow = {
@@ -162,6 +183,70 @@ function normalizeRouteAttribution(
 
 function normalizePrefilledScript(value: string | null | undefined) {
   return toNullableTrimmed(value);
+}
+
+export async function harmonizeMixedRouteStopScripts(args: {
+  experienceKind: CustomRouteExperienceKind;
+  persona: Persona;
+  narratorGuidance: string | null;
+  stops: PreparedCustomRouteStop[];
+  scripts: Array<string | null | undefined>;
+  rewriteScriptOpener: (input: MixedRouteOpenerRewriteInput) => Promise<string>;
+}): Promise<MixedRouteOpenerRewriteResult> {
+  const nextScripts: Array<string | null> = [];
+  const finalizedScripts: string[] = [];
+  let warningCount = 0;
+  let lastWarning = "";
+
+  for (let index = 0; index < args.stops.length; index += 1) {
+    const stop = args.stops[index];
+    const script = toNullableTrimmed(args.scripts[index]);
+    if (!stop || !script) {
+      nextScripts.push(script);
+      continue;
+    }
+
+    if (args.experienceKind !== "mix" || stop.scriptEditedByUser) {
+      nextScripts.push(script);
+      finalizedScripts.push(script);
+      continue;
+    }
+
+    const { openerFamily, blockedLeadIns } = buildMixedRouteOpenerContext(
+      args.persona,
+      index,
+      finalizedScripts
+    );
+
+    try {
+      const rewritten = toNullableTrimmed(
+        await args.rewriteScriptOpener({
+          stop,
+          script,
+          openerFamily,
+          blockedLeadIns,
+          stopIndex: index,
+          totalStops: args.stops.length,
+        })
+      );
+      const finalScript = rewritten || script;
+      nextScripts.push(finalScript);
+      finalizedScripts.push(finalScript);
+    } catch (error) {
+      warningCount += 1;
+      lastWarning = `Opener harmonization failed for ${args.persona} at stop "${stop.title}": ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`;
+      nextScripts.push(script);
+      finalizedScripts.push(script);
+    }
+  }
+
+  return {
+    scripts: nextScripts,
+    warningCount,
+    lastWarning,
+  };
 }
 
 async function createJam(
@@ -462,6 +547,7 @@ export async function prepareCustomRouteJob(
     city,
     transportMode: input.transportMode,
     lengthMinutes: input.lengthMinutes,
+    experienceKind,
     persona,
     narratorGuidance,
     stops: input.stops,
@@ -475,6 +561,7 @@ export async function runCustomRouteGeneration(
   city: string,
   transportMode: TransportMode,
   lengthMinutes: number,
+  experienceKind: CustomRouteExperienceKind,
   persona: Persona,
   stops: PreparedCustomRouteStop[],
   narratorGuidance: string | null,
@@ -513,7 +600,8 @@ export async function runCustomRouteGeneration(
   type RowState = {
     stop: PreparedCustomRouteStop;
     canonicalStopId: string;
-    script: string | null;
+    baseScript: string | null;
+    routeScript: string | null;
     audioUrl: string | null;
   };
   const states: RowState[] = [];
@@ -553,7 +641,8 @@ export async function runCustomRouteGeneration(
             stop,
             i,
             stops.length,
-            narratorGuidance
+            narratorGuidance,
+            { endingStyle: "reflective_close" }
           )
         );
       } catch (e) {
@@ -578,19 +667,62 @@ export async function runCustomRouteGeneration(
       );
     }
 
-    const scriptPatch = SCRIPT_PATCH_BY_PERSONA[persona](script);
-    await admin
-      .from("custom_route_stops")
-      .update(scriptPatch)
-      .eq("route_id", routeId)
-      .eq("stop_id", stop.id);
-
-    states.push({ stop, canonicalStopId: canonical.id, script, audioUrl: null });
+    states.push({
+      stop,
+      canonicalStopId: canonical.id,
+      baseScript: script,
+      routeScript: script,
+      audioUrl: null,
+    });
     doneUnits += 1;
     await updateProgress(
       "generating_script",
       `Generating scripts (${doneUnits}/${totalUnits})`
     );
+  }
+
+  const harmonized = await harmonizeMixedRouteStopScripts({
+    experienceKind,
+    persona,
+    narratorGuidance,
+    stops,
+    scripts: states.map((state) => state.routeScript),
+    rewriteScriptOpener: async ({
+      stop,
+      script,
+      openerFamily,
+      blockedLeadIns,
+    }) =>
+      await rewriteScriptOpenerWithOpenAI(
+        apiKey,
+        city,
+        transportMode,
+        lengthMinutes,
+        persona,
+        stop,
+        script,
+        narratorGuidance,
+        {
+          routeContextMode: "mixed",
+          openerFamily,
+          blockedLeadIns,
+        }
+      ),
+  });
+  warningCount += harmonized.warningCount;
+  if (harmonized.lastWarning) lastWarning = harmonized.lastWarning;
+
+  for (let index = 0; index < states.length; index += 1) {
+    const state = states[index];
+    if (!state) continue;
+    state.routeScript = toNullableTrimmed(harmonized.scripts[index]) || state.routeScript;
+
+    const scriptPatch = SCRIPT_PATCH_BY_PERSONA[persona](state.routeScript);
+    await admin
+      .from("custom_route_stops")
+      .update(scriptPatch)
+      .eq("route_id", routeId)
+      .eq("stop_id", state.stop.id);
   }
 
   await updateProgress("generating_audio", "Generating audio");
@@ -607,11 +739,14 @@ export async function runCustomRouteGeneration(
           .maybeSingle()
       : { data: null };
 
-    const currentScript = isCustomNarrator
-      ? state.script
-      : toNullableTrimmed(assetRow?.script) || state.script;
+    const currentScript = toNullableTrimmed(state.routeScript);
+    const canonicalScript = toNullableTrimmed(assetRow?.script) || toNullableTrimmed(state.baseScript);
+    const hasRouteSpecificScript =
+      experienceKind === "mix" &&
+      Boolean(currentScript) &&
+      currentScript !== canonicalScript;
     let audioUrl =
-      !forceAudio && !isCustomNarrator
+      !forceAudio && !isCustomNarrator && !hasRouteSpecificScript
         ? toNullableAudioUrl(assetRow?.audio_url)
         : null;
     if (replayUrl) audioUrl = replayUrl;
@@ -645,12 +780,12 @@ export async function runCustomRouteGeneration(
 
     if (isUsableGeneratedAudioUrl(audioUrl)) audioReadyCount += 1;
 
-    if (!isCustomNarrator) {
+    if (!isCustomNarrator && !hasRouteSpecificScript) {
       await admin.from("canonical_stop_assets").upsert(
         {
           canonical_stop_id: state.canonicalStopId,
           persona,
-          script: currentScript,
+          script: canonicalScript,
           audio_url: audioUrl,
           status: audioUrl ? "ready" : "failed",
           error: audioUrl ? null : lastWarning || "Audio generation failed",

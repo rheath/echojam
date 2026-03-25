@@ -12,6 +12,7 @@ import {
   isValidGooglePlaceId,
   proxyGoogleImageUrl,
 } from "@/lib/placesImages";
+import { buildPlaceGroundingSignature } from "@/lib/placeGrounding";
 import {
   buildInstagramScriptGenerationSourceText,
   composeInstagramImportSourceText,
@@ -45,6 +46,8 @@ import {
   uploadNarrationAudio,
 } from "@/lib/mixGeneration";
 import { fetchInstagramProfileImageUrl } from "@/lib/server/instagramProfileImage";
+import { resolvePlaceGrounding } from "@/lib/server/placeGroundingResolver";
+import { generateGroundedSocialScriptWithOpenAI } from "@/lib/server/socialScriptGrounding";
 import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 
 type InstagramImportDraftRow = {
@@ -441,6 +444,17 @@ export function serializeInstagramDraft(
       cleanedTextTokensEstimate: estimateTextTokenCount(row.transcript_cleaned),
       finalScriptTokensEstimate: estimateTextTokenCount(finalScript),
     },
+    grounding: {
+      confirmedPlaceId: row.confirmed_google_place_id,
+      signature:
+        row.confirmed_place_label || row.confirmed_google_place_id
+          ? buildPlaceGroundingSignature({
+              placeId: row.confirmed_google_place_id,
+              resolvedName: row.confirmed_place_label,
+              formattedAddress: null,
+            })
+          : null,
+    },
     latestJob: serializeInstagramJob(latestJob),
   };
 }
@@ -787,6 +801,73 @@ export async function getInstagramDraftResponseById(
     loadLatestJobForDraft(admin, draftId),
   ]);
   return serializeInstagramDraft(draft, latestJob);
+}
+
+export async function updateInstagramDraftById(
+  draftId: string,
+  patch: Partial<InstagramImportDraftRow>,
+  admin: SupabaseClient = getSupabaseAdminClient()
+) {
+  await updateDraft(admin, draftId, patch);
+  return await getInstagramDraftResponseById(draftId, admin);
+}
+
+export async function regenerateInstagramDraftForConfirmedPlace(
+  draftId: string,
+  admin: SupabaseClient = getSupabaseAdminClient(),
+  options?: { force?: boolean }
+) {
+  const draft = await loadDraft(admin, draftId);
+  if (toNullableTrimmed(draft.edited_script) && !options?.force) {
+    return await getInstagramDraftResponseById(draftId, admin);
+  }
+
+  const confirmedPlace = makePlaceCandidate(
+    draft.confirmed_place_label,
+    draft.confirmed_place_lat,
+    draft.confirmed_place_lng,
+    draft.confirmed_place_image_url,
+    draft.confirmed_google_place_id
+  );
+  if (!confirmedPlace) {
+    return await getInstagramDraftResponseById(draftId, admin);
+  }
+
+  const placeGrounding = await resolvePlaceGrounding({
+    title: confirmedPlace.label,
+    googlePlaceId: confirmedPlace.googlePlaceId,
+    lat: confirmedPlace.lat,
+    lng: confirmedPlace.lng,
+    formattedAddress: confirmedPlace.formattedAddress,
+  });
+  if (!placeGrounding) {
+    return await getInstagramDraftResponseById(draftId, admin);
+  }
+
+  const apiKey = getOpenAiApiKey();
+  const grounded = await generateGroundedSocialScriptWithOpenAI(
+    apiKey,
+    "Instagram",
+    {
+      caption: draft.source_caption,
+      transcript: draft.transcript_raw,
+      cleanedText: draft.transcript_cleaned,
+    },
+    resolveInstagramDraftTitle(buildDraftContent(draft)),
+    placeGrounding
+  );
+
+  await updateDraft(admin, draftId, {
+    generated_title: grounded.title,
+    generated_script: grounded.script,
+    place_query: confirmedPlace.label,
+    place_city_hint: placeGrounding.city,
+    place_country_hint: placeGrounding.country,
+    place_confidence: 1,
+    error: null,
+  });
+
+  return await getInstagramDraftResponseById(draftId, admin);
 }
 
 export async function createInstagramImportJob(

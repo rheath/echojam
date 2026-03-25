@@ -14,7 +14,7 @@ export const customNarratorPersonaPrompt = {
     "Follow the narrator guidance closely without quoting it back.",
     "Tailor tone, vocabulary, and emphasis to the intended listener.",
     "Keep details concrete, vivid, and spoken-word natural.",
-    "Maintain forward momentum toward the next stop.",
+    "End on a reflective note rooted in the place itself, not in what comes next.",
   ],
   bannedPatterns: [
     "Do not mention the prompt, narrator guidance, or instructions explicitly.",

@@ -7,11 +7,14 @@ import os from "node:os";
 import path from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { proxyGoogleImageUrl } from "@/lib/placesImages";
+import { buildPlaceGroundingSignature } from "@/lib/placeGrounding";
 import {
   composeInstagramImportSourceText,
   toNullableTrimmed,
   type InstagramPlaceCandidate,
 } from "@/lib/instagramImport";
+import { resolvePlaceGrounding } from "@/lib/server/placeGroundingResolver";
+import { generateGroundedSocialScriptWithOpenAI } from "@/lib/server/socialScriptGrounding";
 import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 import {
   isTikTokDraftPublishable,
@@ -263,6 +266,17 @@ function serializeTikTokDraft(
       publishReady: isTikTokDraftPublishable(buildDraftContent(row)),
     },
     metrics: serializeTikTokMetrics(extractedText, row.transcript_cleaned, finalScript),
+    grounding: {
+      confirmedPlaceId: row.confirmed_google_place_id,
+      signature:
+        row.confirmed_place_label || row.confirmed_google_place_id
+          ? buildPlaceGroundingSignature({
+              placeId: row.confirmed_google_place_id,
+              resolvedName: row.confirmed_place_label,
+              formattedAddress: null,
+            })
+          : null,
+    },
     latestJob: serializeTikTokJob(latestJob),
   };
 }
@@ -544,6 +558,65 @@ export async function updateTikTokDraftById(
 ) {
   const admin = getAdmin(adminArg);
   await updateDraft(admin, draftId, patch);
+  return await getTikTokDraftResponseById(draftId, admin);
+}
+
+export async function regenerateTikTokDraftForConfirmedPlace(
+  draftId: string,
+  adminArg?: SupabaseClient,
+  options?: { force?: boolean }
+) {
+  const admin = getAdmin(adminArg);
+  const draft = await loadDraft(admin, draftId);
+  if (toNullableTrimmed(draft.edited_script) && !options?.force) {
+    return await getTikTokDraftResponseById(draftId, admin);
+  }
+
+  const confirmedPlace = makePlaceCandidate(
+    draft.confirmed_place_label,
+    draft.confirmed_place_lat,
+    draft.confirmed_place_lng,
+    draft.confirmed_place_image_url,
+    draft.confirmed_google_place_id
+  );
+  if (!confirmedPlace) {
+    return await getTikTokDraftResponseById(draftId, admin);
+  }
+
+  const placeGrounding = await resolvePlaceGrounding({
+    title: confirmedPlace.label,
+    googlePlaceId: confirmedPlace.googlePlaceId,
+    lat: confirmedPlace.lat,
+    lng: confirmedPlace.lng,
+    formattedAddress: confirmedPlace.formattedAddress,
+  });
+  if (!placeGrounding) {
+    return await getTikTokDraftResponseById(draftId, admin);
+  }
+
+  const apiKey = getOpenAiApiKey();
+  const grounded = await generateGroundedSocialScriptWithOpenAI(
+    apiKey,
+    "TikTok",
+    {
+      caption: draft.source_caption,
+      transcript: draft.transcript_raw,
+      cleanedText: draft.transcript_cleaned,
+    },
+    resolveTikTokDraftTitle(buildDraftContent(draft)),
+    placeGrounding
+  );
+
+  await updateDraft(admin, draftId, {
+    generated_title: grounded.title,
+    generated_script: grounded.script,
+    place_query: confirmedPlace.label,
+    place_city_hint: placeGrounding.city,
+    place_country_hint: placeGrounding.country,
+    place_confidence: 1,
+    error: null,
+  });
+
   return await getTikTokDraftResponseById(draftId, admin);
 }
 

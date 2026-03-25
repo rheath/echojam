@@ -42,6 +42,8 @@ async function generateScriptWithOpenAI(
     `Tour duration target: ${lengthMinutes} minutes total.`,
     `Write 2-3 sentences for stop "${stop.title}".`,
     "Keep it vivid, concise, and suitable for audio narration.",
+    "End with a reflective close tied to this place rather than teasing another stop.",
+    "Do not mention the next stop, continuing onward, or what comes next.",
   ].join("\n");
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {

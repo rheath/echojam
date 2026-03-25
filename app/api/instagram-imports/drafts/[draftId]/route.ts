@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { getInstagramImportRequestAuthorizationState } from "@/lib/server/instagramCreatorAccess";
-import { getInstagramDraftResponseById } from "@/lib/server/instagramImportWorker";
+import {
+  getInstagramDraftResponseById,
+  regenerateInstagramDraftForConfirmedPlace,
+  updateInstagramDraftById,
+} from "@/lib/server/instagramImportWorker";
 import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 
 type PatchBody = {
   editedTitle?: string | null;
   editedScript?: string | null;
   placeQuery?: string | null;
+  regenerateScript?: boolean | null;
   confirmedPlace?:
     | {
         label: string;
@@ -60,8 +65,6 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ draftId: stri
   try {
     const { draftId } = await ctx.params;
     const body = (await req.json()) as PatchBody;
-    const admin = getSupabaseAdminClient();
-
     const patch: Record<string, string | number | null> = {};
     if ("editedTitle" in body) patch.edited_title = body.editedTitle?.trim() || null;
     if ("editedScript" in body) patch.edited_script = body.editedScript?.trim() || null;
@@ -91,13 +94,17 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ draftId: stri
       }
     }
 
-    const { error } = await admin
-      .from("instagram_import_drafts")
-      .update(patch)
-      .eq("id", draftId);
-    if (error) throw new Error(error.message);
+    const admin = getSupabaseAdminClient();
+    const updated = await updateInstagramDraftById(draftId, patch, admin);
+    if (body.confirmedPlace && (!updated.content.editedScript || body.regenerateScript === true)) {
+      return NextResponse.json(
+        await regenerateInstagramDraftForConfirmedPlace(draftId, admin, {
+          force: body.regenerateScript === true,
+        })
+      );
+    }
 
-    return NextResponse.json(await getInstagramDraftResponseById(draftId, admin));
+    return NextResponse.json(updated);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to update Instagram draft" },

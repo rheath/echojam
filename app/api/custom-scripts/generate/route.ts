@@ -95,7 +95,8 @@ export async function POST(req: Request) {
         },
         stop.position ?? 0,
         totalStops ?? 1,
-        narratorGuidance
+        narratorGuidance,
+        { endingStyle: "reflective_close" }
       );
 
       const script = toNullableTrimmed(generated);
@@ -150,7 +151,9 @@ export async function POST(req: Request) {
         image: stop.image_url,
       },
       stop.position ?? 0,
-      totalStops ?? 1
+      totalStops ?? 1,
+      undefined,
+      { endingStyle: "reflective_close" }
     );
 
     const script = toNullableTrimmed(generated);

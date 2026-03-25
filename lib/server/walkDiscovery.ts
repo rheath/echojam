@@ -683,7 +683,8 @@ export async function appendAcceptedNearbyStop(args: {
         },
         insertedStopIndex,
         Math.max(1, context.currentStops.length + 1),
-        narratorGuidance
+        narratorGuidance,
+        { endingStyle: "reflective_close" }
       )
     );
     if (!selectedScript) {

@@ -109,6 +109,10 @@ export type InstagramDraftResponse = {
     cleanedTextTokensEstimate: number | null;
     finalScriptTokensEstimate: number | null;
   };
+  grounding: {
+    confirmedPlaceId: string | null;
+    signature: string | null;
+  };
   latestJob: InstagramImportJobResponse | null;
 };
 

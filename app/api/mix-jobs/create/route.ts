@@ -127,6 +127,7 @@ export async function POST(req: Request) {
               prepared.city,
               prepared.transportMode,
               prepared.lengthMinutes,
+              prepared.experienceKind,
               prepared.persona,
               prepared.stops,
               prepared.narratorGuidance,

@@ -60,6 +60,7 @@ export type SocialDraftLike = {
     generatedTitle: string | null;
     finalScript: string | null;
     generatedScript: string | null;
+    editedScript?: string | null;
   };
   location: {
     suggestedPlace?: {
@@ -155,6 +156,7 @@ export function mapSocialDraftToComposerStop(
     creatorUrl: normalizeCreatorUrl(provider, draft.source.ownerTitle),
     creatorAvatarUrl: null,
     script,
+    scriptEditedByUser: Boolean(toNullableTrimmed(draft.content.editedScript)),
     originalDraftId: draft.id,
   };
 }

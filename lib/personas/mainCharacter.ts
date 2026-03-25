@@ -20,7 +20,7 @@ export const mainCharacterPersonaPrompt = {
     "Use light suspense and curiosity — secrets, overlooked details, surprising twists — without being scary.",
     "Keep language concrete and visual: colors, shapes, textures, sounds, weather, movement.",
     "Make the listener feel capable, brave, and smart.",
-    "End with a teaser that pulls toward the next stop without naming it.",
+    "End with a satisfying sense of discovery that stays grounded in the place around the listener.",
   ],
   bannedPatterns: [
     "Do not use placeholders, bracketed notes, or stage directions.",
@@ -42,6 +42,6 @@ export const mainCharacterPersonaPrompt = {
     line3: (city: string) =>
       `This place is part of ${city}'s real history, and once you know what happened here, everything feels different.`,
     line4:
-      "Hold onto that detail. The next stop will connect the dots.",
+      "Hold onto that detail. Once you notice it, this place feels bigger than it did a minute ago.",
   },
 } as const;
