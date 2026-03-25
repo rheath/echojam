@@ -8,7 +8,8 @@
     "start": "NODE_ENV=production /opt/alt/alt-nodejs22/root/bin/node server.js",
     "lint": "eslint",
     "presets:build": "node --experimental-strip-types scripts/buildPresetRoutes.ts --allow-unresolved",
-    "presets:check": "node --experimental-strip-types scripts/buildPresetRoutes.ts --check"
+    "presets:check": "node --experimental-strip-types scripts/buildPresetRoutes.ts --check",
+    "wander:repair-stop": "node --loader ./scripts/alias-loader.mjs --experimental-strip-types ./scripts/repairWalkDiscoveryStop.ts"
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "^2.0.2",

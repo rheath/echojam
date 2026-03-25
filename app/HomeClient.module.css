@@ -2241,25 +2241,33 @@
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.05);
-  padding: 8px;
+  padding: 12px;
 }
 
 .walkDiscoveryEyebrow {
-  font-size: 14px;
-  font-weight: normal; 
-  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .walkDiscoveryContent {
   display: flex;
-  gap: 14px;
-  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.walkDiscoveryTopRow {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
 }
 
 .walkDiscoveryImageWrap {
   position: relative;
-  width: 44px;
-  height: 44px;
+  width: 52px;
+  height: 52px;
   border-radius: 14px;
   overflow: hidden;
   flex-shrink: 0;
@@ -2274,44 +2282,66 @@
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .walkDiscoveryTitle {
-  font-size: 16px;
-  line-height: 1;
+  font-size: 18px;
+  line-height: 1.08;
   font-weight: 700;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
-.walkDiscoveryActions {
+.walkDiscoveryMetaRow {
   display: flex;
   gap: 10px;
-  margin-left: auto;
   align-items: center;
-  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.walkDiscoveryPriceBadge {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.walkDiscoveryDistance {
+  font-size: 12px;
+  opacity: 0.72;
 }
 
 .walkDiscoverySkipButton,
 .walkDiscoveryAddButton {
-  width: 56px;
-  height: 56px;
   border: 0;
   border-radius: 999px;
-  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .walkDiscoverySkipButton {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
   background: rgba(255, 255, 255, 0.18);
+  padding: 0;
 }
 
 .walkDiscoveryAddButton {
-  background: transparent;
+  width: 100%;
+  min-height: 52px;
+  background: #fff;
+  color: #111;
+  padding: 0 20px;
 }
 
 .walkDiscoverySkipButton:disabled,
@@ -2328,6 +2358,196 @@
 .walkDiscoveryLoading {
   font-size: 15px;
   opacity: 0.82;
+}
+
+.walkDiscoveryCheckoutOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(6, 7, 12, 0.54);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 18px;
+}
+
+.walkDiscoveryCheckoutSheet {
+  position: relative;
+  width: min(100%, 460px);
+  max-height: min(78vh, 680px);
+  overflow-y: auto;
+  border-radius: 28px;
+  background: linear-gradient(180deg, rgba(22, 27, 39, 0.98), rgba(10, 14, 22, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.35);
+  padding: 22px 22px calc(22px + env(safe-area-inset-bottom));
+  color: #fff;
+}
+
+.walkDiscoveryCheckoutClose {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.walkDiscoveryCheckoutCloseIcon {
+  filter: invert(1);
+}
+
+.walkDiscoveryCheckoutHeader {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.walkDiscoveryCheckoutImageWrap {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.walkDiscoveryCheckoutImage {
+  object-fit: cover;
+}
+
+.walkDiscoveryCheckoutHeaderBody {
+  min-width: 0;
+}
+
+.walkDiscoveryCheckoutEyebrow {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.walkDiscoveryCheckoutTitle {
+  margin-top: 4px;
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 700;
+}
+
+.walkDiscoveryCheckoutDistance {
+  margin-top: 6px;
+  font-size: 13px;
+  opacity: 0.68;
+}
+
+.walkDiscoveryCheckoutText {
+  margin: 16px 0 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.walkDiscoveryCheckoutPriceRow {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 15px;
+}
+
+.walkDiscoveryCheckoutSignedIn {
+  margin: 14px 0 0;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.walkDiscoveryCheckoutLabel {
+  display: block;
+  margin-top: 16px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.walkDiscoveryCheckoutInput {
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  padding: 12px 14px;
+  font-size: 15px;
+}
+
+.walkDiscoveryCheckoutMessage {
+  margin-top: 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.09);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.walkDiscoveryCheckoutActions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.walkDiscoveryCheckoutPrimary,
+.walkDiscoveryCheckoutSecondary {
+  width: 100%;
+  border: 0;
+  border-radius: 999px;
+  padding: 14px 18px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.walkDiscoveryCheckoutPrimary {
+  background: #fff;
+  color: #111;
+}
+
+.walkDiscoveryCheckoutSecondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.walkDiscoveryCheckoutPrimary:disabled,
+.walkDiscoveryCheckoutSecondary:disabled,
+.walkDiscoveryCheckoutInput:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.walkDiscoveryCheckoutPending {
+  padding: 18px 4px 8px;
+}
+
+.walkDiscoveryCheckoutPendingTitle {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.walkDiscoveryCheckoutPendingText {
+  margin: 10px 0 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.78);
 }
 
 .pillButton {
@@ -3463,6 +3683,54 @@
 
   .followAlongStoryImageWrap {
     min-height: 180px;
+  }
+
+  .walkDiscoveryContent {
+    gap: 10px;
+  }
+
+  .walkDiscoveryTopRow {
+    gap: 10px;
+  }
+
+  .walkDiscoveryImageWrap {
+    width: 48px;
+    height: 48px;
+  }
+
+  .walkDiscoveryTitle {
+    font-size: 16px;
+    line-height: 1.08;
+  }
+
+  .walkDiscoveryAddButton {
+    min-height: 50px;
+    font-size: 15px;
+  }
+
+  .walkDiscoveryCheckoutOverlay {
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .walkDiscoveryCheckoutSheet {
+    width: 100%;
+    max-height: 86vh;
+    border-radius: 24px;
+    padding: 18px 18px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .walkDiscoveryCheckoutHeader {
+    align-items: flex-start;
+  }
+
+  .walkDiscoveryCheckoutImageWrap {
+    width: 60px;
+    height: 60px;
+    border-radius: 18px;
+  }
+
+  .walkDiscoveryCheckoutTitle {
+    font-size: 20px;
   }
 }
 

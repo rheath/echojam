@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
+import { recordWalkDiscoveryPurchaseFromCheckoutSession } from "@/lib/server/walkDiscoveryPurchases";
 import { getStripeWebhookSecret, verifyStripeWebhookSignature, type StripeCheckoutCompletedEvent } from "@/lib/server/stripe";
 
 function isDuplicateKeyError(code: string | undefined) {
@@ -54,6 +55,15 @@ export async function POST(req: Request) {
           throw new Error(error.message);
         }
       }
+
+      await recordWalkDiscoveryPurchaseFromCheckoutSession(admin, {
+        id: session.id,
+        url: null,
+        paymentStatus: session.payment_status ?? null,
+        amountTotal: typeof session.amount_total === "number" ? session.amount_total : null,
+        metadata: session.metadata ?? null,
+        customerDetails: session.customer_details ?? null,
+      });
     }
 
     return NextResponse.json({ received: true });

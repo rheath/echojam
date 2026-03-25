@@ -25,6 +25,11 @@ export type WalkDiscoverySuggestion = {
   offeredAt: number;
   expiresAt: number;
   distanceMeters: number | null;
+  isIncluded: boolean;
+  isFree: boolean;
+  amountUsdCents: number | null;
+  priceLabel: string;
+  purchaseKey: string;
 };
 
 export type WalkDiscoveryCandidate = NearbyPlaceCandidate & {
@@ -80,7 +85,14 @@ export function toWalkDiscoveryCandidate(
 
 export function createWalkDiscoverySuggestion(
   candidate: WalkDiscoveryCandidate,
-  now = Date.now()
+  now = Date.now(),
+  pricing?: {
+    isIncluded: boolean;
+    isFree: boolean;
+    amountUsdCents: number | null;
+    priceLabel: string;
+    purchaseKey: string;
+  }
 ): WalkDiscoverySuggestion {
   return {
     status: "suggested",
@@ -95,6 +107,11 @@ export function createWalkDiscoverySuggestion(
     offeredAt: now,
     expiresAt: now + WALK_DISCOVERY_EXPIRY_MS,
     distanceMeters: candidate.distanceMeters ?? null,
+    isIncluded: pricing?.isIncluded ?? false,
+    isFree: pricing?.isFree ?? true,
+    amountUsdCents: pricing?.amountUsdCents ?? null,
+    priceLabel: pricing?.priceLabel ?? "Free",
+    purchaseKey: pricing?.purchaseKey ?? candidate.candidateKey,
   };
 }
 

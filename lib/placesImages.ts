@@ -24,6 +24,14 @@ export type PlaceImageResult = {
   googlePlaceId: string;
 };
 
+export type PlaceDetailsResult = {
+  title: string;
+  lat: number;
+  lng: number;
+  imageUrl: string;
+  googlePlaceId: string;
+};
+
 type GooglePlaceNew = {
   id?: string;
   name?: string;
@@ -255,6 +263,15 @@ async function resolveFromTextSearch(apiKey: string, input: ResolveInput) {
 }
 
 export async function resolvePlaceImage(input: ResolveInput): Promise<PlaceImageResult | null> {
+  const resolved = await resolvePlaceDetails(input);
+  if (!resolved) return null;
+  return {
+    imageUrl: resolved.imageUrl,
+    googlePlaceId: resolved.googlePlaceId,
+  };
+}
+
+export async function resolvePlaceDetails(input: ResolveInput): Promise<PlaceDetailsResult | null> {
   const apiKey = normalize(process.env.GOOGLE_PLACES_API_KEY);
   if (!apiKey) return null;
 
@@ -263,8 +280,15 @@ export async function resolvePlaceImage(input: ResolveInput): Promise<PlaceImage
 
   const googlePlaceId = placeIdFromNewPlace(selected.place);
   if (!isValidGooglePlaceId(googlePlaceId)) return null;
+  const title = normalize(selected.place.displayName?.text);
+  const lat = Number(selected.place.location?.latitude);
+  const lng = Number(selected.place.location?.longitude);
+  if (!title || !isFiniteCoord(lat, lng)) return null;
 
   return {
+    title,
+    lat,
+    lng,
     imageUrl: buildGooglePlacePhotoUrl(selected.photoName),
     googlePlaceId,
   };

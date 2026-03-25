@@ -96,6 +96,71 @@ function buildUniqueStopId(existingIds: Set<string>, base: string) {
   return `${normalizedBase}-${idx}`;
 }
 
+export type AcceptedNearbyStopSnapshot = {
+  title: string;
+  lat: number;
+  lng: number;
+  imageUrl: string;
+  googlePlaceId: string | null;
+};
+
+export function buildAcceptedNearbyStopSnapshot(
+  candidate: NearbyPlaceCandidate,
+  canonicalImageUrl?: string | null
+): AcceptedNearbyStopSnapshot {
+  return {
+    title: candidate.title,
+    lat: candidate.lat,
+    lng: candidate.lng,
+    imageUrl:
+      proxyGoogleImageUrl(canonicalImageUrl || candidate.image) ||
+      "/images/salem/placeholder.png",
+    googlePlaceId: toNullableTrimmed(candidate.googlePlaceId) ?? null,
+  };
+}
+
+export function buildAcceptedNearbyRouteStop(args: {
+  stopId: string;
+  snapshot: AcceptedNearbyStopSnapshot;
+  persona: Persona;
+  selectedScript: string | null;
+  selectedAudio: string | null;
+  canonicalAssets: {
+    scriptAdult: string | null;
+    scriptPreteen: string | null;
+    scriptGhost: string | null;
+    audioAdult: string | null;
+    audioPreteen: string | null;
+    audioGhost: string | null;
+  };
+  canonicalStopId: string;
+}): JourneyRouteStop {
+  return {
+    stopId: args.stopId,
+    title: args.snapshot.title,
+    lat: args.snapshot.lat,
+    lng: args.snapshot.lng,
+    imageUrl: args.snapshot.imageUrl,
+    scriptAdult:
+      args.persona === "adult" ? args.selectedScript : args.canonicalAssets.scriptAdult,
+    scriptPreteen:
+      args.persona === "preteen"
+        ? args.selectedScript
+        : args.canonicalAssets.scriptPreteen,
+    scriptGhost:
+      args.persona === "ghost" ? args.selectedScript : args.canonicalAssets.scriptGhost,
+    scriptCustom: args.persona === "custom" ? args.selectedScript : null,
+    audioAdult:
+      args.persona === "adult" ? args.selectedAudio : args.canonicalAssets.audioAdult,
+    audioPreteen:
+      args.persona === "preteen" ? args.selectedAudio : args.canonicalAssets.audioPreteen,
+    audioGhost:
+      args.persona === "ghost" ? args.selectedAudio : args.canonicalAssets.audioGhost,
+    audioCustom: args.persona === "custom" ? args.selectedAudio : null,
+    canonicalStopId: args.canonicalStopId,
+  };
+}
+
 function mapAssetsByCanonical(rows: CanonicalAssetRow[]) {
   const byCanonical = new Map<
     string,
@@ -468,6 +533,10 @@ export async function appendAcceptedNearbyStop(args: {
     image: args.candidate.image,
     googlePlaceId: args.candidate.googlePlaceId ?? undefined,
   });
+  const acceptedSnapshot = buildAcceptedNearbyStopSnapshot(
+    args.candidate,
+    canonical.image_url || null
+  );
 
   const { data: existingAssetsRows, error: existingAssetsErr } =
     args.persona !== "custom"
@@ -524,12 +593,11 @@ export async function appendAcceptedNearbyStop(args: {
         args.persona,
         {
           id: canonical.id,
-          title: canonical.title,
-          lat: canonical.lat,
-          lng: canonical.lng,
-          image:
-            proxyGoogleImageUrl(canonical.image_url || args.candidate.image) ||
-            "/images/salem/placeholder.png",
+          title: acceptedSnapshot.title,
+          lat: acceptedSnapshot.lat,
+          lng: acceptedSnapshot.lng,
+          image: acceptedSnapshot.imageUrl,
+          googlePlaceId: acceptedSnapshot.googlePlaceId ?? undefined,
         },
         insertedStopIndex,
         Math.max(1, context.currentStops.length + 1),
@@ -587,32 +655,15 @@ export async function appendAcceptedNearbyStop(args: {
     `nearby-${canonical.id}`
   );
 
-  const insertedStop: JourneyRouteStop = {
+  const insertedStop = buildAcceptedNearbyRouteStop({
     stopId: nearbyStopId,
-    title: canonical.title,
-    lat: canonical.lat,
-    lng: canonical.lng,
-    imageUrl:
-      proxyGoogleImageUrl(canonical.image_url || args.candidate.image) ||
-      "/images/salem/placeholder.png",
-    scriptAdult:
-      args.persona === "adult" ? selectedScript : canonicalAssets.scriptAdult,
-    scriptPreteen:
-      args.persona === "preteen"
-        ? selectedScript
-        : canonicalAssets.scriptPreteen,
-    scriptGhost:
-      args.persona === "ghost" ? selectedScript : canonicalAssets.scriptGhost,
-    scriptCustom: args.persona === "custom" ? selectedScript : null,
-    audioAdult:
-      args.persona === "adult" ? selectedAudio : canonicalAssets.audioAdult,
-    audioPreteen:
-      args.persona === "preteen" ? selectedAudio : canonicalAssets.audioPreteen,
-    audioGhost:
-      args.persona === "ghost" ? selectedAudio : canonicalAssets.audioGhost,
-    audioCustom: args.persona === "custom" ? selectedAudio : null,
+    snapshot: acceptedSnapshot,
+    persona: args.persona,
+    selectedScript,
+    selectedAudio,
+    canonicalAssets,
     canonicalStopId: canonical.id,
-  };
+  });
 
   const nextStops = [...context.currentStops];
   nextStops.splice(insertedStopIndex, 0, insertedStop);

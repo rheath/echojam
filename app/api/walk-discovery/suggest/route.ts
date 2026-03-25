@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   createWalkDiscoverySuggestion,
   type WalkDiscoveryPositionSample,
 } from "@/lib/walkDiscovery";
+import { countAcceptedWalkDiscoveryStops } from "@/lib/server/walkDiscoveryPurchases";
+import { resolveWalkDiscoverySuggestionPricing } from "@/lib/server/walkDiscoveryPricing";
 import { resolveWalkDiscoverySuggestion } from "@/lib/server/walkDiscoverySuggestions";
 
 type Body = {
@@ -61,8 +64,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ suggestion: null });
     }
 
+    const pricing = resolveWalkDiscoverySuggestionPricing({
+      acceptedStopCount: body.jamId?.trim()
+        ? await countAcceptedWalkDiscoveryStops(admin, body.jamId.trim())
+        : 0,
+      purchaseKey: randomUUID(),
+    });
+
     return NextResponse.json({
-      suggestion: createWalkDiscoverySuggestion(candidate),
+      suggestion: createWalkDiscoverySuggestion(candidate, Date.now(), pricing),
     });
   } catch (e) {
     return NextResponse.json(

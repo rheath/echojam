@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveWalkDiscoverySuggestion } from "@/lib/server/walkDiscoverySuggestions";
+import {
+  buildAcceptedNearbyRouteStop,
+  buildAcceptedNearbyStopSnapshot,
+} from "@/lib/server/walkDiscovery";
 
 const TEST_ADMIN = {} as SupabaseClient;
 
@@ -107,4 +111,59 @@ test("resolveWalkDiscoverySuggestion falls back to the wider radius when needed"
 
   assert.deepEqual(radii, [350, 700]);
   assert.equal(candidate?.id, "nearby-gplace-fallback-place");
+});
+
+test("buildAcceptedNearbyStopSnapshot preserves the accepted candidate title and coordinates", () => {
+  const snapshot = buildAcceptedNearbyStopSnapshot(
+    {
+      id: "nearby-gplace-salem-common",
+      title: "Salem Common",
+      lat: 42.523018,
+      lng: -70.8912,
+      image: "/images/candidate.png",
+      source: "google_places",
+      distanceMeters: 4,
+      googlePlaceId: "place-salem-common",
+    },
+    "/images/stale-canonical.png"
+  );
+
+  assert.equal(snapshot.title, "Salem Common");
+  assert.equal(snapshot.lat, 42.523018);
+  assert.equal(snapshot.lng, -70.8912);
+  assert.equal(snapshot.imageUrl, "/images/stale-canonical.png");
+  assert.equal(snapshot.googlePlaceId, "place-salem-common");
+});
+
+test("buildAcceptedNearbyRouteStop writes the accepted snapshot into the route stop", () => {
+  const stop = buildAcceptedNearbyRouteStop({
+    stopId: "nearby-canon-1",
+    snapshot: {
+      title: "Salem Common",
+      lat: 42.523018,
+      lng: -70.8912,
+      imageUrl: "/images/candidate.png",
+      googlePlaceId: "place-salem-common",
+    },
+    persona: "adult",
+    selectedScript: "Fresh Salem Common story",
+    selectedAudio: "https://example.com/salem-common.mp3",
+    canonicalAssets: {
+      scriptAdult: "Stale downtown story",
+      scriptPreteen: null,
+      scriptGhost: null,
+      audioAdult: "https://example.com/stale.mp3",
+      audioPreteen: null,
+      audioGhost: null,
+    },
+    canonicalStopId: "canon-salem-common",
+  });
+
+  assert.equal(stop.title, "Salem Common");
+  assert.equal(stop.lat, 42.523018);
+  assert.equal(stop.lng, -70.8912);
+  assert.equal(stop.imageUrl, "/images/candidate.png");
+  assert.equal(stop.scriptAdult, "Fresh Salem Common story");
+  assert.equal(stop.audioAdult, "https://example.com/salem-common.mp3");
+  assert.equal(stop.canonicalStopId, "canon-salem-common");
 });

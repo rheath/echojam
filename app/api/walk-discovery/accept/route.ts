@@ -2,13 +2,23 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import type { Persona } from "@/app/content/salemRoutes";
 import type { NearbyPlaceCandidate } from "@/lib/nearbyPlaceResolver";
+import { getRequestAuthUser } from "@/lib/server/requestAuth";
 import { appendAcceptedNearbyStop } from "@/lib/server/walkDiscovery";
+import {
+  doesWalkDiscoveryPurchaseMatchCandidate,
+  ensureWalkDiscoveryPurchaseRecorded,
+  markWalkDiscoveryPurchaseConsumed,
+  resolveWalkDiscoveryCheckoutRequirement,
+} from "@/lib/server/walkDiscoveryPurchases";
+import { buildWalkDiscoveryCandidateKey } from "@/lib/walkDiscovery";
 
 type Body = {
   jamId?: string | null;
   routeId?: string | null;
   persona?: Persona | null;
   candidate?: NearbyPlaceCandidate | null;
+  purchaseKey?: string | null;
+  stripeCheckoutSessionId?: string | null;
 };
 
 function getAdmin() {
@@ -48,6 +58,72 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "jamId or routeId is required." }, { status: 400 });
     }
 
+    const purchaseKey = (body.purchaseKey || "").trim();
+    const pricing = await resolveWalkDiscoveryCheckoutRequirement({
+      admin,
+      jamId,
+      purchaseKey: purchaseKey || "pending",
+    });
+    const requiresPurchase = !pricing.isIncluded && !pricing.isFree;
+
+    let purchase: Awaited<ReturnType<typeof ensureWalkDiscoveryPurchaseRecorded>> | null = null;
+    if (requiresPurchase) {
+      const user = await getRequestAuthUser(req);
+      if (!user) {
+        return NextResponse.json({ error: "Sign in before checkout." }, { status: 401 });
+      }
+      if (!purchaseKey) {
+        return NextResponse.json(
+          { error: "Purchase required before adding this stop." },
+          { status: 402 }
+        );
+      }
+
+      purchase = await ensureWalkDiscoveryPurchaseRecorded({
+        admin,
+        purchaseKey,
+        userId: user.id,
+        stripeCheckoutSessionId: body.stripeCheckoutSessionId,
+      });
+      if (!purchase) {
+        return NextResponse.json(
+          { error: "Complete checkout before adding this stop." },
+          { status: 402 }
+        );
+      }
+      if (
+        !doesWalkDiscoveryPurchaseMatchCandidate({
+          purchase,
+          jamId,
+          suggestion: {
+            candidateKey: buildWalkDiscoveryCandidateKey(body.candidate),
+          },
+        })
+      ) {
+        return NextResponse.json(
+          { error: "This payment does not match the selected Wander stop." },
+          { status: 400 }
+        );
+      }
+
+      if (
+        purchase.consumed_at &&
+        purchase.route_id &&
+        purchase.inserted_stop_id &&
+        typeof purchase.inserted_stop_index === "number"
+      ) {
+        return NextResponse.json({
+          jamId,
+          routeId: purchase.route_id,
+          routeRef: `custom:${purchase.route_id}`,
+          insertedStopId: purchase.inserted_stop_id,
+          insertedStopIndex: purchase.inserted_stop_index,
+          source: purchase.source || body.candidate.source,
+          distanceMeters: purchase.distance_meters,
+        });
+      }
+    }
+
     const accepted = await appendAcceptedNearbyStop({
       admin,
       jamId,
@@ -56,6 +132,18 @@ export async function POST(req: Request) {
       experienceKind: "walk_discovery",
       generateAssets: false,
     });
+
+    if (purchase) {
+      await markWalkDiscoveryPurchaseConsumed({
+        admin,
+        purchaseId: purchase.id,
+        routeId: accepted.routeId,
+        insertedStopId: accepted.insertedStopId,
+        insertedStopIndex: accepted.insertedStopIndex,
+        source: accepted.source,
+        distanceMeters: accepted.distanceMeters,
+      });
+    }
 
     return NextResponse.json({
       jamId,

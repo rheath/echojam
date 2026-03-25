@@ -112,6 +112,10 @@ test("createWalkDiscoverySuggestion and expiry respect time and distance", () =>
     }),
     false
   );
+  assert.equal(suggestion.isIncluded, false);
+  assert.equal(suggestion.isFree, true);
+  assert.equal(suggestion.priceLabel, "Free");
+  assert.equal(suggestion.purchaseKey, "place:museum-place");
   assert.equal(
     shouldExpireWalkDiscoverySuggestion({
       suggestion,

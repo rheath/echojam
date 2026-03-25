@@ -242,6 +242,16 @@ type WalkDiscoveryAcceptResponse = {
   distanceMeters: number | null;
 };
 
+type WalkDiscoveryCheckoutSessionResponse = {
+  url: string | null;
+  sessionId: string;
+};
+
+type PendingWalkDiscoveryCheckout = {
+  jamId: string;
+  suggestion: WalkDiscoverySuggestion;
+};
+
 type StartCustomMixOptions = {
   source?: "manual" | "instant";
   routeTitle?: string;
@@ -276,8 +286,11 @@ const PERSONA_KEYS: Array<Exclude<Persona, "custom">> = ["adult", "preteen", "gh
 const DEFAULT_STOP_IMAGE = "/images/salem/placeholder.png";
 const LANDING_VIDEO_MAX_PLAYS = 4;
 const WALK_DISCOVERY_STORAGE_PREFIX = "wandrful-walk-discovery";
+const WALK_DISCOVERY_CHECKOUT_STORAGE_PREFIX = `${WALK_DISCOVERY_STORAGE_PREFIX}:checkout`;
 const DISTANCE_TO_STOP_EPSILON_METERS = 5;
 const FOLLOW_ALONG_PROGRESS_EPSILON_METERS = 20;
+const MAGIC_LINK_SUCCESS_MESSAGE =
+  "Check your inbox for a private Wandrful sign-in link from Wandrful Support. It expires in 5 minutes.";
 const CITY_META: Record<CityOption, { label: string; center: { lat: number; lng: number } }> = {
   salem: { label: "Salem", center: { lat: 42.5195, lng: -70.8967 } },
   boston: { label: "Boston", center: { lat: 42.3601, lng: -71.0589 } },
@@ -643,6 +656,46 @@ function saveWalkDiscoveryCooldowns(jamId: string, cooldowns: Record<string, num
   }
 }
 
+function getWalkDiscoveryCheckoutStorageKey(jamId: string, purchaseKey: string) {
+  return `${WALK_DISCOVERY_CHECKOUT_STORAGE_PREFIX}:${jamId}:${purchaseKey}`;
+}
+
+function loadPendingWalkDiscoveryCheckout(jamId: string, purchaseKey: string) {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(
+      getWalkDiscoveryCheckoutStorageKey(jamId, purchaseKey)
+    );
+    if (!raw) return null;
+    return JSON.parse(raw) as PendingWalkDiscoveryCheckout;
+  } catch {
+    return null;
+  }
+}
+
+function savePendingWalkDiscoveryCheckout(payload: PendingWalkDiscoveryCheckout) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      getWalkDiscoveryCheckoutStorageKey(payload.jamId, payload.suggestion.purchaseKey),
+      JSON.stringify(payload)
+    );
+  } catch {
+    // Ignore localStorage failures and continue to hosted checkout.
+  }
+}
+
+function clearPendingWalkDiscoveryCheckout(jamId: string, purchaseKey: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(
+      getWalkDiscoveryCheckoutStorageKey(jamId, purchaseKey)
+    );
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
 function hasMeaningfulNumberChange(
   previous: number | null,
   next: number | null,
@@ -708,8 +761,14 @@ export default function HomeClient() {
   const [isResolvingNearbyGeo, setIsResolvingNearbyGeo] = useState(false);
   const [isStartingWalkDiscovery, setIsStartingWalkDiscovery] = useState(false);
   const [walkDiscoverySuggestion, setWalkDiscoverySuggestion] = useState<WalkDiscoverySuggestion | null>(null);
+  const [walkDiscoveryCheckoutSuggestion, setWalkDiscoveryCheckoutSuggestion] = useState<WalkDiscoverySuggestion | null>(null);
   const [isResolvingWalkDiscoverySuggestion, setIsResolvingWalkDiscoverySuggestion] = useState(false);
   const [isAcceptingWalkDiscoverySuggestion, setIsAcceptingWalkDiscoverySuggestion] = useState(false);
+  const [isStartingWalkDiscoveryCheckout, setIsStartingWalkDiscoveryCheckout] = useState(false);
+  const [isCompletingWalkDiscoveryCheckout, setIsCompletingWalkDiscoveryCheckout] = useState(false);
+  const [walkDiscoveryMagicLinkEmail, setWalkDiscoveryMagicLinkEmail] = useState("");
+  const [walkDiscoveryMagicLinkMessage, setWalkDiscoveryMagicLinkMessage] = useState<string | null>(null);
+  const [isSendingWalkDiscoveryMagicLink, setIsSendingWalkDiscoveryMagicLink] = useState(false);
   const [isGeneratingWalkDiscoveryAcceptedStopAssets, setIsGeneratingWalkDiscoveryAcceptedStopAssets] = useState(false);
   const [returnToWalkOnClose, setReturnToWalkOnClose] = useState(false);
   const [isEditingStopsFromWalk, setIsEditingStopsFromWalk] = useState(false);
@@ -743,8 +802,10 @@ export default function HomeClient() {
 
   const [err, setErr] = useState<string | null>(null);
   const [jam, setJam] = useState<JamRow | null>(null);
+  const [authUserEmail, setAuthUserEmail] = useState<string | null>(null);
   const countedJamOpenRef = useRef<Set<string>>(new Set());
   const attemptedPresetAutoStartRef = useRef<string | null>(null);
+  const walkDiscoveryCheckoutCompletionRef = useRef<string | null>(null);
 
   const [step, setStep] = useState<FlowStep>("landing");
   const [documentVisibility, setDocumentVisibility] = useState<JamVisibilityState>(() =>
@@ -759,8 +820,33 @@ export default function HomeClient() {
   const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
   const [isNearbyStoryEnabled, setIsNearbyStoryEnabled] = useState(DEFAULT_NEARBY_STORY_ENABLED);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncAuthUser() {
+      const { data } = await supabase.auth.getUser();
+      if (cancelled) return;
+      setAuthUserEmail(data.user?.email?.trim() || null);
+    }
+
+    void syncAuthUser();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      void syncAuthUser();
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   const jamIdFromUrl = searchParams.get("jam");
   const startPresetRouteFromUrl = searchParams.get("startPresetRoute");
+  const walkDiscoveryCheckoutStatus = (searchParams.get("walkDiscoveryCheckout") || "").trim();
+  const walkDiscoveryCheckoutPurchaseKey = (searchParams.get("walkDiscoveryPurchaseKey") || "").trim();
+  const walkDiscoveryCheckoutSessionId = (searchParams.get("session_id") || "").trim();
   const debugStepFromUrl = searchParams.get("debugStep");
   const debugPerfEnabled = searchParams.get("debugPerf") === "1";
   const showPresetWalkRefresh = TRUTHY_FLAG_VALUES.includes(
@@ -1024,9 +1110,10 @@ export default function HomeClient() {
       : null;
 
   useEffect(() => {
-    perfTrackerRef.current.setEnabled(debugPerfEnabled);
+    const tracker = perfTrackerRef.current;
+    tracker.setEnabled(debugPerfEnabled);
     return () => {
-      perfTrackerRef.current.flush("home-client-unmount");
+      tracker.flush("home-client-unmount");
     };
   }, [debugPerfEnabled]);
 
@@ -1266,8 +1353,14 @@ export default function HomeClient() {
     setIsScriptModalClosing(false);
     setIsStartingWalkDiscovery(false);
     setWalkDiscoverySuggestion(null);
+    setWalkDiscoveryCheckoutSuggestion(null);
     setIsResolvingWalkDiscoverySuggestion(false);
     setIsAcceptingWalkDiscoverySuggestion(false);
+    setIsStartingWalkDiscoveryCheckout(false);
+    setIsCompletingWalkDiscoveryCheckout(false);
+    setWalkDiscoveryMagicLinkEmail("");
+    setWalkDiscoveryMagicLinkMessage(null);
+    setIsSendingWalkDiscoveryMagicLink(false);
     setReturnToWalkOnClose(false);
     setNarratorFlowSource(null);
     setSelectedRouteId(null);
@@ -1947,6 +2040,7 @@ async function startStopNarration() {
     isGeneratingWalkDiscoveryAcceptedStopAssets,
     myPos,
     route,
+    commitGeoPosition,
   ]);
 
   async function startWalkDiscoveryExperience() {
@@ -2010,6 +2104,8 @@ async function startStopNarration() {
   async function rejectWalkDiscoverySuggestion() {
     if (!walkDiscoverySuggestion) return;
     persistWalkDiscoveryCooldown(walkDiscoverySuggestion.candidateKey);
+    setWalkDiscoveryCheckoutSuggestion(null);
+    setWalkDiscoveryMagicLinkMessage(null);
     setWalkDiscoverySuggestion((current) =>
       current ? { ...current, status: "rejected" } : current
     );
@@ -2019,19 +2115,26 @@ async function startStopNarration() {
     }, 0);
   }
 
-  async function acceptWalkDiscoverySuggestion() {
-    if (!jam?.id || !walkDiscoverySuggestion || isAcceptingWalkDiscoverySuggestion) return;
+  const finalizeWalkDiscoverySuggestionAcceptance = useCallback(async (
+    acceptedSuggestion: WalkDiscoverySuggestion,
+    options?: {
+      purchaseKey?: string | null;
+      stripeCheckoutSessionId?: string | null;
+    }
+  ) => {
+    if (!jam?.id || isAcceptingWalkDiscoverySuggestion) return false;
 
-    const acceptedSuggestion = walkDiscoverySuggestion;
     setIsAcceptingWalkDiscoverySuggestion(true);
     setErr(null);
+    setWalkDiscoveryMagicLinkMessage(null);
 
     try {
+      const headers = await withSupabaseAuthHeaders({ "Content-Type": "application/json" });
       const body = await fetchJsonWithTimeout<WalkDiscoveryAcceptResponse>(
         "/api/walk-discovery/accept",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             jamId: jam.id,
             persona,
@@ -2045,6 +2148,8 @@ async function startStopNarration() {
               distanceMeters: acceptedSuggestion.distanceMeters,
               googlePlaceId: acceptedSuggestion.googlePlaceId ?? undefined,
             },
+            purchaseKey: options?.purchaseKey ?? null,
+            stripeCheckoutSessionId: options?.stripeCheckoutSessionId ?? null,
           }),
         },
         START_JOB_TIMEOUT_MS
@@ -2053,6 +2158,7 @@ async function startStopNarration() {
       persistWalkDiscoveryCooldown(acceptedSuggestion.candidateKey);
       invalidateWalkDiscoverySuggestionRequests();
       setWalkDiscoverySuggestion(null);
+      setWalkDiscoveryCheckoutSuggestion(null);
       await loadJamById(body.jamId);
       const nextRoute = await loadResolvedRoute(body.routeRef);
       await generateWalkDiscoveryAcceptedStopAssets(
@@ -2061,11 +2167,114 @@ async function startStopNarration() {
         body.insertedStopId,
         nextRoute
       );
+      if (options?.purchaseKey) {
+        clearPendingWalkDiscoveryCheckout(jam.id, options.purchaseKey);
+      }
+      return true;
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to accept nearby stop.");
+      return false;
     } finally {
       setIsAcceptingWalkDiscoverySuggestion(false);
     }
+  }, [
+    generateWalkDiscoveryAcceptedStopAssets,
+    invalidateWalkDiscoverySuggestionRequests,
+    isAcceptingWalkDiscoverySuggestion,
+    jam?.id,
+    loadJamById,
+    loadResolvedRoute,
+    persona,
+    persistWalkDiscoveryCooldown,
+  ]);
+
+  async function sendWalkDiscoveryMagicLink() {
+    if (!jam?.id || authUserEmail || isSendingWalkDiscoveryMagicLink) return;
+    const email = walkDiscoveryMagicLinkEmail.trim().toLowerCase();
+    if (!email) {
+      setErr("Enter your email address.");
+      return;
+    }
+
+    setIsSendingWalkDiscoveryMagicLink(true);
+    setErr(null);
+    setWalkDiscoveryMagicLinkMessage(null);
+
+    try {
+      const response = await fetch("/api/auth/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          next: `/?jam=${encodeURIComponent(jam.id)}`,
+        }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(body.error || "Failed to send magic link.");
+      }
+      setWalkDiscoveryMagicLinkMessage(MAGIC_LINK_SUCCESS_MESSAGE);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to send magic link.");
+    } finally {
+      setIsSendingWalkDiscoveryMagicLink(false);
+    }
+  }
+
+  async function startWalkDiscoveryCheckout(suggestion: WalkDiscoverySuggestion) {
+    if (!jam?.id || isStartingWalkDiscoveryCheckout) return;
+
+    setIsStartingWalkDiscoveryCheckout(true);
+    setErr(null);
+    setWalkDiscoveryMagicLinkMessage(null);
+
+    try {
+      const headers = await withSupabaseAuthHeaders({ "Content-Type": "application/json" });
+      const body = await fetchJsonWithTimeout<WalkDiscoveryCheckoutSessionResponse>(
+        "/api/walk-discovery/checkout",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            jamId: jam.id,
+            suggestion: {
+              candidateKey: suggestion.candidateKey,
+              title: suggestion.title,
+              purchaseKey: suggestion.purchaseKey,
+            },
+          }),
+        },
+        START_JOB_TIMEOUT_MS
+      );
+      if (!body.url) {
+        throw new Error("Failed to start checkout.");
+      }
+
+      savePendingWalkDiscoveryCheckout({
+        jamId: jam.id,
+        suggestion,
+      });
+      window.location.href = body.url;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to start checkout.");
+      setIsStartingWalkDiscoveryCheckout(false);
+    }
+  }
+
+  async function acceptWalkDiscoverySuggestion() {
+    if (!walkDiscoverySuggestion) return;
+
+    if (!walkDiscoverySuggestion.isIncluded && !walkDiscoverySuggestion.isFree) {
+      setErr(null);
+      setWalkDiscoveryMagicLinkMessage(null);
+      setWalkDiscoveryCheckoutSuggestion(walkDiscoverySuggestion);
+      if (!authUserEmail) {
+        setWalkDiscoveryMagicLinkEmail((current) => current || "");
+      }
+      return;
+    }
+
+    await finalizeWalkDiscoverySuggestionAcceptance(walkDiscoverySuggestion);
   }
 
   async function handleNearbyStory() {
@@ -2937,12 +3146,14 @@ async function startStopNarration() {
       walkDiscoveryCooldownsRef.current = {};
       walkDiscoveryRecentPositionsRef.current = [];
       walkDiscoveryLastFetchPosRef.current = null;
+      walkDiscoveryCheckoutCompletionRef.current = null;
       setWalkDiscoverySuggestion(null);
       return;
     }
     walkDiscoveryCooldownsRef.current = loadWalkDiscoveryCooldowns(jam.id);
     walkDiscoveryRecentPositionsRef.current = [];
     walkDiscoveryLastFetchPosRef.current = null;
+    walkDiscoveryCheckoutCompletionRef.current = null;
     setWalkDiscoverySuggestion(null);
   }, [jam?.id]);
 
@@ -2959,6 +3170,7 @@ async function startStopNarration() {
   useEffect(() => {
     if (step === "walk" && isWalkDiscoveryRoute) return;
     setWalkDiscoverySuggestion(null);
+    setWalkDiscoveryCheckoutSuggestion(null);
   }, [step, isWalkDiscoveryRoute]);
 
   useEffect(() => {
@@ -2969,6 +3181,75 @@ async function startStopNarration() {
     if (!acceptedCandidateKeys.has(walkDiscoverySuggestion.candidateKey)) return;
     setWalkDiscoverySuggestion(null);
   }, [walkDiscoverySuggestion, route]);
+
+  useEffect(() => {
+    if (!jamIdFromUrl || !walkDiscoveryCheckoutStatus || !walkDiscoveryCheckoutPurchaseKey) return;
+
+    if (walkDiscoveryCheckoutStatus === "cancelled") {
+      const pending = loadPendingWalkDiscoveryCheckout(jamIdFromUrl, walkDiscoveryCheckoutPurchaseKey);
+      if (pending?.suggestion) {
+        setWalkDiscoverySuggestion(pending.suggestion);
+      }
+      clearPendingWalkDiscoveryCheckout(jamIdFromUrl, walkDiscoveryCheckoutPurchaseKey);
+      setWalkDiscoveryCheckoutSuggestion(null);
+      setWalkDiscoveryMagicLinkMessage(null);
+      setErr("Checkout was cancelled. This stop is still available.");
+      router.replace(`/?jam=${jamIdFromUrl}`);
+      return;
+    }
+
+    if (walkDiscoveryCheckoutStatus !== "success" || !walkDiscoveryCheckoutSessionId) return;
+    if (!jam?.id || jam.id !== jamIdFromUrl) return;
+
+    const completionKey = `${walkDiscoveryCheckoutStatus}:${walkDiscoveryCheckoutPurchaseKey}:${walkDiscoveryCheckoutSessionId}`;
+    if (walkDiscoveryCheckoutCompletionRef.current === completionKey) return;
+    walkDiscoveryCheckoutCompletionRef.current = completionKey;
+
+    let cancelled = false;
+    setIsCompletingWalkDiscoveryCheckout(true);
+    setErr(null);
+
+    void (async () => {
+      const pending = loadPendingWalkDiscoveryCheckout(
+        jamIdFromUrl,
+        walkDiscoveryCheckoutPurchaseKey
+      );
+      if (!pending?.suggestion) {
+        if (!cancelled) {
+          setErr("Payment received. Refresh the nearby stop to continue.");
+          setIsCompletingWalkDiscoveryCheckout(false);
+          router.replace(`/?jam=${jamIdFromUrl}`);
+        }
+        return;
+      }
+
+      const accepted = await finalizeWalkDiscoverySuggestionAcceptance(
+        pending.suggestion,
+        {
+          purchaseKey: walkDiscoveryCheckoutPurchaseKey,
+          stripeCheckoutSessionId: walkDiscoveryCheckoutSessionId,
+        }
+      );
+      if (cancelled) return;
+      if (accepted) {
+        clearPendingWalkDiscoveryCheckout(jamIdFromUrl, walkDiscoveryCheckoutPurchaseKey);
+      }
+      setIsCompletingWalkDiscoveryCheckout(false);
+      router.replace(`/?jam=${jamIdFromUrl}`);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    finalizeWalkDiscoverySuggestionAcceptance,
+    jam?.id,
+    jamIdFromUrl,
+    router,
+    walkDiscoveryCheckoutPurchaseKey,
+    walkDiscoveryCheckoutSessionId,
+    walkDiscoveryCheckoutStatus,
+  ]);
 
 // ---------- watchPosition ----------
   useEffect(() => {
@@ -5300,27 +5581,41 @@ You choose where to go — each stop shapes what unfolds next.                  
                   <div className={styles.walkDiscoveryCard}>
                     {walkDiscoverySuggestion ? (
                       <div className={styles.walkDiscoveryContent}>
-                        <div className={styles.walkDiscoveryImageWrap}>
-                          <WalkStepImage
-                            src={toSafeStopImage(walkDiscoverySuggestion.image)}
-                            alt={walkDiscoverySuggestion.title}
-                            fill
-                            className={styles.walkDiscoveryImage}
-                            unoptimized
-                          />
-                        </div>
-                        <div className={styles.walkDiscoveryBody}>
-                          <div className={styles.walkDiscoveryEyebrow}>Suggested Stop</div>
-                          <div className={styles.walkDiscoveryTitle}>
-                            {walkDiscoverySuggestion.title}
+                        <div className={styles.walkDiscoveryTopRow}>
+                          <div className={styles.walkDiscoveryImageWrap}>
+                            <WalkStepImage
+                              src={toSafeStopImage(walkDiscoverySuggestion.image)}
+                              alt={walkDiscoverySuggestion.title}
+                              fill
+                              className={styles.walkDiscoveryImage}
+                              unoptimized
+                            />
                           </div>
-                        </div>
-                        <div className={styles.walkDiscoveryActions}>
+                          <div className={styles.walkDiscoveryBody}>
+                            <div className={styles.walkDiscoveryEyebrow}>Suggested Stop</div>
+                            <div className={styles.walkDiscoveryTitle}>
+                              {walkDiscoverySuggestion.title}
+                            </div>
+                            <div className={styles.walkDiscoveryMetaRow}>
+                              <div className={styles.walkDiscoveryPriceBadge}>
+                                {walkDiscoverySuggestion.isIncluded
+                                  ? "Included"
+                                  : walkDiscoverySuggestion.isFree
+                                    ? "Free"
+                                    : `Add for ${walkDiscoverySuggestion.priceLabel}`}
+                              </div>
+                              {typeof walkDiscoverySuggestion.distanceMeters === "number" ? (
+                                <div className={styles.walkDiscoveryDistance}>
+                                  {formatDistance(walkDiscoverySuggestion.distanceMeters)} away
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
                           <button
                             type="button"
                             className={styles.walkDiscoverySkipButton}
                             onClick={() => void rejectWalkDiscoverySuggestion()}
-                            disabled={isAcceptingWalkDiscoverySuggestion}
+                            disabled={isAcceptingWalkDiscoverySuggestion || isCompletingWalkDiscoveryCheckout}
                             aria-label="Skip suggested stop"
                           >
                             <Image
@@ -5332,23 +5627,30 @@ You choose where to go — each stop shapes what unfolds next.                  
                               aria-hidden="true"
                             />
                           </button>
-                          <button
-                            type="button"
-                            className={styles.walkDiscoveryAddButton}
-                            onClick={() => void acceptWalkDiscoverySuggestion()}
-                            disabled={isAcceptingWalkDiscoverySuggestion}
-                            aria-label={isAcceptingWalkDiscoverySuggestion ? "Adding suggested stop" : "Add suggested stop"}
-                          >
-                            <Image
-                              src="/icons/plus-circle.svg"
-                              alt=""
-                              width={28}
-                              height={28}
-                              className={styles.walkDiscoveryAddIcon}
-                              aria-hidden="true"
-                            />
-                          </button>
                         </div>
+                        <button
+                          type="button"
+                          className={styles.walkDiscoveryAddButton}
+                          onClick={() => void acceptWalkDiscoverySuggestion()}
+                          disabled={isAcceptingWalkDiscoverySuggestion || isCompletingWalkDiscoveryCheckout}
+                          aria-label={
+                            isAcceptingWalkDiscoverySuggestion || isCompletingWalkDiscoveryCheckout
+                              ? "Adding suggested stop"
+                              : walkDiscoverySuggestion.isIncluded
+                                ? "Add included suggested stop"
+                                : walkDiscoverySuggestion.isFree
+                                  ? "Add free suggested stop"
+                                  : `Add suggested stop for ${walkDiscoverySuggestion.priceLabel}`
+                          }
+                        >
+                          {isAcceptingWalkDiscoverySuggestion || isCompletingWalkDiscoveryCheckout
+                            ? "Adding..."
+                            : walkDiscoverySuggestion.isIncluded
+                              ? "Add"
+                              : walkDiscoverySuggestion.isFree
+                                ? "Add for free"
+                                : `Add for ${walkDiscoverySuggestion.priceLabel}`}
+                        </button>
                       </div>
                     ) : (
                       <div className={styles.walkDiscoveryLoading}>
@@ -5436,6 +5738,148 @@ You choose where to go — each stop shapes what unfolds next.                  
               ) : null
             }
           />
+            {(walkDiscoveryCheckoutSuggestion || isStartingWalkDiscoveryCheckout || isCompletingWalkDiscoveryCheckout) && (
+              <div
+                className={styles.walkDiscoveryCheckoutOverlay}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Add a Wander stop"
+                onClick={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (isStartingWalkDiscoveryCheckout || isCompletingWalkDiscoveryCheckout) return;
+                  setWalkDiscoveryCheckoutSuggestion(null);
+                  setWalkDiscoveryMagicLinkMessage(null);
+                }}
+              >
+                <div className={styles.walkDiscoveryCheckoutSheet}>
+                  {!isStartingWalkDiscoveryCheckout && !isCompletingWalkDiscoveryCheckout && walkDiscoveryCheckoutSuggestion ? (
+                    <>
+                      <button
+                        type="button"
+                        className={styles.walkDiscoveryCheckoutClose}
+                        onClick={() => {
+                          setWalkDiscoveryCheckoutSuggestion(null);
+                          setWalkDiscoveryMagicLinkMessage(null);
+                        }}
+                        aria-label="Close paid stop checkout"
+                      >
+                        <Image
+                          src="/icons/x.svg"
+                          alt=""
+                          width={16}
+                          height={16}
+                          className={styles.walkDiscoveryCheckoutCloseIcon}
+                          aria-hidden="true"
+                        />
+                      </button>
+                      <div className={styles.walkDiscoveryCheckoutHeader}>
+                        <div className={styles.walkDiscoveryCheckoutImageWrap}>
+                          <WalkStepImage
+                            src={toSafeStopImage(walkDiscoveryCheckoutSuggestion.image)}
+                            alt={walkDiscoveryCheckoutSuggestion.title}
+                            fill
+                            className={styles.walkDiscoveryCheckoutImage}
+                            unoptimized
+                          />
+                        </div>
+                        <div className={styles.walkDiscoveryCheckoutHeaderBody}>
+                          <div className={styles.walkDiscoveryCheckoutEyebrow}>
+                            {authUserEmail ? "Extra Wander stop" : "Sign in to continue"}
+                          </div>
+                          <div className={styles.walkDiscoveryCheckoutTitle}>
+                            {walkDiscoveryCheckoutSuggestion.title}
+                          </div>
+                          {typeof walkDiscoveryCheckoutSuggestion.distanceMeters === "number" ? (
+                            <div className={styles.walkDiscoveryCheckoutDistance}>
+                              {formatDistance(walkDiscoveryCheckoutSuggestion.distanceMeters)} away
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                      <p className={styles.walkDiscoveryCheckoutText}>
+                        This adds one more story stop to your Wander.
+                      </p>
+                      <div className={styles.walkDiscoveryCheckoutPriceRow}>
+                        <span>1 extra stop</span>
+                        <strong>{walkDiscoveryCheckoutSuggestion.priceLabel}</strong>
+                      </div>
+                      {authUserEmail ? (
+                        <p className={styles.walkDiscoveryCheckoutSignedIn}>
+                          Signed in as {authUserEmail}.
+                        </p>
+                      ) : (
+                        <>
+                          <p className={styles.walkDiscoveryCheckoutText}>
+                            Sign in first so we can attach this paid stop to your account.
+                          </p>
+                          <label className={styles.walkDiscoveryCheckoutLabel} htmlFor="walk-discovery-email">
+                            Email address
+                            <input
+                              id="walk-discovery-email"
+                              type="email"
+                              value={walkDiscoveryMagicLinkEmail}
+                              onChange={(event) => setWalkDiscoveryMagicLinkEmail(event.target.value)}
+                              placeholder="you@example.com"
+                              autoComplete="email"
+                              disabled={isSendingWalkDiscoveryMagicLink}
+                              className={styles.walkDiscoveryCheckoutInput}
+                            />
+                          </label>
+                        </>
+                      )}
+                      {walkDiscoveryMagicLinkMessage ? (
+                        <div className={styles.walkDiscoveryCheckoutMessage}>
+                          {walkDiscoveryMagicLinkMessage}
+                        </div>
+                      ) : null}
+                      <div className={styles.walkDiscoveryCheckoutActions}>
+                        {authUserEmail ? (
+                          <button
+                            type="button"
+                            className={styles.walkDiscoveryCheckoutPrimary}
+                            onClick={() => void startWalkDiscoveryCheckout(walkDiscoveryCheckoutSuggestion)}
+                            disabled={isStartingWalkDiscoveryCheckout}
+                          >
+                            {isStartingWalkDiscoveryCheckout ? "Opening secure checkout..." : "Continue to secure checkout"}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className={styles.walkDiscoveryCheckoutPrimary}
+                            onClick={() => void sendWalkDiscoveryMagicLink()}
+                            disabled={isSendingWalkDiscoveryMagicLink}
+                          >
+                            {isSendingWalkDiscoveryMagicLink ? "Sending sign-in link..." : "Email me a sign-in link"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className={styles.walkDiscoveryCheckoutSecondary}
+                          onClick={() => {
+                            setWalkDiscoveryCheckoutSuggestion(null);
+                            setWalkDiscoveryMagicLinkMessage(null);
+                          }}
+                          disabled={isSendingWalkDiscoveryMagicLink || isStartingWalkDiscoveryCheckout}
+                        >
+                          Not now
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className={styles.walkDiscoveryCheckoutPending}>
+                      <p className={styles.walkDiscoveryCheckoutPendingTitle}>
+                        {isCompletingWalkDiscoveryCheckout ? "Adding paid stop" : "Opening secure checkout"}
+                      </p>
+                      <p className={styles.walkDiscoveryCheckoutPendingText}>
+                        {isCompletingWalkDiscoveryCheckout
+                          ? "Finalizing your payment and adding this stop to Wander."
+                          : "We&apos;re taking you to our hosted payment screen now."}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             {(isScriptModalOpen || isScriptModalClosing) && currentStop && (
               <div
                 className={`${styles.scriptModalOverlay} ${isScriptModalClosing ? styles.scriptModalOverlayClosing : ""}`}

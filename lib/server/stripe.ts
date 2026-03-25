@@ -15,9 +15,21 @@ export type StripeCheckoutCompletedEvent = {
         email?: string | null;
       } | null;
       payment_status?: string | null;
+      amount_total?: number | null;
       metadata?: Record<string, string | undefined> | null;
     };
   };
+};
+
+export type StripeCheckoutSessionRecord = {
+  id: string;
+  url: string | null;
+  paymentStatus: string | null;
+  amountTotal: number | null;
+  metadata: Record<string, string | undefined> | null;
+  customerDetails: {
+    email?: string | null;
+  } | null;
 };
 
 type CreateCheckoutParams = {
@@ -98,6 +110,38 @@ export async function createStripeCheckoutSession(params: CreateCheckoutParams):
   return {
     id: payload.id,
     url: payload.url ?? null,
+  };
+}
+
+export async function retrieveStripeCheckoutSession(sessionId: string): Promise<StripeCheckoutSessionRecord> {
+  const secret = getStripeSecretKey();
+  const response = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
+    headers: {
+      Authorization: `Bearer ${secret}`,
+    },
+    cache: "no-store",
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    id?: string;
+    url?: string | null;
+    payment_status?: string | null;
+    amount_total?: number | null;
+    metadata?: Record<string, string | undefined> | null;
+    customer_details?: { email?: string | null } | null;
+    error?: { message?: string };
+  };
+  if (!response.ok || !payload.id) {
+    throw new Error(payload.error?.message || "Failed to load Stripe Checkout session.");
+  }
+
+  return {
+    id: payload.id,
+    url: payload.url ?? null,
+    paymentStatus: payload.payment_status ?? null,
+    amountTotal: typeof payload.amount_total === "number" ? payload.amount_total : null,
+    metadata: payload.metadata ?? null,
+    customerDetails: payload.customer_details ?? null,
   };
 }
 

@@ -248,6 +248,129 @@ type NearbyStopInput = StopInput & {
   googlePlaceId?: string | null;
 };
 
+export type NearbyCanonicalDecision =
+  | {
+      kind: "reuse-place-id";
+      updates: NearbyPlaceMatchUpdates;
+    }
+  | {
+      kind: "reuse-nearest";
+      updates: NearbyNearestUpdates;
+    }
+  | {
+      kind: "create-new";
+      updates: Record<string, never>;
+    };
+
+type NearbyPlaceMatchUpdates = Partial<
+  Pick<CanonicalStopRow, "title" | "lat" | "lng" | "image_url" | "image_source" | "google_place_id">
+>;
+type NearbyNearestUpdates = Partial<
+  Pick<CanonicalStopRow, "image_url" | "image_source" | "google_place_id">
+>;
+
+const NEARBY_TITLE_STOPWORDS = new Set(["a", "an", "and", "at", "in", "of", "on", "the"]);
+
+function normalizeNearbyTitleTokens(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((token) => token && !NEARBY_TITLE_STOPWORDS.has(token));
+}
+
+function titlesMatchClosely(a: string, b: string) {
+  const aTokens = normalizeNearbyTitleTokens(a);
+  const bTokens = normalizeNearbyTitleTokens(b);
+  if (aTokens.length === 0 || bTokens.length === 0) return false;
+
+  const aJoined = aTokens.join(" ");
+  const bJoined = bTokens.join(" ");
+  if (aJoined === bJoined) return true;
+
+  const aSet = new Set(aTokens);
+  const bSet = new Set(bTokens);
+  const smaller = aSet.size <= bSet.size ? aSet : bSet;
+  const larger = aSet.size <= bSet.size ? bSet : aSet;
+
+  let overlap = 0;
+  for (const token of smaller) {
+    if (larger.has(token)) overlap += 1;
+  }
+
+  if (smaller.size >= 2 && overlap === smaller.size) return true;
+  return overlap >= 2 && overlap / Math.max(aSet.size, bSet.size) >= 0.75;
+}
+
+function buildNearbyPlaceMatchUpdates(
+  row: CanonicalStopRow,
+  stop: NearbyStopInput,
+  googlePlaceId: string,
+  stopImage: string
+) {
+  const updates: NearbyPlaceMatchUpdates = {};
+  if (row.title !== stop.title) updates.title = stop.title;
+  if (row.lat !== stop.lat) updates.lat = stop.lat;
+  if (row.lng !== stop.lng) updates.lng = stop.lng;
+  if (row.google_place_id !== googlePlaceId) updates.google_place_id = googlePlaceId;
+  if (!isStrongImageSource(row.image_source) && stopImage && !isPlaceholderImage(stopImage)) {
+    updates.image_url = stopImage;
+    updates.image_source = "link_seed";
+  }
+  return updates;
+}
+
+function buildNearbyNearestUpdates(
+  row: CanonicalStopRow,
+  googlePlaceId: string | null,
+  stopImage: string
+) {
+  const updates: NearbyNearestUpdates = {};
+  if (googlePlaceId && !row.google_place_id) {
+    updates.google_place_id = googlePlaceId;
+  }
+  if (!isStrongImageSource(row.image_source) && stopImage && !isPlaceholderImage(stopImage)) {
+    updates.image_url = stopImage;
+    updates.image_source = "link_seed";
+  }
+  return updates;
+}
+
+export function decideNearbyCanonicalReuse(args: {
+  stop: NearbyStopInput;
+  placeMatch: CanonicalStopRow | null;
+  nearest: CanonicalStopRow | null;
+}): NearbyCanonicalDecision {
+  const rawGooglePlaceId = (args.stop.googlePlaceId || "").trim() || null;
+  const googlePlaceId = isValidGooglePlaceId(rawGooglePlaceId) ? rawGooglePlaceId : null;
+  const stopImage = (args.stop.image || "").trim();
+
+  if (googlePlaceId) {
+    if (!args.placeMatch) {
+      return { kind: "create-new", updates: {} };
+    }
+    return {
+      kind: "reuse-place-id",
+      updates: buildNearbyPlaceMatchUpdates(args.placeMatch, args.stop, googlePlaceId, stopImage),
+    };
+  }
+
+  if (
+    args.nearest &&
+    !args.nearest.google_place_id &&
+    titlesMatchClosely(args.nearest.title, args.stop.title)
+  ) {
+    return {
+      kind: "reuse-nearest",
+      updates: buildNearbyNearestUpdates(args.nearest, googlePlaceId, stopImage),
+    };
+  }
+
+  return { kind: "create-new", updates: {} };
+}
+
 export async function ensureCanonicalStopForNearby(
   admin: SupabaseClient,
   city: string,
@@ -257,33 +380,37 @@ export async function ensureCanonicalStopForNearby(
   let googlePlaceId = isValidGooglePlaceId(rawGooglePlaceId) ? rawGooglePlaceId : null;
   const stopImage = (stop.image || "").trim();
 
-  if (googlePlaceId) {
-    const placeMatch = await findCanonicalByGooglePlaceId(admin, city, googlePlaceId);
-    if (placeMatch) {
-      return seedLinkImageIfAllowed(admin, placeMatch, stopImage);
-    }
-  }
+  const placeMatch = googlePlaceId
+    ? await findCanonicalByGooglePlaceId(admin, city, googlePlaceId)
+    : null;
+  const nearest =
+    googlePlaceId || placeMatch
+      ? null
+      : await findNearestCanonicalStopWithinRadius(admin, city, stop.lat, stop.lng, NEARBY_MERGE_RADIUS_METERS);
+  const decision = decideNearbyCanonicalReuse({
+    stop,
+    placeMatch,
+    nearest,
+  });
 
-  const nearest = await findNearestCanonicalStopWithinRadius(admin, city, stop.lat, stop.lng, NEARBY_MERGE_RADIUS_METERS);
-  if (nearest) {
-    const updates: Record<string, string> = {};
-    if (googlePlaceId && !nearest.google_place_id) {
-      updates.google_place_id = googlePlaceId;
-    }
-    if (!isStrongImageSource(nearest.image_source) && stopImage && !isPlaceholderImage(stopImage)) {
-      updates.image_url = stopImage;
-      updates.image_source = "link_seed";
-    }
-    if (Object.keys(updates).length > 0) {
+  const reusableCanonical =
+    decision.kind === "reuse-place-id"
+      ? placeMatch
+      : decision.kind === "reuse-nearest"
+        ? nearest
+        : null;
+
+  if (reusableCanonical) {
+    if (Object.keys(decision.updates).length > 0) {
       const { data, error } = await admin
         .from("canonical_stops")
-        .update(updates)
-        .eq("id", nearest.id)
+        .update(decision.updates)
+        .eq("id", reusableCanonical.id)
         .select("id,city,title,lat,lng,image_url,image_source,fallback_image_url,google_place_id,image_last_checked_at")
         .single();
       if (!error && data) return data as CanonicalStopRow;
     }
-    return nearest;
+    return reusableCanonical;
   }
 
   const id = canonicalIdForNearbyStop(city, googlePlaceId, stop);
