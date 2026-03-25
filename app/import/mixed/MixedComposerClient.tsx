@@ -1649,11 +1649,6 @@ export default function MixedComposerClient({
     );
   }
 
-  async function handleClearStops() {
-    await persistMixedComposerSession({ stops: [] }, { createIfMissing: true });
-    setStops([]);
-  }
-
   async function handleMoveStop(index: number, targetIndex: number) {
     const nextStops = moveComposerStop(stops, index, targetIndex);
     if (nextStops === stops) return;
@@ -2464,9 +2459,8 @@ export default function MixedComposerClient({
           <div>
             <Link href="/" className={styles.backLink}>
               Back
-            </Link>
-            <p className={styles.kicker}>Mixed Composer</p>
-            <h1 className={styles.title}>Build a journey from Instagram, TikTok, and Google Places</h1>
+            </Link> 
+            <h1 className={styles.title}>Create your journey</h1>
              
           </div>
           <div className={styles.headerLinks}>
@@ -2478,7 +2472,7 @@ export default function MixedComposerClient({
         <section className={`${styles.card} ${styles.titleCard}`}>
           <div className={styles.formGrid}>
             <label className={`${styles.field} ${styles.fieldFullWidth}`}>
-              <span>Name of Journey (seen by listeners)</span>
+              <span>Journey&apos;s Name (seen by listeners)</span>
               <input
                 value={routeTitle}
                 onChange={(event) => setRouteTitle(clampRouteTitle(event.target.value))}
@@ -2583,10 +2577,7 @@ export default function MixedComposerClient({
 
           <section className={styles.card}>
             <div className={styles.listHeader}>
-              <h2 className={styles.sectionTitle}>Route stops</h2>
-              <button type="button" className={styles.listHeaderAction} onClick={() => void handleClearStops()}>
-                Clear
-              </button>
+              <h2 className={styles.sectionTitle}>Journey&apos;s stops</h2>
             </div>
             {stops.length === 0 ? (
               <p className={styles.emptyState}>No stops added yet.</p>
@@ -2617,14 +2608,13 @@ export default function MixedComposerClient({
             )}
 
             <div className={styles.attributionBox}>
-              <div className={styles.attributionLabel}>Route credit</div>
-              <div>{attribution.storyBy || "No social creator credit yet"}</div>
+              <div className={styles.attributionLabel}>Journey by: {attribution.storyBy || "No social creator credit yet"}</div>
             </div>
 
             {error ? <div className={styles.errorBanner}>{error}</div> : null}
 
             <button type="button" className={styles.publishButton} onClick={() => void publishRoute()} disabled={isPublishing}>
-              {isPublishing ? "Publishing..." : "Publish mixed route"}
+              {isPublishing ? "Publishing..." : "Publish"}
             </button>
           </section>
         </div>

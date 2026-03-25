@@ -78,13 +78,13 @@
   border-radius: 16px;
   padding: 22px;
   background: rgba(255, 255, 255, 0.88);
-  margin-bottom: 8px;
+  margin: 4px;
 }
 
 .columns,
 .formGrid {
   display: grid;
-  gap: 18px;
+  gap: 4px;
 }
 
 .formGrid {
@@ -501,24 +501,6 @@
   margin-bottom: 16px;
 }
 
-.listHeaderAction {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: #666;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  text-decoration: underline;
-  transition: color 160ms ease, opacity 160ms ease;
-}
-
-.listHeaderAction:hover,
-.listHeaderAction:focus-visible {
-  color: #1f1714;
-  text-decoration: underline;
-}
-
 .listHeaderAction:focus-visible {
   outline: none;
 }
@@ -559,6 +541,7 @@
 .publishButton {
   width: 100%;
   margin-top: 14px;
+  font-size: 21px;
 }
 
 .customNarratorPanel {
@@ -568,8 +551,7 @@
   gap: 8px;
 }
 
-.customNarratorLabel {
-  font-size: 15px;
+.customNarratorLabel { 
   font-weight: 700;
 }
 
@@ -719,7 +701,6 @@
   .columns,
   .formGrid,
   .instagramDraftGrid,
-  .listHeader,
   .inlineRow,
   .panelHeader,
   .formRow,
@@ -732,8 +713,7 @@
     justify-content: flex-start;
   }
 
-  .stopRow,
-  .stopActions,
+  .stopRow, 
   .placeList,
   .instagramCollectionRow {
     display: grid;
