@@ -1,4 +1,6 @@
 import type { NearbyPlaceCandidate } from "@/lib/nearbyPlaceResolver";
+import { NEARBY_REUSE_RADIUS_METERS, titlesMatchClosely } from "@/lib/nearbyPlaceMatching";
+import { scoreDiscoveryThemeMatch, type DiscoveryTheme } from "@/lib/discoveryThemes";
 
 export type WalkDiscoveryStatus =
   | "suggested"
@@ -34,6 +36,17 @@ export type WalkDiscoverySuggestion = {
 
 export type WalkDiscoveryCandidate = NearbyPlaceCandidate & {
   candidateKey: string;
+};
+
+export type WalkDiscoveryExistingStop = {
+  title: string;
+  lat: number;
+  lng: number;
+  googlePlaceId?: string | null;
+};
+
+type WalkDiscoveryEligibilityStop = {
+  isOverview?: boolean;
 };
 
 export const WALK_DISCOVERY_PRIMARY_RADIUS_METERS = 350;
@@ -81,6 +94,40 @@ export function toWalkDiscoveryCandidate(
     ...candidate,
     candidateKey: buildWalkDiscoveryCandidateKey(candidate),
   };
+}
+
+function normalizedGooglePlaceId(value: string | null | undefined) {
+  const placeId = (value || "").trim().toLowerCase();
+  return placeId || null;
+}
+
+export function isWalkDiscoveryDuplicateCandidate(args: {
+  candidate: Pick<NearbyPlaceCandidate, "title" | "lat" | "lng" | "googlePlaceId">;
+  existingRouteStops?: WalkDiscoveryExistingStop[] | null;
+  fallbackRadiusMeters?: number;
+}) {
+  const existingRouteStops = args.existingRouteStops ?? [];
+  if (existingRouteStops.length === 0) return false;
+
+  const candidatePlaceId = normalizedGooglePlaceId(args.candidate.googlePlaceId);
+  const fallbackRadiusMeters = args.fallbackRadiusMeters ?? NEARBY_REUSE_RADIUS_METERS;
+
+  for (const stop of existingRouteStops) {
+    const stopPlaceId = normalizedGooglePlaceId(stop.googlePlaceId);
+    if (candidatePlaceId && stopPlaceId && candidatePlaceId === stopPlaceId) {
+      return true;
+    }
+
+    if (
+      titlesMatchClosely(stop.title, args.candidate.title) &&
+      walkDiscoveryDistanceMeters(stop.lat, stop.lng, args.candidate.lat, args.candidate.lng) <=
+        fallbackRadiusMeters
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function createWalkDiscoverySuggestion(
@@ -167,6 +214,27 @@ export function appendWalkDiscoveryPosition(
   return [...samples, next].slice(-WALK_DISCOVERY_RECENT_POSITIONS_LIMIT);
 }
 
+export function getLastNonOverviewStopIndex(
+  stops: WalkDiscoveryEligibilityStop[] | null | undefined
+) {
+  if (!Array.isArray(stops) || stops.length === 0) return -1;
+  for (let idx = stops.length - 1; idx >= 0; idx -= 1) {
+    if (!stops[idx]?.isOverview) return idx;
+  }
+  return -1;
+}
+
+export function shouldShowFinalStopWalkDiscovery(args: {
+  currentStopIndex: number | null;
+  stops: WalkDiscoveryEligibilityStop[] | null | undefined;
+  isWalkDiscoveryRoute: boolean;
+}) {
+  if (args.isWalkDiscoveryRoute) return true;
+  if (args.currentStopIndex === null) return false;
+  const finalStopIndex = getLastNonOverviewStopIndex(args.stops);
+  return finalStopIndex >= 0 && args.currentStopIndex === finalStopIndex;
+}
+
 function toProjectedMeters(
   origin: { lat: number; lng: number },
   point: { lat: number; lng: number }
@@ -210,7 +278,9 @@ export function selectWalkDiscoveryCandidate(args: {
   currentPosition: { lat: number; lng: number };
   recentPositions?: WalkDiscoveryPositionSample[];
   excludedCandidateKeys?: string[];
+  existingRouteStops?: WalkDiscoveryExistingStop[] | null;
   radiusMeters: number;
+  preferredThemes?: DiscoveryTheme[] | null;
 }) {
   const excluded = new Set(args.excludedCandidateKeys ?? []);
   const movement = deriveWalkDiscoveryMovementVector(args.recentPositions ?? []);
@@ -218,6 +288,14 @@ export function selectWalkDiscoveryCandidate(args: {
   const scored = args.candidates
     .map(toWalkDiscoveryCandidate)
     .filter((candidate) => {
+      if (
+        isWalkDiscoveryDuplicateCandidate({
+          candidate,
+          existingRouteStops: args.existingRouteStops,
+        })
+      ) {
+        return false;
+      }
       if (excluded.has(candidate.candidateKey)) return false;
       const distance =
         candidate.distanceMeters ??
@@ -240,14 +318,15 @@ export function selectWalkDiscoveryCandidate(args: {
           candidate.lng
         );
 
+      const themeScore = scoreDiscoveryThemeMatch(candidate, args.preferredThemes);
       if (!movement) {
-        return { candidate, score: distance };
+        return { candidate, score: distance, themeScore };
       }
 
       const projected = toProjectedMeters(args.currentPosition, candidate);
       const magnitude = Math.hypot(projected.x, projected.y);
       if (magnitude < 1) {
-        return { candidate, score: distance + 5 };
+        return { candidate, score: distance + 5, themeScore };
       }
       const cosine =
         (movement.dx * projected.x + movement.dy * projected.y) /
@@ -261,10 +340,22 @@ export function selectWalkDiscoveryCandidate(args: {
       return {
         candidate,
         score: distance + headingPenalty + lateralPenalty,
+        themeScore,
       };
     })
-    .filter((entry): entry is { candidate: WalkDiscoveryCandidate; score: number } => Boolean(entry))
-    .sort((a, b) => a.score - b.score);
+    .filter((entry): entry is { candidate: WalkDiscoveryCandidate; score: number; themeScore: number } => Boolean(entry));
+
+  const highestThemeScore = scored.reduce(
+    (best, entry) => Math.max(best, entry.themeScore),
+    0
+  );
+
+  scored.sort((a, b) => {
+    if (highestThemeScore > 0 && a.themeScore !== b.themeScore) {
+      return b.themeScore - a.themeScore;
+    }
+    return a.score - b.score;
+  });
 
   return scored[0]?.candidate ?? null;
 }

@@ -5,7 +5,9 @@ import {
   buildWalkDiscoveryCandidateKey,
   createWalkDiscoverySuggestion,
   deriveWalkDiscoveryMovementVector,
+  getLastNonOverviewStopIndex,
   selectWalkDiscoveryCandidate,
+  shouldShowFinalStopWalkDiscovery,
   shouldExpireWalkDiscoverySuggestion,
   WALK_DISCOVERY_EXPIRE_DISTANCE_METERS,
 } from "@/lib/walkDiscovery";
@@ -86,6 +88,125 @@ test("selectWalkDiscoveryCandidate filters excluded and backtracking places", ()
   });
 
   assert.equal(selected?.id, "ahead");
+});
+
+test("selectWalkDiscoveryCandidate prefers a theme-matching candidate when available", () => {
+  const selected = selectWalkDiscoveryCandidate({
+    candidates: [
+      {
+        id: "history",
+        title: "Old State House Museum",
+        lat: 42.3607,
+        lng: -71.0506,
+        image: "/history.jpg",
+        source: "google_places",
+        distanceMeters: 150,
+        googlePlaceId: "history-place",
+        primaryType: "museum",
+        types: ["museum", "tourist_attraction"],
+      },
+      {
+        id: "animals",
+        title: "City Duck Pond",
+        lat: 42.36075,
+        lng: -71.05065,
+        image: "/animals.jpg",
+        source: "google_places",
+        distanceMeters: 120,
+        googlePlaceId: "animals-place",
+        primaryType: "park",
+        types: ["park"],
+      },
+    ],
+    currentPosition: { lat: 42.36, lng: -71.0505 },
+    radiusMeters: 350,
+    preferredThemes: ["history"],
+  });
+
+  assert.equal(selected?.id, "history");
+});
+
+test("selectWalkDiscoveryCandidate falls back to broad nearby ranking when no themed match exists", () => {
+  const selected = selectWalkDiscoveryCandidate({
+    candidates: [
+      {
+        id: "animals",
+        title: "City Duck Pond",
+        lat: 42.36075,
+        lng: -71.05065,
+        image: "/animals.jpg",
+        source: "google_places",
+        distanceMeters: 120,
+        googlePlaceId: "animals-place",
+        primaryType: "park",
+        types: ["park"],
+      },
+    ],
+    currentPosition: { lat: 42.36, lng: -71.0505 },
+    radiusMeters: 350,
+    preferredThemes: ["history"],
+  });
+
+  assert.equal(selected?.id, "animals");
+});
+
+test("selectWalkDiscoveryCandidate still excludes themed candidates on cooldown", () => {
+  const selected = selectWalkDiscoveryCandidate({
+    candidates: [
+      {
+        id: "history",
+        title: "Old State House Museum",
+        lat: 42.3607,
+        lng: -71.0506,
+        image: "/history.jpg",
+        source: "google_places",
+        distanceMeters: 150,
+        googlePlaceId: "history-place",
+        primaryType: "museum",
+        types: ["museum", "tourist_attraction"],
+      },
+      {
+        id: "backup",
+        title: "City Plaza",
+        lat: 42.36075,
+        lng: -71.05065,
+        image: "/backup.jpg",
+        source: "google_places",
+        distanceMeters: 160,
+        googlePlaceId: "backup-place",
+        primaryType: "tourist_attraction",
+        types: ["tourist_attraction"],
+      },
+    ],
+    currentPosition: { lat: 42.36, lng: -71.0505 },
+    radiusMeters: 350,
+    preferredThemes: ["history"],
+    excludedCandidateKeys: ["place:history-place"],
+  });
+
+  assert.equal(selected?.id, "backup");
+});
+
+test("final-stop walk discovery eligibility ignores overview stops", () => {
+  const stops = [{ isOverview: true }, { isOverview: false }, { isOverview: false }];
+
+  assert.equal(getLastNonOverviewStopIndex(stops), 2);
+  assert.equal(
+    shouldShowFinalStopWalkDiscovery({
+      currentStopIndex: 2,
+      stops,
+      isWalkDiscoveryRoute: false,
+    }),
+    true
+  );
+  assert.equal(
+    shouldShowFinalStopWalkDiscovery({
+      currentStopIndex: 1,
+      stops,
+      isWalkDiscoveryRoute: false,
+    }),
+    false
+  );
 });
 
 test("createWalkDiscoverySuggestion and expiry respect time and distance", () => {

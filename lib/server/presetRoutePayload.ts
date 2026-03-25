@@ -16,6 +16,7 @@ type MappingRow = {
 type CanonicalImageRow = {
   id: string;
   image_url: string | null;
+  google_place_id: string | null;
 };
 
 type PresetRouteStopRecord = {
@@ -23,6 +24,7 @@ type PresetRouteStopRecord = {
   title: string;
   lat: number;
   lng: number;
+  google_place_id: string | null;
   image_url: string;
   script_adult: string | null;
   script_preteen: string | null;
@@ -90,6 +92,7 @@ async function loadPresetRouteStops(
       title: stop.title,
       lat: stop.lat,
       lng: stop.lng,
+      google_place_id: toNullableTrimmed(stop.googlePlaceId),
       image_url: proxyGoogleImageUrl(toNullableTrimmed(stop.image)) || "/images/salem/placeholder.png",
       script_adult: null,
       script_preteen: null,
@@ -133,7 +136,7 @@ async function loadPresetRouteStops(
   if (canonicalIds.size > 0) {
     const { data: imageRows, error: imagesErr } = await admin
       .from("canonical_stops")
-      .select("id,image_url")
+      .select("id,image_url,google_place_id")
       .in("id", Array.from(canonicalIds));
     if (imagesErr) {
       console.error("preset-routes: canonical image query failed", imagesErr);
@@ -193,6 +196,9 @@ async function loadPresetRouteStops(
       title: stop.title,
       lat: stop.lat,
       lng: stop.lng,
+      google_place_id:
+        toNullableTrimmed(stop.googlePlaceId) ??
+        toNullableTrimmed(imageForStop?.google_place_id),
       image_url:
         proxyGoogleImageUrl(
           pickStopImage(canonicalImage, placeIdPhoto, routeImage, "/images/salem/placeholder.png")
@@ -231,6 +237,7 @@ export async function loadPresetRoutePreviewStops(routeId: string, cityHint?: st
       title: stop.title,
       lat: stop.lat,
       lng: stop.lng,
+      google_place_id: stop.google_place_id,
       image_url: stop.image_url,
       position: stop.position,
       is_overview: stop.is_overview,

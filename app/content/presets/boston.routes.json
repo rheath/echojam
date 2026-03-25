@@ -6,6 +6,7 @@
       "title": "Boston Revolutionary Secrets",
       "durationMinutes": 45,
       "description": "Hidden stories from the American Revolution.",
+      "discoveryThemes": ["history"],
       "defaultPersona": "adult",
       "pricing": {
         "status": "free",
@@ -27,6 +28,7 @@
       "title": "Boston Old Taverns",
       "durationMinutes": 40,
       "description": "Historic pubs and gathering places where politics and nightlife overlapped.",
+      "discoveryThemes": ["history"],
       "defaultPersona": "adult",
       "pricing": {
         "status": "paid",

@@ -4,6 +4,13 @@ export type PresetCity = "salem" | "boston" | "concord" | "nyc";
 export type PresetContentPriority = "default" | "history_first";
 export type PresetNarrationBeat = "overview" | "hook" | "reveal" | "contrast" | "payoff";
 export type PresetTtsVoice = "alloy" | "nova" | "shimmer" | "onyx";
+export type DiscoveryTheme =
+  | "history"
+  | "architecture"
+  | "animals"
+  | "comics"
+  | "weird_history"
+  | "ghosts_folklore";
 
 export type RoutePricing = {
   status: "free" | "paid" | "tbd";
@@ -65,6 +72,7 @@ export type RouteDef = {
   durationLabel: string;
   durationMinutes?: number;
   description: string;
+  discoveryThemes?: DiscoveryTheme[] | null;
   defaultPersona: Persona;
   storyBy?: string;
   storyByUrl?: string | null;
@@ -91,6 +99,7 @@ export type PresetRouteSummary = {
   durationLabel: string;
   durationMinutes?: number;
   description: string;
+  discoveryThemes?: DiscoveryTheme[] | null;
   defaultPersona: Persona;
   storyBy?: string;
   pricing?: RoutePricing;

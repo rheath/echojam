@@ -5,6 +5,7 @@ type PresetRoutePricingStatus = "free" | "paid" | "tbd";
 type PresetContentPriority = "default" | "history_first";
 type PresetNarrationBeat = "overview" | "hook" | "reveal" | "contrast" | "payoff";
 type PresetTtsVoice = "alloy" | "nova" | "shimmer" | "onyx";
+type DiscoveryTheme = "history" | "architecture" | "animals" | "comics" | "weird_history" | "ghosts_folklore";
 
 const PERSONAS = ["adult", "preteen", "ghost"] as const satisfies readonly Persona[];
 const CITIES = ["salem", "boston", "concord", "nyc"] as const satisfies readonly PresetCity[];
@@ -12,6 +13,14 @@ const PRICING_STATUSES = ["free", "paid", "tbd"] as const satisfies readonly Pre
 const CONTENT_PRIORITIES = ["default", "history_first"] as const satisfies readonly PresetContentPriority[];
 const NARRATION_BEATS = ["overview", "hook", "reveal", "contrast", "payoff"] as const satisfies readonly PresetNarrationBeat[];
 const PRESET_TTS_VOICES = ["alloy", "nova", "shimmer", "onyx"] as const satisfies readonly PresetTtsVoice[];
+const DISCOVERY_THEMES = [
+  "history",
+  "architecture",
+  "animals",
+  "comics",
+  "weird_history",
+  "ghosts_folklore",
+] as const satisfies readonly DiscoveryTheme[];
 
 const NonEmptyTrimmedStringArraySchema = z.array(z.string().trim().min(1)).min(1);
 
@@ -77,6 +86,7 @@ const PresetRouteSeedSchema = z
     description: z.string().trim().min(1),
     defaultPersona: z.enum(PERSONAS),
     storyBy: z.string().trim().min(1).optional(),
+    discoveryThemes: z.array(z.enum(DISCOVERY_THEMES)).min(1).optional(),
     narratorGuidance: z.string().trim().min(1).optional(),
     contentPriority: z.enum(CONTENT_PRIORITIES).optional(),
     voice: PresetRouteVoiceSchema.optional(),

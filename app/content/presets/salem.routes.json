@@ -6,6 +6,7 @@
       "title": "Salem After Dark",
       "durationMinutes": 30,
       "description": "Ghost stories and folklore.",
+      "discoveryThemes": ["ghosts_folklore"],
       "defaultPersona": "ghost",
       "pricing": {
         "status": "free",

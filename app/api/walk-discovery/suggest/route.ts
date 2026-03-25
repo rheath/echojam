@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import type { DiscoveryTheme } from "@/app/content/routeTypes";
 import {
   createWalkDiscoverySuggestion,
   type WalkDiscoveryPositionSample,
 } from "@/lib/walkDiscovery";
+import { normalizePresetCity } from "@/lib/presetOverview";
+import { loadJourneyRouteStopsForWalkDiscovery } from "@/lib/server/walkDiscovery";
 import { countAcceptedWalkDiscoveryStops } from "@/lib/server/walkDiscoveryPurchases";
 import { resolveWalkDiscoverySuggestionPricing } from "@/lib/server/walkDiscoveryPricing";
 import { resolveWalkDiscoverySuggestion } from "@/lib/server/walkDiscoverySuggestions";
@@ -16,6 +19,8 @@ type Body = {
   recentPositions?: WalkDiscoveryPositionSample[];
   acceptedCandidateKeys?: string[];
   cooldownCandidateKeys?: string[];
+  city?: string | null;
+  discoveryThemes?: DiscoveryTheme[] | null;
 };
 
 function getAdmin() {
@@ -49,6 +54,11 @@ export async function POST(req: Request) {
     }
 
     const admin = getAdmin();
+    const jamId = body.jamId?.trim() || null;
+    const cityHint = body.city ? normalizePresetCity(body.city) : null;
+    const existingRouteStops = jamId
+      ? await loadJourneyRouteStopsForWalkDiscovery(admin, jamId, cityHint)
+      : [];
     const candidate = await resolveWalkDiscoverySuggestion({
       admin,
       lat: body.lat,
@@ -58,6 +68,9 @@ export async function POST(req: Request) {
         ...normalizeKeys(body.acceptedCandidateKeys),
         ...normalizeKeys(body.cooldownCandidateKeys),
       ],
+      existingRouteStops,
+      city: body.city,
+      discoveryThemes: Array.isArray(body.discoveryThemes) ? body.discoveryThemes : [],
     });
 
     if (!candidate) {
@@ -65,8 +78,8 @@ export async function POST(req: Request) {
     }
 
     const pricing = resolveWalkDiscoverySuggestionPricing({
-      acceptedStopCount: body.jamId?.trim()
-        ? await countAcceptedWalkDiscoveryStops(admin, body.jamId.trim())
+      acceptedStopCount: jamId
+        ? await countAcceptedWalkDiscoveryStops(admin, jamId)
         : 0,
       purchaseKey: randomUUID(),
     });

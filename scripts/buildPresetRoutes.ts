@@ -7,6 +7,7 @@ type Persona = "adult" | "preteen" | "ghost";
 type PresetContentPriority = "default" | "history_first";
 type PresetNarrationBeat = "overview" | "hook" | "reveal" | "contrast" | "payoff";
 type PresetTtsVoice = "alloy" | "nova" | "shimmer" | "onyx";
+type DiscoveryTheme = "history" | "architecture" | "animals" | "comics" | "weird_history" | "ghosts_folklore";
 
 type GeneratedRouteVoice = {
   archetypeId: string;
@@ -71,6 +72,7 @@ type GeneratedRoute = {
   durationLabel: string;
   durationMinutes: number;
   description: string;
+  discoveryThemes?: DiscoveryTheme[];
   defaultPersona: Persona;
   storyBy?: string;
   narratorGuidance?: string;
@@ -439,6 +441,7 @@ async function main() {
         durationLabel: `${route.durationMinutes} mins`,
         durationMinutes: route.durationMinutes,
         description: route.description,
+        ...(route.discoveryThemes?.length ? { discoveryThemes: route.discoveryThemes } : {}),
         defaultPersona: route.defaultPersona,
         ...(route.storyBy ? { storyBy: route.storyBy } : {}),
         ...(route.narratorGuidance ? { narratorGuidance: route.narratorGuidance } : {}),

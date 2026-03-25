@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { StopInput } from "@/lib/mixGeneration";
+import { NEARBY_REUSE_RADIUS_METERS, titlesMatchClosely } from "@/lib/nearbyPlaceMatching";
 import { isValidGooglePlaceId, resolvePlaceImage } from "@/lib/placesImages";
 
 export type RouteKind = "preset" | "custom";
@@ -19,7 +20,6 @@ export type CanonicalStopRow = {
 };
 
 export const CANONICAL_MATCH_RADIUS_METERS = 50;
-const NEARBY_MERGE_RADIUS_METERS = 35;
 
 function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
   const avgLatRad = ((aLat + bLat) / 2) * (Math.PI / 180);
@@ -269,41 +269,6 @@ type NearbyNearestUpdates = Partial<
   Pick<CanonicalStopRow, "image_url" | "image_source" | "google_place_id">
 >;
 
-const NEARBY_TITLE_STOPWORDS = new Set(["a", "an", "and", "at", "in", "of", "on", "the"]);
-
-function normalizeNearbyTitleTokens(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .split(/\s+/)
-    .filter((token) => token && !NEARBY_TITLE_STOPWORDS.has(token));
-}
-
-function titlesMatchClosely(a: string, b: string) {
-  const aTokens = normalizeNearbyTitleTokens(a);
-  const bTokens = normalizeNearbyTitleTokens(b);
-  if (aTokens.length === 0 || bTokens.length === 0) return false;
-
-  const aJoined = aTokens.join(" ");
-  const bJoined = bTokens.join(" ");
-  if (aJoined === bJoined) return true;
-
-  const aSet = new Set(aTokens);
-  const bSet = new Set(bTokens);
-  const smaller = aSet.size <= bSet.size ? aSet : bSet;
-  const larger = aSet.size <= bSet.size ? bSet : aSet;
-
-  let overlap = 0;
-  for (const token of smaller) {
-    if (larger.has(token)) overlap += 1;
-  }
-
-  if (smaller.size >= 2 && overlap === smaller.size) return true;
-  return overlap >= 2 && overlap / Math.max(aSet.size, bSet.size) >= 0.75;
-}
-
 function buildNearbyPlaceMatchUpdates(
   row: CanonicalStopRow,
   stop: NearbyStopInput,
@@ -386,7 +351,13 @@ export async function ensureCanonicalStopForNearby(
   const nearest =
     googlePlaceId || placeMatch
       ? null
-      : await findNearestCanonicalStopWithinRadius(admin, city, stop.lat, stop.lng, NEARBY_MERGE_RADIUS_METERS);
+      : await findNearestCanonicalStopWithinRadius(
+          admin,
+          city,
+          stop.lat,
+          stop.lng,
+          NEARBY_REUSE_RADIUS_METERS
+        );
   const decision = decideNearbyCanonicalReuse({
     stop,
     placeMatch,

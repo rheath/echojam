@@ -94,6 +94,10 @@ function mapRoute(route: (typeof presetRouteData.routes)[number]): RouteDef {
     durationLabel: route.durationLabel,
     durationMinutes: route.durationMinutes,
     description: route.description,
+    discoveryThemes:
+      "discoveryThemes" in route && Array.isArray(route.discoveryThemes)
+        ? route.discoveryThemes
+        : null,
     defaultPersona: route.defaultPersona,
     storyBy: "storyBy" in route ? route.storyBy : undefined,
     storyByUrl: null,

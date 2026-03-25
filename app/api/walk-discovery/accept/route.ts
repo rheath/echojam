@@ -17,6 +17,7 @@ type Body = {
   routeId?: string | null;
   persona?: Persona | null;
   candidate?: NearbyPlaceCandidate | null;
+  experienceKind?: "mix" | "walk_discovery" | null;
   purchaseKey?: string | null;
   stripeCheckoutSessionId?: string | null;
 };
@@ -129,7 +130,7 @@ export async function POST(req: Request) {
       jamId,
       persona: (body.persona || "adult") as Persona,
       candidate: body.candidate,
-      experienceKind: "walk_discovery",
+      experienceKind: body.experienceKind === "walk_discovery" ? "walk_discovery" : "mix",
       generateAssets: false,
     });
 

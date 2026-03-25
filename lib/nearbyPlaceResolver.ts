@@ -18,6 +18,8 @@ export type NearbyPlaceCandidate = {
   source: NearbyStorySource;
   distanceMeters: number | null;
   googlePlaceId: string | null;
+  primaryType?: string | null;
+  types?: string[] | null;
 };
 
 export type ResolveNearbyPlaceInput = {
@@ -244,6 +246,10 @@ async function resolveGoogleNearby(
       source: "google_places",
       distanceMeters: dist,
       googlePlaceId: placeId || null,
+      primaryType: normalizeType(place.primaryType) || null,
+      types: Array.isArray(place.types)
+        ? place.types.map((type) => normalizeType(type)).filter(Boolean)
+        : null,
     });
     const latest = candidates[candidates.length - 1];
     if (isPoiLike(place.primaryType, place.types)) {
@@ -297,6 +303,8 @@ async function resolveLocalityFallback(
     source: "locality_fallback",
     distanceMeters: null,
     googlePlaceId: isValidGooglePlaceId(localityGooglePlaceId) ? localityGooglePlaceId : null,
+    primaryType: null,
+    types: null,
   };
 }
 
@@ -363,6 +371,8 @@ async function resolveCanonicalNearby(input: ResolveNearbyPlaceInput): Promise<N
         source: "canonical" as const,
         distanceMeters: dist,
         googlePlaceId: isValidGooglePlaceId(row.google_place_id) ? (row.google_place_id || "").trim() : null,
+        primaryType: null,
+        types: null,
       };
     })
     .filter((candidate) => Number(candidate.distanceMeters) <= input.radiusMeters)

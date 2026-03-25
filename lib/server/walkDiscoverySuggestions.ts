@@ -1,8 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  discoveryPrimaryTypesForThemes,
+  normalizeDiscoveryThemes,
+  type DiscoveryTheme,
+} from "@/lib/discoveryThemes";
 import { resolveNearbyPlaces } from "@/lib/nearbyPlaceResolver";
 import {
   buildWalkDiscoveryCandidateKey,
   selectWalkDiscoveryCandidate,
+  type WalkDiscoveryExistingStop,
   type WalkDiscoveryPositionSample,
   WALK_DISCOVERY_FALLBACK_RADIUS_METERS,
   WALK_DISCOVERY_PRIMARY_RADIUS_METERS,
@@ -23,9 +29,13 @@ export async function resolveWalkDiscoverySuggestion(args: {
   lng: number;
   recentPositions?: WalkDiscoveryPositionSample[];
   excludedCandidateKeys?: string[];
+  existingRouteStops?: WalkDiscoveryExistingStop[] | null;
   city?: string | null;
+  discoveryThemes?: DiscoveryTheme[] | null;
 }) {
   const city = (args.city || "").trim().toLowerCase() || "nearby";
+  const discoveryThemes = normalizeDiscoveryThemes(args.discoveryThemes);
+  const themedPrimaryTypes = discoveryPrimaryTypesForThemes(discoveryThemes);
   const search = async (radiusMeters: number) => {
     const resolved = await resolveNearbyPlaces({
       admin: args.admin,
@@ -35,8 +45,8 @@ export async function resolveWalkDiscoverySuggestion(args: {
       radiusMeters,
       maxCandidates: 8,
       googleOnly: true,
-      includedPrimaryTypes: [...WALK_DISCOVERY_INCLUDED_PRIMARY_TYPES],
-      allowBroadGoogleFallback: false,
+      includedPrimaryTypes: themedPrimaryTypes ?? [...WALK_DISCOVERY_INCLUDED_PRIMARY_TYPES],
+      allowBroadGoogleFallback: discoveryThemes.length > 0,
     });
 
     const candidate = selectWalkDiscoveryCandidate({
@@ -44,7 +54,9 @@ export async function resolveWalkDiscoverySuggestion(args: {
       currentPosition: { lat: args.lat, lng: args.lng },
       recentPositions: args.recentPositions,
       excludedCandidateKeys: args.excludedCandidateKeys,
+      existingRouteStops: args.existingRouteStops,
       radiusMeters,
+      preferredThemes: discoveryThemes,
     });
 
     return candidate

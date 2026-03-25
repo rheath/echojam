@@ -4,6 +4,7 @@ import type { Persona } from "@/app/content/salemRoutes";
 import {
   appendAcceptedNearbyStop,
   createDiscoveryJam,
+  loadJourneyRouteStopsForWalkDiscovery,
 } from "@/lib/server/walkDiscovery";
 import { resolveWalkDiscoverySuggestion } from "@/lib/server/walkDiscoverySuggestions";
 
@@ -37,10 +38,14 @@ export async function POST(req: Request) {
     const admin = getAdmin();
     const persona = (body.persona || "adult") as Persona;
     const jamId = body.jamId || (await createDiscoveryJam(admin, persona));
+    const existingRouteStops = body.jamId
+      ? await loadJourneyRouteStopsForWalkDiscovery(admin, body.jamId, null)
+      : [];
     const candidate = await resolveWalkDiscoverySuggestion({
       admin,
       lat: body.lat,
       lng: body.lng,
+      existingRouteStops,
     });
 
     if (!candidate) {

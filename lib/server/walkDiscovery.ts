@@ -17,7 +17,11 @@ import {
 } from "@/lib/mixGeneration";
 import type { NearbyPlaceCandidate } from "@/lib/nearbyPlaceResolver";
 import { buildPresetStopsWithOverview, normalizePresetCity } from "@/lib/presetOverview";
-import { proxyGoogleImageUrl } from "@/lib/placesImages";
+import {
+  buildGooglePlaceIdPhotoUrl,
+  isValidGooglePlaceId,
+  proxyGoogleImageUrl,
+} from "@/lib/placesImages";
 
 export type DiscoveryExperienceKind = "mix" | "walk_discovery";
 
@@ -33,11 +37,20 @@ type CanonicalAssetRow = {
   audio_url: string | null;
 };
 
+type CanonicalImageRow = {
+  id: string;
+  image_url: string | null;
+  fallback_image_url: string | null;
+  image_source: "places" | "curated" | "placeholder" | "link_seed" | null;
+  google_place_id: string | null;
+};
+
 export type JourneyRouteStop = {
   stopId: string;
   title: string;
   lat: number;
   lng: number;
+  googlePlaceId: string | null;
   imageUrl: string;
   scriptAdult: string | null;
   scriptPreteen: string | null;
@@ -96,6 +109,39 @@ function buildUniqueStopId(existingIds: Set<string>, base: string) {
   return `${normalizedBase}-${idx}`;
 }
 
+function isNonPlaceholderImage(value: string | null | undefined) {
+  const normalized = toNullableTrimmed(value);
+  if (!normalized) return false;
+  return !normalized.toLowerCase().includes("/placeholder");
+}
+
+export function resolveJourneyRouteStopImage(args: {
+  canonicalImage?: string | null;
+  curatedFallback?: string | null;
+  stopImage?: string | null;
+  googlePlaceId?: string | null;
+  canonicalSource?: CanonicalImageRow["image_source"];
+  placeholder?: string;
+}) {
+  const placeholder = args.placeholder || "/images/salem/placeholder.png";
+  const googlePlaceId = toNullableTrimmed(args.googlePlaceId);
+  const placeIdPhoto = isValidGooglePlaceId(googlePlaceId)
+    ? buildGooglePlaceIdPhotoUrl(googlePlaceId!.trim())
+    : null;
+  const preferStopSpecific =
+    args.canonicalSource === "places" &&
+    isNonPlaceholderImage(args.stopImage) &&
+    isNonPlaceholderImage(args.canonicalImage);
+  const rankedCandidates = preferStopSpecific
+    ? [args.stopImage, args.canonicalImage, placeIdPhoto, args.curatedFallback]
+    : [args.canonicalImage, placeIdPhoto, args.curatedFallback, args.stopImage];
+  const strongCandidates = rankedCandidates
+    .map((value) => toNullableTrimmed(value))
+    .filter((value): value is string => Boolean(value) && isNonPlaceholderImage(value));
+
+  return proxyGoogleImageUrl(strongCandidates[0] || args.stopImage || placeholder) || placeholder;
+}
+
 export type AcceptedNearbyStopSnapshot = {
   title: string;
   lat: number;
@@ -140,6 +186,7 @@ export function buildAcceptedNearbyRouteStop(args: {
     title: args.snapshot.title,
     lat: args.snapshot.lat,
     lng: args.snapshot.lng,
+    googlePlaceId: args.snapshot.googlePlaceId,
     imageUrl: args.snapshot.imageUrl,
     scriptAdult:
       args.persona === "adult" ? args.selectedScript : args.canonicalAssets.scriptAdult,
@@ -264,22 +311,47 @@ async function loadCustomRouteStops(
     );
   }
 
-  return (stops ?? []).map((stop) => ({
-    stopId: stop.stop_id,
-    title: stop.title,
-    lat: stop.lat,
-    lng: stop.lng,
-    imageUrl: proxyGoogleImageUrl(stop.image_url) || "/images/salem/placeholder.png",
-    scriptAdult: toNullableTrimmed(stop.script_adult),
-    scriptPreteen: toNullableTrimmed(stop.script_preteen),
-    scriptGhost: toNullableTrimmed(stop.script_ghost),
-    scriptCustom: toNullableTrimmed(stop.script_custom),
-    audioAdult: toNullableAudioUrl(stop.audio_url_adult),
-    audioPreteen: toNullableAudioUrl(stop.audio_url_preteen),
-    audioGhost: toNullableAudioUrl(stop.audio_url_ghost),
-    audioCustom: toNullableAudioUrl(stop.audio_url_custom),
-    canonicalStopId: mappingByStopId.get(stop.stop_id) ?? null,
-  }));
+  const canonicalIds = Array.from(new Set(mappingByStopId.values()));
+  const canonicalById = new Map<string, CanonicalImageRow>();
+  if (canonicalIds.length > 0) {
+    const { data: canonicalRows, error: canonicalErr } = await admin
+      .from("canonical_stops")
+      .select("id,image_url,fallback_image_url,image_source,google_place_id")
+      .in("id", canonicalIds);
+    if (canonicalErr) throw new Error(canonicalErr.message);
+
+    for (const row of canonicalRows ?? []) {
+      const typedRow = row as CanonicalImageRow;
+      canonicalById.set(typedRow.id, typedRow);
+    }
+  }
+
+  return (stops ?? []).map((stop) => {
+    const canonical = canonicalById.get(mappingByStopId.get(stop.stop_id) ?? "");
+    return {
+      stopId: stop.stop_id,
+      title: stop.title,
+      lat: stop.lat,
+      lng: stop.lng,
+      googlePlaceId: toNullableTrimmed(canonical?.google_place_id),
+      imageUrl: resolveJourneyRouteStopImage({
+        canonicalImage: canonical?.image_url,
+        curatedFallback: canonical?.fallback_image_url,
+        stopImage: stop.image_url,
+        googlePlaceId: canonical?.google_place_id,
+        canonicalSource: canonical?.image_source ?? null,
+      }),
+      scriptAdult: toNullableTrimmed(stop.script_adult),
+      scriptPreteen: toNullableTrimmed(stop.script_preteen),
+      scriptGhost: toNullableTrimmed(stop.script_ghost),
+      scriptCustom: toNullableTrimmed(stop.script_custom),
+      audioAdult: toNullableAudioUrl(stop.audio_url_adult),
+      audioPreteen: toNullableAudioUrl(stop.audio_url_preteen),
+      audioGhost: toNullableAudioUrl(stop.audio_url_ghost),
+      audioCustom: toNullableAudioUrl(stop.audio_url_custom),
+      canonicalStopId: mappingByStopId.get(stop.stop_id) ?? null,
+    };
+  });
 }
 
 async function loadPresetRouteStops(
@@ -345,16 +417,14 @@ async function loadPresetRouteStops(
   const { data: canonicalRows, error: canonErr } = canonicalIds.length
     ? await admin
         .from("canonical_stops")
-        .select("id,image_url")
+        .select("id,image_url,fallback_image_url,image_source,google_place_id")
         .in("id", canonicalIds)
     : { data: [], error: null };
   if (canonErr) throw new Error(canonErr.message);
-  const imageByCanonical = new Map<string, string | null>();
+  const canonicalById = new Map<string, CanonicalImageRow>();
   for (const row of canonicalRows ?? []) {
-    imageByCanonical.set(
-      (row as { id: string }).id,
-      (row as { image_url: string | null }).image_url
-    );
+    const typedRow = row as CanonicalImageRow;
+    canonicalById.set(typedRow.id, typedRow);
   }
 
   return {
@@ -363,18 +433,21 @@ async function loadPresetRouteStops(
     stops: presetStops.map((stop) => {
       const canonicalId = mappingByStopId.get(stop.id) ?? null;
       const assets = canonicalId ? assetsByCanonical.get(canonicalId) : null;
-      const canonicalImage = canonicalId
-        ? toNullableTrimmed(imageByCanonical.get(canonicalId) || null)
-        : null;
+      const canonical = canonicalId ? canonicalById.get(canonicalId) : null;
 
       return {
         stopId: stop.id,
         title: stop.title,
         lat: stop.lat,
         lng: stop.lng,
-        imageUrl:
-          proxyGoogleImageUrl(canonicalImage || stop.image) ||
-          "/images/salem/placeholder.png",
+        googlePlaceId: toNullableTrimmed(stop.googlePlaceId) ?? toNullableTrimmed(canonical?.google_place_id),
+        imageUrl: resolveJourneyRouteStopImage({
+          canonicalImage: canonical?.image_url,
+          curatedFallback: canonical?.fallback_image_url,
+          stopImage: stop.image,
+          googlePlaceId: stop.googlePlaceId ?? canonical?.google_place_id,
+          canonicalSource: canonical?.image_source ?? null,
+        }),
         scriptAdult: assets?.scriptAdult ?? null,
         scriptPreteen: assets?.scriptPreteen ?? null,
         scriptGhost: assets?.scriptGhost ?? null,
@@ -476,6 +549,15 @@ async function resolveRouteContext(
     narratorVoice,
     experienceKind,
   };
+}
+
+export async function loadJourneyRouteStopsForWalkDiscovery(
+  admin: SupabaseClient,
+  jamId: string,
+  cityHint?: "salem" | "boston" | "concord" | "nyc" | null
+) {
+  const context = await resolveRouteContext(admin, jamId, cityHint);
+  return context.currentStops;
 }
 
 export async function createDiscoveryJam(

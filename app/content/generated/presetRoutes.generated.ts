@@ -15,6 +15,9 @@ export const presetRouteData = {
       "durationLabel": "45 mins",
       "durationMinutes": 45,
       "description": "Hidden stories from the American Revolution.",
+      "discoveryThemes": [
+        "history"
+      ],
       "defaultPersona": "adult",
       "pricing": {
         "status": "free",
@@ -87,6 +90,9 @@ export const presetRouteData = {
       "durationLabel": "40 mins",
       "durationMinutes": 40,
       "description": "Historic pubs and gathering places where politics and nightlife overlapped.",
+      "discoveryThemes": [
+        "history"
+      ],
       "defaultPersona": "adult",
       "pricing": {
         "status": "paid",
@@ -152,6 +158,9 @@ export const presetRouteData = {
       "durationLabel": "45 mins",
       "durationMinutes": 45,
       "description": "A walk through centuries of design.",
+      "discoveryThemes": [
+        "architecture"
+      ],
       "defaultPersona": "adult",
       "pricing": {
         "status": "free",
@@ -231,6 +240,9 @@ export const presetRouteData = {
       "durationLabel": "35 mins",
       "durationMinutes": 35,
       "description": "A playful walk through the wild side of Central Park.",
+      "discoveryThemes": [
+        "animals"
+      ],
       "defaultPersona": "preteen",
       "storyBy": "AI Explorer",
       "narratorGuidance": "You are the Animal Explorer, a friendly guide for curious kids discovering the wildlife hidden inside big cities. Focus on birds, squirrels, ducks, turtles, and other animals living alongside people in parks, ponds, trees, and buildings. Keep the tone playful and observant, ask occasional questions, encourage listeners to imagine what animals are doing when humans are not around, and explain how nature survives in a busy city.",
@@ -291,6 +303,10 @@ export const presetRouteData = {
       "durationLabel": "35 mins",
       "durationMinutes": 35,
       "description": "A comic-book adventure through Midtown ending at the Brooklyn Bridge, where real New York history meets the world of superheroes.",
+      "discoveryThemes": [
+        "comics",
+        "history"
+      ],
       "defaultPersona": "preteen",
       "storyBy": "AI Explorer",
       "narratorGuidance": "You are the Superhero Guide for curious kids and preteens. Keep the delivery cinematic and exciting, but let real New York comic-book history lead each stop. When the route mentions creators like Stan Lee, Jack Kirby, Steve Ditko, or Bob Kane, treat those names as real people connected to the city's creative history rather than as background flavor.",
@@ -579,6 +595,9 @@ export const presetRouteData = {
       "durationLabel": "35 mins",
       "durationMinutes": 35,
       "description": "Odd landmarks, secret corners, and the strangest stories in the city.",
+      "discoveryThemes": [
+        "weird_history"
+      ],
       "defaultPersona": "preteen",
       "storyBy": "AI Explorer",
       "narratorGuidance": "You are the Curious Explorer, obsessed with the strangest stories hidden in cities. Focus on funny accidents, unusual buildings, secret spaces, tiny details, and surprising moments from the past rather than formal history. Keep the tone playful, curious, and full of discovery so each stop feels like a hidden weird detail most people walk right past.",
@@ -639,6 +658,9 @@ export const presetRouteData = {
       "durationLabel": "30 mins",
       "durationMinutes": 30,
       "description": "Ghost stories and folklore.",
+      "discoveryThemes": [
+        "ghosts_folklore"
+      ],
       "defaultPersona": "ghost",
       "pricing": {
         "status": "free",
