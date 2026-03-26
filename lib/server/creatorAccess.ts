@@ -66,6 +66,8 @@ type CreatorAccessStartValidationResult =
 
 const CREATOR_ACCESS_SETUP_MESSAGE =
   "Creator access is not set up yet. Run the Supabase migration `20260326_add_creator_access_invites.sql`.";
+const CREATOR_ACCESS_COOKIE_SECRET_MESSAGE =
+  "CREATOR_ACCESS_COOKIE_SECRET is required for creator access. Add it to your environment and restart the server.";
 
 function getCookieSecret() {
   return (process.env.CREATOR_ACCESS_COOKIE_SECRET || "").trim();
@@ -158,7 +160,7 @@ function getCreatorAccessCookieName() {
 function createSignedCookieValue(payload: string, now = Date.now()) {
   const secret = getCookieSecret();
   if (!secret) {
-    throw new Error("CREATOR_ACCESS_COOKIE_SECRET is required to mint creator access cookies.");
+    throw new Error(CREATOR_ACCESS_COOKIE_SECRET_MESSAGE);
   }
   const expiresAt = now + COOKIE_TTL_MS;
   const signedPayload = `${COOKIE_VERSION}.${expiresAt}.${payload}`;
@@ -220,7 +222,7 @@ export function getCreatorAccessCookieOptions(now = Date.now()) {
 function createPendingClaimPayload(value: Omit<PendingCreatorAccessClaim, "expiresAt">, now = Date.now()) {
   const secret = getCookieSecret();
   if (!secret) {
-    throw new Error("CREATOR_ACCESS_COOKIE_SECRET is required to start creator access claims.");
+    throw new Error(CREATOR_ACCESS_COOKIE_SECRET_MESSAGE);
   }
   const expiresAt = now + PENDING_COOKIE_TTL_MS;
   const encodedPayload = Buffer.from(
