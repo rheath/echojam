@@ -7,7 +7,12 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import WalkScreen from "@/app/components/WalkScreen";
 import walkStyles from "@/app/components/WalkScreen.module.css";
-import { supabase } from "@/lib/supabaseClient";
+import {
+  getSupabaseAuthHeaders,
+  safeGetSupabaseUser,
+  safeOnSupabaseAuthStateChange,
+  signOutSupabaseClient,
+} from "@/lib/supabaseClient";
 import { buildPathWithUtm, pickUtmParamsFromSearchParams, appendUtmParams } from "@/lib/utm";
 
 const RouteMap = dynamic(() => import("@/app/components/RouteMap"), { ssr: false });
@@ -64,13 +69,9 @@ type JourneyAccessClientProps = {
 };
 
 async function withAuthHeaders() {
-  const headers = new Headers();
-  const { data } = await supabase.auth.getSession();
-  const accessToken = data.session?.access_token?.trim();
-  if (accessToken) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
-  }
-  return headers;
+  return await getSupabaseAuthHeaders(undefined, undefined, {
+    context: "journey access headers",
+  });
 }
 
 function buildFallbackStopPreview(teaser: JourneyOfferingSummary): JourneyStopPreview[] {
@@ -120,17 +121,19 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
     let cancelled = false;
 
     async function syncUser() {
-      const { data } = await supabase.auth.getUser();
+      const data = await safeGetSupabaseUser(undefined, {
+        context: "journey access user",
+      });
       if (!cancelled) {
-        setUserEmail(data.user?.email?.trim() || null);
+        setUserEmail(data?.email?.trim() || null);
       }
     }
 
     void syncUser();
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
+    const subscription = safeOnSupabaseAuthStateChange(() => {
       void syncUser();
+    }, undefined, {
+      context: "journey access auth subscription",
     });
 
     return () => {
@@ -296,7 +299,7 @@ export default function JourneyAccessClient({ slug, initialTeaser }: JourneyAcce
   }
 
   async function handleSignOut() {
-    await supabase.auth.signOut();
+    await signOutSupabaseClient();
     setUserEmail(null);
     setPayload(null);
     setMagicLinkMessage(null);

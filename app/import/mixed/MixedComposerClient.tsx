@@ -4,7 +4,6 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
 import { CUSTOM_NARRATOR_MAX_CHARS } from "@/lib/customNarrator";
 import {
   type InstagramDraftResponse,
@@ -21,7 +20,10 @@ import {
   type MixedComposerSessionSnapshot,
   type MixedComposerSessionProvider,
 } from "@/lib/mixedComposerSession";
-import { buildMixedImportPath } from "@/lib/mixedImportRouting";
+import {
+  buildMixedImportJourneysPath,
+  buildMixedImportPath,
+} from "@/lib/mixedImportRouting";
 import {
   buildMixedComposerCreateMixRequest,
   normalizeMixedComposerPublishTarget,
@@ -44,6 +46,17 @@ import {
   type ComposerStop,
   type GooglePlaceDraft,
 } from "@/lib/socialComposer";
+import {
+  safeGetSupabaseUser,
+  safeOnSupabaseAuthStateChange,
+} from "@/lib/supabaseClient";
+import {
+  type CreatorAccessStatusResponse,
+  type OwnedMixedJourneySummary,
+  type OwnedMixedJourneysResponse,
+  type ResumeMixedJourneyResponse,
+  fetchJson,
+} from "./clientShared";
 import styles from "./MixedComposerClient.module.css";
 
 type Provider = "instagram" | "tiktok";
@@ -66,32 +79,6 @@ type CreateMixResponse = {
   jamId?: string;
   routeId?: string;
   jobId?: string;
-  error?: string;
-};
-
-type OwnedMixedJourneySummary = {
-  jamId: string;
-  routeId: string;
-  sessionId: string | null;
-  title: string;
-  updatedAt: string;
-  hasDraft: boolean;
-};
-
-type OwnedMixedJourneysResponse = {
-  journeys: OwnedMixedJourneySummary[];
-};
-
-type CreatorAccessStatusResponse = {
-  authorized?: boolean;
-  email?: string | null;
-  scopes?: string[];
-  error?: string;
-};
-
-type ResumeMixedJourneyResponse = {
-  sessionId?: string;
-  reused?: boolean;
   error?: string;
 };
 
@@ -157,20 +144,6 @@ function getPlaceSubtitle(
   place: Pick<InstagramPlaceCandidate, "locationLabel" | "formattedAddress"> | null | undefined
 ) {
   return place?.locationLabel || place?.formattedAddress || null;
-}
-
-async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
-  const headers = new Headers(init?.headers);
-  const { data } = await supabase.auth.getSession();
-  const accessToken = data.session?.access_token?.trim();
-  if (accessToken && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
-  }
-
-  const response = await fetch(input, { ...init, headers });
-  const body = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(body.error || "Request failed");
-  return body;
 }
 
 async function sleep(ms: number) {
@@ -270,8 +243,6 @@ export default function MixedComposerClient({
   const [magicLinkMessage, setMagicLinkMessage] = useState<string | null>(null);
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
   const [ownedJourneys, setOwnedJourneys] = useState<OwnedMixedJourneySummary[]>([]);
-  const [isLoadingOwnedJourneys, setIsLoadingOwnedJourneys] = useState(false);
-  const [isResumingOwnedJourney, setIsResumingOwnedJourney] = useState(false);
   const [isInitialStateReady, setIsInitialStateReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -360,7 +331,6 @@ export default function MixedComposerClient({
     if (!normalizedJamId) return;
 
     setError(null);
-    setIsResumingOwnedJourney(true);
     try {
       const response = await fetchJson<ResumeMixedJourneyResponse>(
         `/api/mixed-composer-jams/${encodeURIComponent(normalizedJamId)}/resume`,
@@ -379,8 +349,6 @@ export default function MixedComposerClient({
           ? resumeError.message
           : "Failed to reopen your journey."
       );
-    } finally {
-      setIsResumingOwnedJourney(false);
     }
   }, [router]);
 
@@ -388,17 +356,19 @@ export default function MixedComposerClient({
     let cancelled = false;
 
     async function syncAuth() {
-      const { data } = await supabase.auth.getUser();
+      const data = await safeGetSupabaseUser(undefined, {
+        context: "mixed composer user",
+      });
       if (cancelled) return;
-      setAuthEmail(data.user?.email?.trim() || null);
+      setAuthEmail(data?.email?.trim() || null);
       setIsAuthReady(true);
     }
 
     void syncAuth();
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
+    const subscription = safeOnSupabaseAuthStateChange(() => {
       void syncAuth();
+    }, undefined, {
+      context: "mixed composer auth subscription",
     });
 
     return () => {
@@ -454,7 +424,6 @@ export default function MixedComposerClient({
     let cancelled = false;
 
     async function loadOwnedJourneys() {
-      setIsLoadingOwnedJourneys(true);
       try {
         const response = await fetchJson<OwnedMixedJourneysResponse>("/api/mixed-composer-jams");
         if (!cancelled) {
@@ -464,13 +433,9 @@ export default function MixedComposerClient({
         if (!cancelled) {
           setError(
             loadError instanceof Error
-              ? loadError.message
-              : "Failed to load your creator journeys."
+            ? loadError.message
+            : "Failed to load your creator journeys."
           );
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingOwnedJourneys(false);
         }
       }
     }
@@ -2912,6 +2877,11 @@ export default function MixedComposerClient({
             </Link> 
             <h1 className={styles.title}>Create your journey</h1>
           </div>
+          {ownedJourneys.length > 0 ? (
+            <Link href={buildMixedImportJourneysPath()} className={`${styles.secondaryButton} ${styles.linkButton}`}>
+              View all journeys
+            </Link>
+          ) : null}
         </div>
 
         <section className={`${styles.card} ${styles.titleCard}`}>
@@ -2949,37 +2919,6 @@ export default function MixedComposerClient({
             </div>
           </div>
         </section>
-
-        {ownedJourneys.length > 0 || isLoadingOwnedJourneys ? (
-          <section className={styles.card}>
-            <div className={styles.listHeader}>
-              <h2 className={styles.sectionTitle}>Your creator journeys</h2>
-            </div>
-            {isLoadingOwnedJourneys ? (
-              <p className={styles.emptyState}>Loading your journeys...</p>
-            ) : (
-              <div className={styles.results}>
-                {ownedJourneys.map((journey) => (
-                  <button
-                    key={journey.jamId}
-                    type="button"
-                    className={styles.resultRow}
-                    onClick={() => void resumeOwnedJourney(journey.jamId)}
-                    disabled={isResumingOwnedJourney}
-                  >
-                    <div>
-                      <div className={styles.resultTitle}>{journey.title}</div>
-                      <div className={styles.placeAddress}>
-                        {journey.hasDraft ? "Private draft ready" : "Reopen live journey into a private draft"}
-                      </div>
-                    </div>
-                    <span className={styles.resultMeta}>Edit</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-        ) : null}
 
         <div className={styles.columns}>
           <section className={styles.card}>

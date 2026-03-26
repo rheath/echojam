@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image, { type ImageProps } from "next/image";
-import { supabase } from "@/lib/supabaseClient";
+import {
+  getSupabaseAuthHeaders,
+  safeGetSupabaseUser,
+  safeOnSupabaseAuthStateChange,
+  supabase,
+} from "@/lib/supabaseClient";
 import {
   getPresetRouteSummariesByCity,
   getPresetRouteSummaryById,
@@ -49,6 +54,10 @@ import {
   type JamVisibilityState,
 } from "@/lib/jamRuntime";
 import { buildGoogleMapsDirectionsUrl } from "@/lib/routePath";
+import {
+  buildMixedImportEntryPath,
+  buildMixedImportPath,
+} from "@/lib/mixedImportRouting";
 import { mapResolvedRouteStops, toSafeResolvedRouteStopImage } from "@/lib/resolvedRouteStops";
 import { buildWalkScriptModalSourceLink } from "@/lib/walkScriptModalSource";
 import dynamic from "next/dynamic";
@@ -589,16 +598,6 @@ async function fetchJsonWithTimeout<T>(
   }
 }
 
-async function withSupabaseAuthHeaders(headersInit?: HeadersInit) {
-  const headers = new Headers(headersInit);
-  const { data } = await supabase.auth.getSession();
-  const accessToken = data.session?.access_token?.trim();
-  if (accessToken && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
-  }
-  return headers;
-}
-
 async function requestCurrentGeoPosition(timeoutMs = 8000): Promise<{ lat: number; lng: number }> {
   return await new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
@@ -792,6 +791,12 @@ export default function HomeClient() {
   const lastFollowAlongRouteProgressMRef = useRef<number | null>(null);
   const lastFollowAlongOffRouteRef = useRef(false);
   const previousVisibilityRef = useRef<JamVisibilityState>("visible");
+  const homeResetVersionRef = useRef(0);
+  const jamLoadRequestIdRef = useRef(0);
+  const routeLoadRequestIdRef = useRef(0);
+  const nearbyStoryRequestIdRef = useRef(0);
+  const walkDiscoveryStartRequestIdRef = useRef(0);
+  const jamIdFromUrlRef = useRef<string | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -820,16 +825,18 @@ export default function HomeClient() {
     let cancelled = false;
 
     async function syncAuthUser() {
-      const { data } = await supabase.auth.getUser();
+      const data = await safeGetSupabaseUser(undefined, {
+        context: "home auth user",
+      });
       if (cancelled) return;
-      setAuthUserEmail(data.user?.email?.trim() || null);
+      setAuthUserEmail(data?.email?.trim() || null);
     }
 
     void syncAuthUser();
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
+    const subscription = safeOnSupabaseAuthStateChange(() => {
       void syncAuthUser();
+    }, undefined, {
+      context: "home auth subscription",
     });
 
     return () => {
@@ -850,6 +857,43 @@ export default function HomeClient() {
   );
   const showLandingThemeToggle = true;
   const nextLandingTheme = landingTheme === "dark" ? "light" : "dark";
+
+  const invalidatePendingAsyncWork = useCallback((reason: string) => {
+    homeResetVersionRef.current += 1;
+    jamLoadRequestIdRef.current += 1;
+    routeLoadRequestIdRef.current += 1;
+    nearbyStoryRequestIdRef.current += 1;
+    walkDiscoveryStartRequestIdRef.current += 1;
+    console.warn(
+      `[home] invalidated pending async work (${reason}) version=${homeResetVersionRef.current}`
+    );
+  }, []);
+
+  const isAsyncResultCurrent = useCallback(
+    (
+      resetVersion: number,
+      requestId: number,
+      currentRequestId: number,
+      context: string,
+      expectedJamId?: string | null
+    ) => {
+      const resetValid = resetVersion === homeResetVersionRef.current;
+      const requestValid = requestId === currentRequestId;
+      const jamValid =
+        typeof expectedJamId === "undefined" || jamIdFromUrlRef.current === expectedJamId;
+      if (resetValid && requestValid && jamValid) return true;
+      console.warn(`[home] discarded stale async result (${context})`, {
+        resetVersion,
+        activeResetVersion: homeResetVersionRef.current,
+        requestId,
+        activeRequestId: currentRequestId,
+        expectedJamId: expectedJamId ?? null,
+        activeJamId: jamIdFromUrlRef.current,
+      });
+      return false;
+    },
+    []
+  );
 
   // Derive route + stop from jam
   const route: RouteDef | null = useMemo(() => customRoute, [customRoute]);
@@ -1192,12 +1236,27 @@ export default function HomeClient() {
 
   // ---------- Supabase: load jam ----------
   const loadJamById = useCallback(async (id: string) => {
+    const requestId = jamLoadRequestIdRef.current + 1;
+    jamLoadRequestIdRef.current = requestId;
+    const resetVersion = homeResetVersionRef.current;
     setErr(null);
     const { data, error } = await supabase
       .from("jams")
       .select("id,host_name,route_id,persona,current_stop,completed_at,is_playing,position_ms")
       .eq("id", id)
       .single();
+
+    if (
+      !isAsyncResultCurrent(
+        resetVersion,
+        requestId,
+        jamLoadRequestIdRef.current,
+        "loadJamById:jams",
+        id
+      )
+    ) {
+      return;
+    }
 
     if (error) {
       setErr(error.message);
@@ -1227,6 +1286,18 @@ export default function HomeClient() {
         .maybeSingle(),
     ]);
 
+    if (
+      !isAsyncResultCurrent(
+        resetVersion,
+        requestId,
+        jamLoadRequestIdRef.current,
+        "loadJamById:jobs",
+        id
+      )
+    ) {
+      return;
+    }
+
     const presetActive = (presetJobResult.data ?? null) as ActiveGenerationJobRow | null;
     const customActive = (customJobResult.data ?? null) as ActiveGenerationJobRow | null;
     const activeJob = presetActive ?? customActive;
@@ -1248,7 +1319,7 @@ export default function HomeClient() {
     }
     else if (data.completed_at) setStep("end");
     else setStep("walk");
-  }, []);
+  }, [isAsyncResultCurrent]);
 
   // ---------- Supabase: create jam ----------
   async function createJam(routeId?: string, personaValue: Persona = "adult", opts?: { skipStep?: boolean }) {
@@ -1375,6 +1446,7 @@ export default function HomeClient() {
   }
 
   function goHome() {
+    invalidatePendingAsyncWork("goHome");
     if (scriptModalCloseTimeoutRef.current) {
       window.clearTimeout(scriptModalCloseTimeoutRef.current);
       scriptModalCloseTimeoutRef.current = null;
@@ -1384,8 +1456,10 @@ export default function HomeClient() {
     setCustomRoute(null);
     setGenerationJobId(null);
     setGenerationJobKind(null);
+    setPendingPresetRouteAction(null);
     setIsScriptModalOpen(false);
     setIsScriptModalClosing(false);
+    setIsLandingJourneyModalOpen(false);
     setIsStartingWalkDiscovery(false);
     setWalkDiscoverySuggestion(null);
     setWalkDiscoveryCheckoutSuggestion(null);
@@ -1420,6 +1494,7 @@ export default function HomeClient() {
     walkDiscoveryRecentPositionsRef.current = [];
     walkDiscoveryLastFetchPosRef.current = null;
     walkDiscoveryCooldownsRef.current = {};
+    setActiveStopIndex(null);
     setPickDurationPage("routes");
     setStep("landing");
   }
@@ -1604,6 +1679,7 @@ export default function HomeClient() {
   }
 
   async function startFollowAlongExperience(personaOverride?: Persona) {
+    const resetVersion = homeResetVersionRef.current;
     const narratorSelection = resolveNarratorSubmitSelection(personaOverride);
     const personaForSubmit = narratorSelection.persona;
     if (!followAlongOrigin || !followAlongDestination || !personaForSubmit) {
@@ -1639,6 +1715,10 @@ export default function HomeClient() {
         },
         START_JOB_TIMEOUT_MS
       );
+      if (resetVersion !== homeResetVersionRef.current) {
+        console.warn("[home] discarded stale async result (startFollowAlongExperience)");
+        return;
+      }
       if (!body.jamId || !body.jobId) {
         throw new Error("Missing follow along generation metadata.");
       }
@@ -1646,12 +1726,19 @@ export default function HomeClient() {
       setGenerationJobKind("custom");
       router.replace(`/?jam=${body.jamId}`);
     } catch (e) {
+      if (resetVersion !== homeResetVersionRef.current) {
+        console.warn("[home] discarded stale async result (startFollowAlongExperience:error)");
+        return;
+      }
       setPickDurationPage("narrator");
       setStep("pickDuration");
       setGenerationJobId(null);
       setGenerationJobKind(null);
       setErr(e instanceof Error ? e.message : "Failed to create Follow Along.");
     } finally {
+      if (resetVersion !== homeResetVersionRef.current) {
+        return;
+      }
       setIsCreatingFollowAlong(false);
     }
   }
@@ -1696,6 +1783,9 @@ export default function HomeClient() {
   }
 
   const loadResolvedRoute = useCallback(async (routeRef: string) => {
+    const requestId = routeLoadRequestIdRef.current + 1;
+    routeLoadRequestIdRef.current = requestId;
+    const resetVersion = homeResetVersionRef.current;
     const startedAt =
       typeof performance !== "undefined" && typeof performance.now === "function"
         ? performance.now()
@@ -1705,14 +1795,35 @@ export default function HomeClient() {
     const isCustom = Boolean(customRouteId);
     const presetRouteSummary = getPresetRouteSummaryById(routeRef);
     if (!isCustom && !presetRouteSummary) {
-      setCustomRoute(null);
+      if (
+        isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          routeLoadRequestIdRef.current,
+          "loadResolvedRoute:missing preset"
+        )
+      ) {
+        setCustomRoute(null);
+      }
       return null;
     }
     const endpoint = isCustom
       ? `/api/custom-routes/${customRouteId}`
       : `/api/preset-routes/${routeRef}`;
-    const headers = await withSupabaseAuthHeaders();
+    const headers = await getSupabaseAuthHeaders(undefined, undefined, {
+      context: "home route headers",
+    });
     const res = await fetch(endpoint, { cache: "no-store", headers });
+    if (
+      !isAsyncResultCurrent(
+        resetVersion,
+        requestId,
+        routeLoadRequestIdRef.current,
+        "loadResolvedRoute:fetch"
+      )
+    ) {
+      return null;
+    }
     if (!res.ok && res.status === 402) {
       try {
         const lockedPayload = (await res.json()) as {
@@ -1722,6 +1833,16 @@ export default function HomeClient() {
           } | null;
         };
         if (lockedPayload.access === "locked") {
+          if (
+            !isAsyncResultCurrent(
+              resetVersion,
+              requestId,
+              routeLoadRequestIdRef.current,
+              "loadResolvedRoute:locked response"
+            )
+          ) {
+            return null;
+          }
           const teaserSlug = lockedPayload.teaser?.slug?.trim();
           if (teaserSlug) {
             setErr(null);
@@ -1753,11 +1874,31 @@ export default function HomeClient() {
           } | null;
         };
     if ("access" in payload && payload.access === "locked") {
+      if (
+        !isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          routeLoadRequestIdRef.current,
+          "loadResolvedRoute:locked payload"
+        )
+      ) {
+        return null;
+      }
       const teaserSlug = payload.teaser?.slug?.trim();
       if (teaserSlug) {
         router.replace(`/journeys/${encodeURIComponent(teaserSlug)}`);
       }
       setCustomRoute(null);
+      return null;
+    }
+    if (
+      !isAsyncResultCurrent(
+        resetVersion,
+        requestId,
+        routeLoadRequestIdRef.current,
+        "loadResolvedRoute:payload"
+      )
+    ) {
       return null;
     }
     const resolvedCity = isCustom
@@ -1845,7 +1986,7 @@ export default function HomeClient() {
         : Date.now()) - startedAt
     );
     return nextRoute;
-  }, [selectedCity, jam?.persona, instantDiscoveryCity, router]);
+  }, [instantDiscoveryCity, isAsyncResultCurrent, jam?.persona, router, selectedCity]);
 
   // ---------- "Start stop” handler ----------
 async function startStopNarration() {
@@ -2064,6 +2205,10 @@ async function startStopNarration() {
       return;
     }
 
+    const requestId = walkDiscoveryStartRequestIdRef.current + 1;
+    walkDiscoveryStartRequestIdRef.current = requestId;
+    const resetVersion = homeResetVersionRef.current;
+
     try {
       setErr(null);
       setIsStartingWalkDiscovery(true);
@@ -2081,6 +2226,16 @@ async function startStopNarration() {
         commitGeoPosition(coords, { force: true });
         setGeoAllowed(true);
       }
+      if (
+        !isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          walkDiscoveryStartRequestIdRef.current,
+          "startWalkDiscoveryExperience:coords"
+        )
+      ) {
+        return;
+      }
 
       const body = await fetchJsonWithTimeout<WalkDiscoveryStartResponse>(
         "/api/walk-discovery/start",
@@ -2096,18 +2251,58 @@ async function startStopNarration() {
         },
         START_JOB_TIMEOUT_MS
       );
+      if (
+        !isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          walkDiscoveryStartRequestIdRef.current,
+          "startWalkDiscoveryExperience:start response"
+        )
+      ) {
+        return;
+      }
 
       router.replace(`/?jam=${body.jamId}`);
       setWalkDiscoverySuggestion(null);
       await loadJamById(body.jamId);
+      if (
+        !isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          walkDiscoveryStartRequestIdRef.current,
+          "startWalkDiscoveryExperience:load jam"
+        )
+      ) {
+        return;
+      }
       setPendingAutoplayStopId(body.insertedStopId);
     } catch (e) {
+      if (
+        !isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          walkDiscoveryStartRequestIdRef.current,
+          "startWalkDiscoveryExperience:error"
+        )
+      ) {
+        return;
+      }
       setGenerationJobId(null);
       setGenerationJobKind(null);
       setGenerationProgress(0);
       setStep("landing");
       setErr(e instanceof Error ? e.message : "Failed to start Wander.");
     } finally {
+      if (
+        !isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          walkDiscoveryStartRequestIdRef.current,
+          "startWalkDiscoveryExperience:finally"
+        )
+      ) {
+        return;
+      }
       setIsResolvingNearbyGeo(false);
       setIsStartingWalkDiscovery(false);
     }
@@ -2141,7 +2336,9 @@ async function startStopNarration() {
     setWalkDiscoveryMagicLinkMessage(null);
 
     try {
-      const headers = await withSupabaseAuthHeaders({ "Content-Type": "application/json" });
+      const headers = await getSupabaseAuthHeaders({ "Content-Type": "application/json" }, undefined, {
+        context: "walk discovery accept",
+      });
       const body = await fetchJsonWithTimeout<WalkDiscoveryAcceptResponse>(
         "/api/walk-discovery/accept",
         {
@@ -2243,7 +2440,9 @@ async function startStopNarration() {
     setWalkDiscoveryMagicLinkMessage(null);
 
     try {
-      const headers = await withSupabaseAuthHeaders({ "Content-Type": "application/json" });
+      const headers = await getSupabaseAuthHeaders({ "Content-Type": "application/json" }, undefined, {
+        context: "walk discovery checkout",
+      });
       const body = await fetchJsonWithTimeout<WalkDiscoveryCheckoutSessionResponse>(
         "/api/walk-discovery/checkout",
         {
@@ -2294,6 +2493,9 @@ async function startStopNarration() {
   async function handleNearbyStory() {
     if (!isNearbyStoryEnabled || isGeneratingNearbyStory || isResolvingNearbyGeo) return;
     const previousStep = step;
+    const requestId = nearbyStoryRequestIdRef.current + 1;
+    nearbyStoryRequestIdRef.current = requestId;
+    const resetVersion = homeResetVersionRef.current;
 
     try {
       setErr(null);
@@ -2313,6 +2515,16 @@ async function startStopNarration() {
         commitGeoPosition(coords, { force: true });
         setGeoAllowed(true);
       }
+      if (
+        !isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          nearbyStoryRequestIdRef.current,
+          "handleNearbyStory:coords"
+        )
+      ) {
+        return;
+      }
 
       setGenerationMessage("Finding a nearby landmark...");
 
@@ -2331,6 +2543,16 @@ async function startStopNarration() {
         },
         START_JOB_TIMEOUT_MS
       );
+      if (
+        !isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          nearbyStoryRequestIdRef.current,
+          "handleNearbyStory:nearby response"
+        )
+      ) {
+        return;
+      }
 
       if (!Array.isArray(nearby.stops) || nearby.stops.length < 1) {
         throw new Error("No nearby places were returned.");
@@ -2349,16 +2571,46 @@ async function startStopNarration() {
         errorStep: previousStep,
         cityOverride: (nearby.cityUsed || "").trim() || undefined,
       });
+      if (
+        !isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          nearbyStoryRequestIdRef.current,
+          "handleNearbyStory:start generation"
+        )
+      ) {
+        return;
+      }
       if (!started) {
         setStep(previousStep);
       }
     } catch (e) {
+      if (
+        !isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          nearbyStoryRequestIdRef.current,
+          "handleNearbyStory:error"
+        )
+      ) {
+        return;
+      }
       setGenerationJobId(null);
       setGenerationJobKind(null);
       setGenerationProgress(0);
       setErr(e instanceof Error ? e.message : "Failed to generate nearby story");
       setStep(previousStep);
     } finally {
+      if (
+        !isAsyncResultCurrent(
+          resetVersion,
+          requestId,
+          nearbyStoryRequestIdRef.current,
+          "handleNearbyStory:finally"
+        )
+      ) {
+        return;
+      }
       setIsResolvingNearbyGeo(false);
       setIsGeneratingNearbyStory(false);
     }
@@ -2479,6 +2731,7 @@ async function startStopNarration() {
     personaSelection: Persona,
     options?: StartPresetTourOptions
   ) {
+    const resetVersion = homeResetVersionRef.current;
     const presetSummary = getPresetRouteSummaryById(routeId);
     if (!presetSummary) {
       setErr("Unknown preset route");
@@ -2532,7 +2785,9 @@ async function startStopNarration() {
 
       const controller = new AbortController();
       const timeoutId = window.setTimeout(() => controller.abort(), START_JOB_TIMEOUT_MS);
-      const headers = await withSupabaseAuthHeaders({ "Content-Type": "application/json" });
+      const headers = await getSupabaseAuthHeaders({ "Content-Type": "application/json" }, undefined, {
+        context: "preset generation create",
+      });
       const res = await fetch("/api/preset-jobs/create", {
         method: "POST",
         headers,
@@ -2547,6 +2802,10 @@ async function startStopNarration() {
       });
       window.clearTimeout(timeoutId);
       const body = (await res.json()) as { error?: string; jobId?: string; status?: string };
+      if (resetVersion !== homeResetVersionRef.current) {
+        console.warn("[home] discarded stale async result (startPresetTour)");
+        return;
+      }
       if (res.status === 429 && body.jobId) {
         setGenerationJobId(body.jobId);
         setGenerationJobKind("preset");
@@ -2560,6 +2819,10 @@ async function startStopNarration() {
       router.replace(`/?jam=${jamId}`);
       setPendingPresetRouteAction(null);
     } catch (e) {
+      if (resetVersion !== homeResetVersionRef.current) {
+        console.warn("[home] discarded stale async result (startPresetTour:error)");
+        return;
+      }
       if (e instanceof DOMException && e.name === "AbortError") {
         setErr("Timed out while starting generation. Please try again.");
       } else {
@@ -2746,6 +3009,7 @@ async function startStopNarration() {
     personaOverride?: Persona,
     options?: StartCustomMixOptions
   ) {
+    const resetVersion = homeResetVersionRef.current;
     const stopsToGenerate = prioritizeOverviewById(stopsOverride ?? builderSelectedStops);
     const narratorSelection = resolveNarratorSubmitSelection(
       personaOverride,
@@ -2787,6 +3051,10 @@ async function startStopNarration() {
         },
         START_JOB_TIMEOUT_MS
       );
+      if (resetVersion !== homeResetVersionRef.current) {
+        console.warn("[home] discarded stale async result (startCustomMixGeneration)");
+        return false;
+      }
       if (!body.jamId || !body.jobId) {
         throw new Error("Missing generation job metadata");
       }
@@ -2798,11 +3066,18 @@ async function startStopNarration() {
       router.replace(`/?jam=${body.jamId}`);
       return true;
     } catch (e) {
+      if (resetVersion !== homeResetVersionRef.current) {
+        console.warn("[home] discarded stale async result (startCustomMixGeneration:error)");
+        return false;
+      }
       setGenerationJobKind(null);
       setErr(e instanceof Error ? e.message : "Failed to generate custom mix");
       setStep(options?.errorStep ?? "buildMix");
       return false;
     } finally {
+      if (resetVersion !== homeResetVersionRef.current) {
+        return;
+      }
       setIsGeneratingMix(false);
     }
   }
@@ -2850,7 +3125,9 @@ async function startStopNarration() {
     if (customRouteId) {
       try {
         setErr(null);
-        const headers = await withSupabaseAuthHeaders({ "Content-Type": "application/json" });
+        const headers = await getSupabaseAuthHeaders({ "Content-Type": "application/json" }, undefined, {
+          context: "save custom route changes",
+        });
         const response = await fetch(`/api/custom-routes/${encodeURIComponent(customRouteId)}`, {
           method: "PATCH",
           headers,
@@ -2913,6 +3190,7 @@ async function startStopNarration() {
     }
 
     if (!jamIdFromUrl) {
+      invalidatePendingAsyncWork("jam param cleared");
       setJam(null);
       setListenCount(0);
       setCustomRoute(null);
@@ -2922,7 +3200,7 @@ async function startStopNarration() {
       return;
     }
     loadJamById(jamIdFromUrl);
-  }, [jamIdFromUrl, debugStepFromUrl, loadJamById]);
+  }, [debugStepFromUrl, invalidatePendingAsyncWork, jamIdFromUrl, loadJamById]);
 
   useEffect(() => {
     if (jamIdFromUrl) return;
@@ -3864,6 +4142,10 @@ async function startStopNarration() {
         : "One nearby landmark. Story by AI Historian.";
   const showLandingDiscoverNearby = false;
 
+  useEffect(() => {
+    jamIdFromUrlRef.current = jamIdFromUrl;
+  }, [jamIdFromUrl]);
+
   // ---------- UI ----------
   return (
     <div className={`${styles.container} ${step === "walk" || step === "followAlongDrive" || step === "landing" || step === "pickDuration" || step === "buildMix" || step === "followAlongSetup" || step === "generating" ? styles.containerWide : ""}`}>
@@ -4114,7 +4396,7 @@ async function startStopNarration() {
                 <button
                   type="button"
                   onClick={() => {
-                    router.push("/import/mixed");
+                    router.push(buildMixedImportEntryPath());
                   }}
                   className={styles.landingHeroCta}
                 >
@@ -5552,7 +5834,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                     className={walkStyles.pillButton}
                     type="button"
                     onClick={() => {
-                      router.push(`/import/mixed?resumeJam=${encodeURIComponent(activeEditableJamId)}`);
+                      router.push(buildMixedImportPath({ resumeJamId: activeEditableJamId }));
                     }}
                   >
                     {activeSocialEditLabel}

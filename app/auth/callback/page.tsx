@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import {
+  exchangeSupabaseCodeForSession,
+  isSupabaseLockAcquireTimeoutError,
+  retrySupabaseAuthOperation,
+  supabase,
+} from "@/lib/supabaseClient";
 
 function normalizeNextPath(value: string | null) {
   const candidate = (value || "").trim();
@@ -30,12 +35,23 @@ export default function AuthCallbackPage() {
 
       try {
         if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          const { error } = await exchangeSupabaseCodeForSession(code, undefined, {
+            context: "auth callback exchange",
+            retries: 2,
+            retryDelayMs: 250,
+          });
           if (error) throw error;
         }
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+        const session = await retrySupabaseAuthOperation(async () => {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          return session;
+        }, {
+          context: "auth callback getSession",
+          retries: 2,
+          retryDelayMs: 250,
+        });
         const accessToken = session?.access_token?.trim();
         if (accessToken) {
           const response = await fetch("/api/creator-access/complete", {
@@ -54,6 +70,10 @@ export default function AuthCallbackPage() {
         }
       } catch (e) {
         if (!cancelled) {
+          if (isSupabaseLockAcquireTimeoutError(e)) {
+            setMessage("We couldn't finish sign-in because browser session access is temporarily busy. Please retry in a moment.");
+            return;
+          }
           setMessage(e instanceof Error ? e.message : "Sign-in failed.");
         }
       }

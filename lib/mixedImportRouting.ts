@@ -6,6 +6,10 @@ import {
 
 export type MixedImportProvider = "instagram" | "tiktok";
 
+export const MIXED_IMPORT_ENTRY_PATH = "/import/mixed";
+export const MIXED_IMPORT_JOURNEYS_PATH = "/import/mixed/journeys";
+export const MIXED_IMPORT_CREATE_PATH = "/import/mixed/create";
+
 type BuildMixedImportPathParams = {
   sessionId?: string | null;
   resumeJamId?: string | null;
@@ -33,12 +37,20 @@ export function buildMixedImportPath(params: BuildMixedImportPathParams = {}) {
   if (tiktokDraftId) search.set("tiktokDraft", tiktokDraftId);
 
   const query = search.toString();
-  return query ? `/import/mixed?${query}` : "/import/mixed";
+  return query ? `${MIXED_IMPORT_CREATE_PATH}?${query}` : MIXED_IMPORT_CREATE_PATH;
+}
+
+export function buildMixedImportEntryPath() {
+  return MIXED_IMPORT_ENTRY_PATH;
+}
+
+export function buildMixedImportJourneysPath() {
+  return MIXED_IMPORT_JOURNEYS_PATH;
 }
 
 export function isMixedImportPath(value: string | null | undefined) {
   const normalized = toNullableTrimmed(value);
-  return Boolean(normalized && normalized.startsWith("/import/mixed"));
+  return Boolean(normalized && normalized.startsWith(MIXED_IMPORT_ENTRY_PATH));
 }
 
 export function normalizeMixedImportNextPath(

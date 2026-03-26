@@ -42,7 +42,7 @@ test("pending creator access claim cookies round-trip the invite claim payload",
       inviteId: "invite-123",
       email: "creator@example.com",
       requestedScope: "mixed",
-      nextPath: "/import/mixed",
+      nextPath: "/import/mixed/journeys",
     },
     now
   );
@@ -51,7 +51,7 @@ test("pending creator access claim cookies round-trip the invite claim payload",
     inviteId: "invite-123",
     email: "creator@example.com",
     requestedScope: "mixed",
-    nextPath: "/import/mixed",
+    nextPath: "/import/mixed/journeys",
     expiresAt: now + (15 * 60 * 1000),
   });
   assert.equal(parsePendingCreatorAccessClaimCookieValue(cookieValue, now + (16 * 60 * 1000)), null);
@@ -89,7 +89,7 @@ test("validateCreatorAccessStart returns a setup error when the invites table is
     admin: fakeAdmin as never,
     code: "alpha",
     email: "creator@example.com",
-    next: "/import/mixed",
+    next: "/import/mixed/create?provider=instagram",
     requestedScope: "mixed",
   });
 

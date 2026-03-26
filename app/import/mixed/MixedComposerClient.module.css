@@ -24,6 +24,12 @@
   text-decoration: none;
 }
 
+.linkButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .backLink {
   display: inline-flex;
   margin-bottom: 10px;
@@ -488,6 +494,10 @@
   outline: none;
 }
 
+.bigCreateButton {
+  min-width: 240px;
+}
+
 .emptyState {
   margin-top: 18px;
 }
@@ -709,5 +719,10 @@
 
   .metadataGrid {
     grid-template-columns: 1fr;
+  }
+
+  .bigCreateButton {
+    width: 100%;
+    min-width: 0;
   }
 }

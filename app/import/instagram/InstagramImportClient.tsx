@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { buildMixedImportPath } from "@/lib/mixedImportRouting";
 import {
   addInstagramCollectionDraftId,
   canMasterPublishInstagramDrafts,
@@ -994,7 +995,7 @@ export default function InstagramImportClient() {
                   <button
                     type="button"
                     onClick={() => {
-                      router.push(`/import/mixed?instagramDraft=${encodeURIComponent(activeComposerDraftId)}`);
+                      router.push(buildMixedImportPath({ instagramDraftId: activeComposerDraftId }));
                     }}
                     className={styles.linkButton}
                   >

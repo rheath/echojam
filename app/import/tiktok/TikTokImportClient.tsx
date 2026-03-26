@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { buildMixedImportPath } from "@/lib/mixedImportRouting";
 import styles from "./TikTokImportClient.module.css";
 
 type CreateResponse = {
@@ -57,7 +58,7 @@ export default function TikTokImportClient() {
           `/api/tiktok-imports/jobs/${encodeURIComponent(create.jobId)}`
         );
         if (job.status === "draft_ready") {
-          router.push(`/import/mixed?tiktokDraft=${encodeURIComponent(create.draftId)}`);
+          router.push(buildMixedImportPath({ tiktokDraftId: create.draftId }));
           return;
         }
         if (job.status === "failed") {
@@ -87,7 +88,7 @@ export default function TikTokImportClient() {
               Import one public TikTok video, then jump straight into the mixed composer with that draft preloaded.
             </p>
           </div>
-          <Link href="/import/mixed?provider=tiktok" className={styles.secondaryLink}>
+          <Link href={buildMixedImportPath({ provider: "tiktok" })} className={styles.secondaryLink}>
             Open Mixed Composer
           </Link>
         </header>

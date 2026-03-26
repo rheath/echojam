@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import MixedImportEntryClient from "./MixedImportEntryClient";
+import MixedComposerClient from "../MixedComposerClient";
 import { buildMixedImportPath } from "@/lib/mixedImportRouting";
 import {
   isInstagramCreatorAccessAuthorizedFromCookieStore,
@@ -15,7 +15,7 @@ function toSingleSearchParam(value: string | string[] | undefined) {
   return typeof value === "string" ? value : Array.isArray(value) ? value[0] : null;
 }
 
-export default async function MixedImportPage({
+export default async function MixedImportCreatePage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -26,25 +26,6 @@ export default async function MixedImportPage({
   const initialProvider = toSingleSearchParam(resolved.provider);
   const initialInstagramDraftId = toSingleSearchParam(resolved.instagramDraft);
   const initialTikTokDraftId = toSingleSearchParam(resolved.tiktokDraft);
-  const hasExplicitComposerState = Boolean(
-    initialSessionId ||
-      initialResumeJamId ||
-      initialProvider ||
-      initialInstagramDraftId ||
-      initialTikTokDraftId
-  );
-
-  const createPath = buildMixedImportPath({
-    sessionId: initialSessionId,
-    resumeJamId: initialResumeJamId,
-    provider: initialProvider,
-    instagramDraftId: initialInstagramDraftId,
-    tiktokDraftId: initialTikTokDraftId,
-  });
-
-  if (!hasExplicitComposerState) {
-    return <MixedImportEntryClient />;
-  }
 
   if (initialProvider === "instagram" || initialInstagramDraftId) {
     if (!isInstagramImportEnabled()) {
@@ -52,7 +33,17 @@ export default async function MixedImportPage({
     }
     const cookieStore = await cookies();
     if (!isInstagramCreatorAccessAuthorizedFromCookieStore(cookieStore)) {
-      redirect(`/import/instagram/access?next=${encodeURIComponent(createPath)}`);
+      redirect(
+        `/import/instagram/access?next=${encodeURIComponent(
+          buildMixedImportPath({
+            sessionId: initialSessionId,
+            resumeJamId: initialResumeJamId,
+            provider: initialProvider,
+            instagramDraftId: initialInstagramDraftId,
+            tiktokDraftId: initialTikTokDraftId,
+          })
+        )}`
+      );
     }
   }
 
@@ -62,9 +53,28 @@ export default async function MixedImportPage({
     }
     const cookieStore = await cookies();
     if (!isTikTokCreatorAccessAuthorizedFromCookieStore(cookieStore)) {
-      redirect(`/import/tiktok/access?next=${encodeURIComponent(createPath)}`);
+      redirect(
+        `/import/tiktok/access?next=${encodeURIComponent(
+          buildMixedImportPath({
+            sessionId: initialSessionId,
+            resumeJamId: initialResumeJamId,
+            provider: initialProvider,
+            instagramDraftId: initialInstagramDraftId,
+            tiktokDraftId: initialTikTokDraftId,
+          })
+        )}`
+      );
     }
   }
 
-  redirect(createPath);
+  return (
+    <MixedComposerClient
+      initialSessionId={initialSessionId}
+      initialResumeJamId={initialResumeJamId}
+      initialProvider={initialProvider}
+      initialInstagramDraftId={initialInstagramDraftId}
+      initialTikTokDraftId={initialTikTokDraftId}
+      initialPublishTarget={null}
+    />
+  );
 }

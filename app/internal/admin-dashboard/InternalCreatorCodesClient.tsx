@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import {
+  getSupabaseAuthHeaders,
+  safeGetSupabaseUser,
+  safeOnSupabaseAuthStateChange,
+  signOutSupabaseClient,
+} from "@/lib/supabaseClient";
 
 type CreatorInviteSummary = {
   id: string;
@@ -31,13 +36,9 @@ class RequestError extends Error {
 }
 
 async function fetchDashboardJson<T>(input: RequestInfo, init?: RequestInit) {
-  const headers = new Headers(init?.headers);
-  const { data } = await supabase.auth.getSession();
-  const accessToken = data.session?.access_token?.trim();
-  if (accessToken && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
-  }
-
+  const headers = await getSupabaseAuthHeaders(init?.headers, undefined, {
+    context: "internal dashboard fetch",
+  });
   const response = await fetch(input, { ...init, headers });
   const body = (await response.json().catch(() => ({}))) as T & { error?: string };
   if (!response.ok) {
@@ -69,8 +70,10 @@ export default function InternalCreatorCodesClient() {
   const [invites, setInvites] = useState<CreatorInviteSummary[]>([]);
 
   const loadDashboard = useCallback(async () => {
-    const { data } = await supabase.auth.getUser();
-    const signedInEmail = data.user?.email?.trim().toLowerCase() || null;
+    const signedInUser = await safeGetSupabaseUser(undefined, {
+      context: "internal dashboard load user",
+    });
+    const signedInEmail = signedInUser?.email?.trim().toLowerCase() || null;
     setCurrentEmail(signedInEmail);
     setMagicLinkEmail((current) => current || signedInEmail || "");
     setDashboardError(null);
@@ -107,10 +110,10 @@ export default function InternalCreatorCodesClient() {
 
     void run();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
+    const subscription = safeOnSupabaseAuthStateChange(() => {
       void loadDashboard();
+    }, undefined, {
+      context: "internal dashboard auth subscription",
     });
 
     return () => {
@@ -179,7 +182,7 @@ export default function InternalCreatorCodesClient() {
   }
 
   async function handleSignOut() {
-    await supabase.auth.signOut();
+    await signOutSupabaseClient();
     setInvites([]);
     setSaveMessage(null);
     setMagicLinkMessage(null);
