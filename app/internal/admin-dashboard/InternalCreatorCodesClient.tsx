@@ -76,7 +76,7 @@ export default function InternalCreatorCodesClient() {
     setDashboardError(null);
 
     try {
-      const response = await fetchDashboardJson<DashboardResponse>("/api/internal/creator-codes");
+      const response = await fetchDashboardJson<DashboardResponse>("/api/internal/admin-dashboard");
       setInvites(Array.isArray(response.invites) ? response.invites : []);
       setAccessState("ready");
     } catch (error) {
@@ -130,7 +130,7 @@ export default function InternalCreatorCodesClient() {
     setMagicLinkMessage(null);
     setIsSendingMagicLink(true);
     try {
-      const response = await fetch("/api/internal/creator-codes/access", {
+      const response = await fetch("/api/internal/admin-dashboard/access", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -157,7 +157,7 @@ export default function InternalCreatorCodesClient() {
 
     try {
       const response = await fetchDashboardJson<{ ok?: boolean; inviteId?: string; email?: string }>(
-        "/api/internal/creator-codes",
+        "/api/internal/admin-dashboard",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

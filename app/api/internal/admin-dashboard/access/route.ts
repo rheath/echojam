@@ -16,7 +16,7 @@ export async function POST(req: Request) {
 
     await sendCreatorAccessMagicLink({
       email: validation.normalizedEmail,
-      nextPath: "/internal/creator-codes",
+      nextPath: "/internal/admin-dashboard",
     });
 
     return NextResponse.json({ ok: true });
