@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
 import {
-  createInstagramCreatorAccessCookieValue,
-  getInstagramCreatorAccessCookieOptions,
-  INSTAGRAM_CREATOR_ACCESS_COOKIE_NAME,
   isInstagramImportEnabled,
-  validateInstagramCreatorAccessCode,
 } from "@/lib/server/instagramCreatorAccess";
+import {
+  CREATOR_ACCESS_PENDING_COOKIE_NAME,
+  createPendingCreatorAccessClaimCookieValue,
+  getPendingCreatorAccessCookieOptions,
+  sendCreatorAccessMagicLink,
+  validateCreatorAccessStart,
+} from "@/lib/server/creatorAccess";
 
 type Body = {
   code?: string | null;
+  email?: string | null;
+  next?: string | null;
 };
 
 export async function POST(req: Request) {
@@ -19,20 +24,39 @@ export async function POST(req: Request) {
     );
   }
 
-  const body = (await req.json().catch(() => ({}))) as Body;
-  const validation = validateInstagramCreatorAccessCode(body.code);
-  if (!validation.ok) {
+  try {
+    const body = (await req.json().catch(() => ({}))) as Body;
+    const validation = await validateCreatorAccessStart({
+      code: body.code,
+      email: body.email,
+      next: body.next,
+      requestedScope: "mixed",
+    });
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: validation.status });
+    }
+
+    await sendCreatorAccessMagicLink({
+      email: validation.normalizedEmail,
+      nextPath: validation.nextPath,
+    });
+
+    const response = NextResponse.json({ ok: true });
+    response.cookies.set(
+      CREATOR_ACCESS_PENDING_COOKIE_NAME,
+      createPendingCreatorAccessClaimCookieValue({
+        inviteId: validation.invite.id,
+        email: validation.normalizedEmail,
+        requestedScope: validation.requestedScope,
+        nextPath: validation.nextPath,
+      }),
+      getPendingCreatorAccessCookieOptions()
+    );
+    return response;
+  } catch (error) {
     return NextResponse.json(
-      { error: validation.error },
-      { status: validation.status }
+      { error: error instanceof Error ? error.message : "Failed to unlock Instagram uploader." },
+      { status: 500 }
     );
   }
-
-  const response = NextResponse.json({ ok: true });
-  response.cookies.set(
-    INSTAGRAM_CREATOR_ACCESS_COOKIE_NAME,
-    createInstagramCreatorAccessCookieValue(),
-    getInstagramCreatorAccessCookieOptions()
-  );
-  return response;
 }

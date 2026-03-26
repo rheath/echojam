@@ -7,14 +7,14 @@ type Body = {
 };
 
 export async function POST(req: Request, ctx: { params: Promise<{ draftId: string }> }) {
-  const access = getTikTokImportRequestAuthorizationState(req);
+  const access = await getTikTokImportRequestAuthorizationState(req);
   if (!access.enabled) {
     return NextResponse.json({ error: "TikTok import is unavailable." }, { status: 404 });
   }
   if (!access.authorized) {
     return NextResponse.json(
-      { error: "Enter a valid creator code to use the TikTok uploader." },
-      { status: 401 }
+      { error: access.error || "Creator access required. Enter your code and creator email first." },
+      { status: access.status || 401 }
     );
   }
 

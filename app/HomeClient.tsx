@@ -16,6 +16,10 @@ import { inferDiscoveryThemes } from "@/lib/discoveryThemes";
 import { getPresetCityMeta, isPresetOverviewStopId } from "@/lib/presetOverview";
 import { personaCatalog } from "@/lib/personas/catalog";
 import { getMaxStops, validateMixSelection } from "@/lib/mixConstraints";
+import {
+  formatWalkStopSourceLabel,
+  hasMultipleWalkSourceCredits,
+} from "@/lib/walkSourceMeta";
 import { CUSTOM_NARRATOR_MAX_CHARS } from "@/lib/customNarrator";
 import {
   nextFollowAlongStopIndex,
@@ -46,6 +50,7 @@ import {
 } from "@/lib/jamRuntime";
 import { buildGoogleMapsDirectionsUrl } from "@/lib/routePath";
 import { mapResolvedRouteStops, toSafeResolvedRouteStopImage } from "@/lib/resolvedRouteStops";
+import { buildWalkScriptModalSourceLink } from "@/lib/walkScriptModalSource";
 import dynamic from "next/dynamic";
 import WalkScreen from "./components/WalkScreen";
 import walkStyles from "./components/WalkScreen.module.css";
@@ -127,6 +132,7 @@ type CustomRouteResponse = {
     route_distance_meters?: number | null;
     route_duration_seconds?: number | null;
     route_polyline?: [number, number][] | null;
+    can_edit?: boolean;
     story_by?: string | null;
     story_by_url?: string | null;
     story_by_avatar_url?: string | null;
@@ -142,6 +148,7 @@ type CustomRouteResponse = {
     source_kind?: "social_import" | "place_search" | null;
     source_url?: string | null;
     source_id?: string | null;
+    source_preview_image_url?: string | null;
     source_creator_name?: string | null;
     source_creator_url?: string | null;
     source_creator_avatar_url?: string | null;
@@ -195,16 +202,6 @@ type FollowAlongSearchResponse = {
 type FollowAlongOriginResponse = {
   origin: FollowAlongLocation;
 };
-
-function formatStopSourceLabel(stop: Pick<RouteDef["stops"][number], "sourceProvider" | "sourceCreatorName"> | null | undefined) {
-  if (!stop?.sourceProvider) return null;
-  if (stop.sourceProvider === "google_places") return "Google Place";
-  const creator = (stop.sourceCreatorName || "").trim();
-  if (stop.sourceProvider === "instagram") {
-    return creator ? `Instagram • ${creator}` : "Instagram";
-  }
-  return creator ? `TikTok • ${creator}` : "TikTok";
-}
 
 type FollowAlongPreviewResponse = {
   origin: FollowAlongLocation;
@@ -889,7 +886,16 @@ export default function HomeClient() {
     step === "walk" &&
     isFinalStopWalkDiscoveryEligible &&
     (isWalkDiscoveryRoute || !currentStop?.id.startsWith("nearby-"));
-  const currentStopSourceLabel = currentStop ? formatStopSourceLabel(currentStop) : null;
+  const shouldShowWalkStopSourceMeta = useMemo(
+    () => hasMultipleWalkSourceCredits(route?.stops ?? []),
+    [route?.stops]
+  );
+  const currentStopSourceLabel = currentStop
+    ? formatWalkStopSourceLabel(currentStop, shouldShowWalkStopSourceMeta)
+    : null;
+  const currentStopScriptModalSourceLink = currentStop
+    ? buildWalkScriptModalSourceLink(currentStop)
+    : null;
   const currentStopScript = useMemo(() => {
     if (!currentStop) return "";
     return currentStop?.text?.[persona] || "";
@@ -942,8 +948,14 @@ export default function HomeClient() {
   const instagramStoryByUrl = isSocialAttributedCustomRoute ? route?.storyByUrl?.trim() || null : null;
   const instagramStoryByAvatarUrl = isSocialAttributedCustomRoute ? route?.storyByAvatarUrl?.trim() || null : null;
   const shouldShowInstagramStoryAvatar = Boolean(instagramStoryByAvatarUrl && !didInstagramAvatarFail);
-  const activeInstagramCustomRouteId =
-    step === "walk" && isSocialAttributedCustomRoute ? getCustomRouteId(route?.id ?? null) : null;
+  const activeEditableJamId =
+    step === "walk" && !isPresetWalkRoute && route?.canEdit ? jam?.id ?? null : null;
+  const activeSocialEditLabel =
+    route?.storyBySource === "instagram" || route?.storyBySource === "social"
+      ? "Edit (IG)"
+      : route?.storyBySource === "tiktok"
+        ? "Edit (TikTok)"
+        : "Edit";
   const activePresetWalkRouteId =
     step === "walk" && isPresetWalkRoute && jam?.route_id ? (jam.route_id as RouteDef["id"]) : null;
   const isActivePresetWalkRegenerating =
@@ -1777,6 +1789,7 @@ export default function HomeClient() {
         ? (payload.route.story_by_avatar_url ?? null)
         : null,
       storyBySource: isCustom ? (payload.route.story_by_source ?? null) : null,
+      canEdit: isCustom ? Boolean(payload.route.can_edit) : false,
       narratorGuidance: isCustom ? (payload.route.narrator_guidance || "").trim() || null : null,
       pricing: isCustom ? undefined : presetRouteSummary?.pricing,
       city: isCustom ? toKnownCityOption(resolvedCity) : presetRouteSummary?.city,
@@ -2837,9 +2850,10 @@ async function startStopNarration() {
     if (customRouteId) {
       try {
         setErr(null);
+        const headers = await withSupabaseAuthHeaders({ "Content-Type": "application/json" });
         const response = await fetch(`/api/custom-routes/${encodeURIComponent(customRouteId)}`, {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             stopIds: nextStops.map((stop) => stop.id),
           }),
@@ -3786,7 +3800,7 @@ async function startStopNarration() {
             isOverview: true,
             image: toSafeStopImage(stop.images[0]),
             subtitle: "Starting point",
-            sourceLabel: formatStopSourceLabel(stop),
+            sourceLabel: formatWalkStopSourceLabel(stop, shouldShowWalkStopSourceMeta),
             isActive: false,
           };
         }
@@ -3802,7 +3816,7 @@ async function startStopNarration() {
           isOverview: Boolean(stop.isOverview),
           image: toSafeStopImage(stop.images[0]),
           subtitle: `${fallbackMinutes} mins away`,
-          sourceLabel: formatStopSourceLabel(stop),
+          sourceLabel: formatWalkStopSourceLabel(stop, shouldShowWalkStopSourceMeta),
           isActive: false,
         };
       }
@@ -3820,11 +3834,11 @@ async function startStopNarration() {
         isOverview: Boolean(stop.isOverview),
         image: toSafeStopImage(stop.images[0]),
         subtitle,
-        sourceLabel: formatStopSourceLabel(stop),
+        sourceLabel: formatWalkStopSourceLabel(stop, shouldShowWalkStopSourceMeta),
         isActive: idx === selectedIdx,
       };
     });
-  }, [route, currentStopIndex]);
+  }, [route, currentStopIndex, shouldShowWalkStopSourceMeta]);
 
   const mapsUrl = useMemo(() => {
     if (!route) return "#";
@@ -5310,6 +5324,27 @@ You choose where to go — each stop shapes what unfolds next.                  
                       unoptimized
                     />
                   </div>
+                  {currentStopScriptModalSourceLink ? (
+                    <a
+                      href={currentStopScriptModalSourceLink.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={styles.scriptModalSourceLink}
+                    >
+                      <div className={styles.scriptModalSourceThumbWrap}>
+                        <Image
+                          src={currentStopScriptModalSourceLink.imageSrc}
+                          alt=""
+                          fill
+                          className={styles.scriptModalSourceThumb}
+                          unoptimized
+                        />
+                      </div>
+                      <div className={styles.scriptModalSourceText}>
+                        {currentStopScriptModalSourceLink.ctaLabel}
+                      </div>
+                    </a>
+                  ) : null}
                   <div className={styles.scriptModalBody}>
                     {currentStopScript || (isGeneratingScriptForModal ? "Generating script..." : "No generated script for this stop yet.")}
                   </div>
@@ -5512,15 +5547,15 @@ You choose where to go — each stop shapes what unfolds next.                  
               <>
                 <button className={walkStyles.pillButton} type="button" onClick={copyShareLink}>Share</button>
 
-                {activeInstagramCustomRouteId ? (
+                {activeEditableJamId ? (
                   <button
                     className={walkStyles.pillButton}
                     type="button"
                     onClick={() => {
-                      router.push(`/import/instagram?route=${encodeURIComponent(activeInstagramCustomRouteId)}`);
+                      router.push(`/import/mixed?resumeJam=${encodeURIComponent(activeEditableJamId)}`);
                     }}
                   >
-                    Edit (IG)
+                    {activeSocialEditLabel}
                   </button>
                 ) : null}
 
@@ -5538,7 +5573,7 @@ You choose where to go — each stop shapes what unfolds next.                  
                   </button>
                 )}
 
-                {!activeInstagramCustomRouteId ? (
+                {!activeEditableJamId ? (
                   <button
                     className={walkStyles.pillButton}
                     type="button"
@@ -5912,6 +5947,55 @@ You choose where to go — each stop shapes what unfolds next.                  
                       unoptimized
                     />
                   </div>
+                  {currentStopScriptModalSourceLink?.provider === "instagram" ? (
+                    <a
+                      href={currentStopScriptModalSourceLink.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={styles.scriptModalInstagramCard}
+                    >
+                      <div className={styles.scriptModalInstagramThumbWrap}>
+                        <WalkStepImage
+                          src={currentStopScriptModalSourceLink.imageSrc}
+                          alt=""
+                          fill
+                          className={styles.scriptModalInstagramThumb}
+                          unoptimized
+                        />
+                      </div>
+                      <div className={styles.scriptModalInstagramText}>
+                        <div className={styles.scriptModalInstagramEyebrow}>
+                          {currentStopScriptModalSourceLink.title}
+                        </div>
+                        <div className={styles.scriptModalInstagramDescription}>
+                          {currentStopScriptModalSourceLink.description}
+                        </div>
+                        <div className={styles.scriptModalInstagramCta}>
+                          {currentStopScriptModalSourceLink.ctaLabel}
+                        </div>
+                      </div>
+                    </a>
+                  ) : currentStopScriptModalSourceLink ? (
+                    <a
+                      href={currentStopScriptModalSourceLink.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={styles.scriptModalSourceLink}
+                    >
+                      <div className={styles.scriptModalSourceThumbWrap}>
+                        <Image
+                          src={currentStopScriptModalSourceLink.imageSrc}
+                          alt=""
+                          fill
+                          className={styles.scriptModalSourceThumb}
+                          unoptimized
+                        />
+                      </div>
+                      <div className={styles.scriptModalSourceText}>
+                        {currentStopScriptModalSourceLink.ctaLabel}
+                      </div>
+                    </a>
+                  ) : null}
                   <div className={styles.scriptModalBody}>
                     {currentStopScript || (isGeneratingScriptForModal ? "Generating script..." : "No generated script for this stop yet.")}
                   </div>

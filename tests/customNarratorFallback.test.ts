@@ -12,6 +12,8 @@ type TableState = {
   customRouteUpdate: Record<string, unknown> | null;
   customRouteStopsInsert: Array<Record<string, unknown>> | null;
   mixJobInsert: Record<string, unknown> | null;
+  existingRouteIdByJamId: string | null;
+  jamInsertCount: number;
 };
 
 function createFakeAdmin(state: TableState) {
@@ -25,7 +27,9 @@ function createFakeAdmin(state: TableState) {
     }
 
     select() {
-      this.action = "select";
+      if (this.action === null) {
+        this.action = "select";
+      }
       return this;
     }
 
@@ -84,14 +88,22 @@ function createFakeAdmin(state: TableState) {
       if (this.table === "mix_generation_jobs" && this.action === "select") {
         return { data: null, error: null };
       }
-      if (this.table === "custom_routes" && this.action === "select") {
-        return { data: null, error: null };
+      if (this.table === "jams" && this.action === "select") {
+        return {
+          data: {
+            route_id: state.existingRouteIdByJamId
+              ? `custom:${state.existingRouteIdByJamId}`
+              : null,
+          },
+          error: null,
+        };
       }
       return { data: null, error: null };
     }
 
     async single() {
       if (this.table === "jams" && this.action === "insert") {
+        state.jamInsertCount += 1;
         return { data: { id: "jam-1" }, error: null };
       }
       if (this.table === "custom_routes" && this.action === "insert") {
@@ -123,6 +135,8 @@ function createBaseState(): TableState {
     customRouteUpdate: null,
     customRouteStopsInsert: null,
     mixJobInsert: null,
+    existingRouteIdByJamId: null,
+    jamInsertCount: 0,
   };
 }
 
@@ -168,6 +182,7 @@ test("prepareCustomRouteJob keeps custom narrator when guidance is provided", as
   const state = createBaseState();
   const prepared = await prepareCustomRouteJob({
     admin: createFakeAdmin(state),
+    mixedComposerSessionId: "session-123",
     city: "boston",
     transportMode: "walk",
     lengthMinutes: 30,
@@ -185,5 +200,55 @@ test("prepareCustomRouteJob keeps custom narrator when guidance is provided", as
     state.customRouteInsert?.narrator_guidance,
     "Warm storyteller for architecture-loving adults."
   );
+  assert.equal(state.customRouteInsert?.mixed_composer_session_id, "session-123");
   assert.match(String(state.customRouteInsert?.narrator_voice), /^(alloy|nova|shimmer|onyx)$/);
+});
+
+test("prepareCustomRouteJob reuses the existing route when jamId is provided", async () => {
+  const state = createBaseState();
+  state.existingRouteIdByJamId = "route-existing";
+
+  const prepared = await prepareCustomRouteJob({
+    admin: createFakeAdmin(state),
+    jamId: "jam-1",
+    mixedComposerSessionId: "session-123",
+    city: "boston",
+    transportMode: "walk",
+    lengthMinutes: 30,
+    persona: "adult",
+    stops: TEST_STOPS,
+  });
+
+  assert.equal(prepared.jamId, "jam-1");
+  assert.equal(prepared.routeId, "route-existing");
+  assert.equal(state.jamInsertCount, 0);
+  assert.equal(state.customRouteInsert, null);
+  assert.equal(state.customRouteUpdate?.mixed_composer_session_id, "session-123");
+  assert.equal(state.mixJobInsert?.jam_id, "jam-1");
+  assert.equal(state.mixJobInsert?.route_id, "route-existing");
+});
+
+test("prepareCustomRouteJob creates a new revision when requested for an existing jam", async () => {
+  const state = createBaseState();
+  state.existingRouteIdByJamId = "route-live";
+
+  const prepared = await prepareCustomRouteJob({
+    admin: createFakeAdmin(state),
+    jamId: "jam-1",
+    mixedComposerSessionId: "session-123",
+    ownerUserId: "user-123",
+    createRouteRevision: true,
+    city: "boston",
+    transportMode: "walk",
+    lengthMinutes: 30,
+    persona: "adult",
+    stops: TEST_STOPS,
+  });
+
+  assert.equal(prepared.jamId, "jam-1");
+  assert.equal(prepared.routeId, "route-1");
+  assert.equal(state.customRouteInsert?.base_route_id, "route-live");
+  assert.equal(state.customRouteInsert?.is_live, false);
+  assert.equal(state.customRouteInsert?.owner_user_id, "user-123");
+  assert.equal(state.jamUpdatePersona, "adult");
 });

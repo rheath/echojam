@@ -110,3 +110,32 @@ test("mixed-route opener harmonization is skipped outside mix routes", async () 
     "Welcome to Old State House. This is the oldest public building in Boston.",
   ]);
 });
+
+test("mixed-route opener harmonization is skipped for stops with a prefilled publish-ready script", async () => {
+  let rewriteCalled = false;
+
+  const result = await harmonizeMixedRouteStopScripts({
+    experienceKind: "mix",
+    persona: "adult",
+    narratorGuidance: null,
+    stops: [
+      {
+        id: "stop-1",
+        title: "Old State House",
+        lat: 1,
+        lng: 1,
+        image: "a",
+        prefilledScript: "Imported final script",
+        scriptEditedByUser: false,
+      },
+    ],
+    scripts: ["Imported final script"],
+    rewriteScriptOpener: async ({ script }) => {
+      rewriteCalled = true;
+      return script;
+    },
+  });
+
+  assert.equal(rewriteCalled, false);
+  assert.deepEqual(result.scripts, ["Imported final script"]);
+});

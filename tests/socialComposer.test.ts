@@ -13,6 +13,7 @@ import {
   mapGooglePlaceDraftOntoComposerStop,
   mapGooglePlaceDraftToComposerStop,
   mapSocialDraftToComposerStop,
+  saveGooglePlaceDraftToStops,
 } from "../lib/socialComposer.ts";
 
 test("mapSocialDraftToComposerStop uses confirmed place and final script for instagram drafts", () => {
@@ -52,6 +53,7 @@ test("mapSocialDraftToComposerStop uses confirmed place and final script for ins
     googlePlaceId: "place-1",
     sourceUrl: "https://www.instagram.com/reels/ABC123/",
     sourceId: "ABC123",
+    sourcePreviewImageUrl: "https://example.com/thumb.jpg",
     creatorName: "@letsfamilystyle",
     creatorUrl: "https://www.instagram.com/letsfamilystyle/",
     creatorAvatarUrl: null,
@@ -384,4 +386,73 @@ test("google place stale detection only refreshes untouched AI drafts", () => {
     ),
     false
   );
+});
+
+test("saveGooglePlaceDraftToStops updates only the matching google place stop", () => {
+  const originalStop = {
+    id: "google_places:place-1",
+    kind: "place_search" as const,
+    provider: "google_places" as const,
+    title: "Boston Public Garden",
+    lat: 42.354,
+    lng: -71.07,
+    image: "/placeholder.jpg",
+    googlePlaceId: "g-1",
+    sourceId: "place-1",
+    script: "Old script",
+    scriptEditedByUser: true,
+    generatedNarratorSignature: "custom:old",
+    generatedRouteSignature: "0:1",
+  };
+  const untouchedStop = {
+    id: "instagram:draft-2",
+    kind: "social_import" as const,
+    provider: "instagram" as const,
+    title: "Cafe stop",
+    lat: 42.36,
+    lng: -71.05,
+    image: "/cafe.jpg",
+    sourceId: "draft-2",
+    sourceUrl: "https://www.instagram.com/p/demo/",
+    creatorName: "@guide",
+    creatorUrl: "https://www.instagram.com/guide/",
+    creatorAvatarUrl: null,
+    script: "Keep me untouched",
+    scriptEditedByUser: false,
+    originalDraftId: "draft-2",
+  };
+
+  const updatedStops = saveGooglePlaceDraftToStops(
+    [originalStop, untouchedStop],
+    originalStop.id,
+    {
+      place: {
+        id: "place-1",
+        title: "Boston Public Garden",
+        lat: 42.354,
+        lng: -71.07,
+        image: "/placeholder.jpg",
+        googlePlaceId: "g-1",
+      },
+      title: "Garden at Night",
+      script: "Fresh saved script",
+      status: "ready",
+      error: null,
+      scriptEditedByUser: true,
+      generatedNarratorSignature: "custom:new",
+      generatedRouteSignature: "1:3",
+    }
+  );
+
+  assert.deepEqual(updatedStops, [
+    {
+      ...originalStop,
+      title: "Garden at Night",
+      script: "Fresh saved script",
+      scriptEditedByUser: true,
+      generatedNarratorSignature: "custom:new",
+      generatedRouteSignature: "1:3",
+    },
+    untouchedStop,
+  ]);
 });

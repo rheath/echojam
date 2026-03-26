@@ -7,10 +7,17 @@ import {
 } from "@/lib/instagramImport";
 import { getJourneyAccess } from "@/lib/server/journeyAccess";
 import { getRequestAuthUser } from "@/lib/server/requestAuth";
+import { mergeCustomRouteStopAssets } from "@/lib/customRouteAssets";
 import { toNullableAudioUrl, toNullableTrimmed } from "@/lib/mixGeneration";
-import { cityPlaceholderImage, proxyGoogleImageUrl } from "@/lib/placesImages";
+import {
+  buildGooglePlaceIdPhotoUrl,
+  cityPlaceholderImage,
+  isValidGooglePlaceId,
+  proxyGoogleImageUrl,
+} from "@/lib/placesImages";
 import { isPresetOverviewStopId } from "@/lib/presetOverview";
 import { fetchInstagramProfileImageUrl } from "@/lib/server/instagramProfileImage";
+import { pickCustomRouteStopImage } from "@/lib/server/customRouteStopImages";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -53,6 +60,7 @@ type StopRow = {
   source_kind?: "social_import" | "place_search" | null;
   source_url?: string | null;
   source_id?: string | null;
+  source_preview_image_url?: string | null;
   source_creator_name?: string | null;
   source_creator_url?: string | null;
   source_creator_avatar_url?: string | null;
@@ -91,6 +99,8 @@ type RouteRow = {
   route_distance_meters: number | null;
   route_duration_seconds: number | null;
   route_polyline: [number, number][] | null;
+  mixed_composer_session_id: string | null;
+  owner_user_id: string | null;
   story_by: string | null;
   story_by_url: string | null;
   story_by_avatar_url: string | null;
@@ -118,11 +128,6 @@ type RouteStopMappingRow = {
 };
 
 const INSTAGRAM_FETCH_TIMEOUT_MS = 4_000;
-function isNonPlaceholderImage(value: string | null | undefined) {
-  const normalized = toNullableTrimmed(value);
-  if (!normalized) return false;
-  return !normalized.toLowerCase().includes("/placeholder");
-}
 
 function isMissingGhostColumnError(message: string | null | undefined) {
   const normalized = (message ?? "").toLowerCase();
@@ -142,7 +147,35 @@ function isMissingSourceColumnError(message: string | null | undefined) {
     normalized.includes("source_kind") ||
     normalized.includes("source_url") ||
     normalized.includes("source_id") ||
+    normalized.includes("source_preview_image_url") ||
     normalized.includes("source_creator")
+  );
+}
+
+function isMissingSourcePreviewImageColumnError(message: string | null | undefined) {
+  const normalized = (message ?? "").toLowerCase();
+  if (!normalized || !normalized.includes("source_preview_image_url")) {
+    return false;
+  }
+  return (
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    (normalized.includes("could not find") && normalized.includes("schema cache"))
+  );
+}
+
+function isMissingSourceCreatorColumnError(message: string | null | undefined) {
+  const normalized = (message ?? "").toLowerCase();
+  if (!normalized) return false;
+  const hasCreatorLookup =
+    normalized.includes("source_creator_name") ||
+    normalized.includes("source_creator_url") ||
+    normalized.includes("source_creator_avatar_url");
+  if (!hasCreatorLookup) {
+    return false;
+  }
+  return (
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    (normalized.includes("could not find") && normalized.includes("schema cache"))
   );
 }
 
@@ -161,27 +194,15 @@ function isMissingStoryByColumnError(message: string | null | undefined) {
   );
 }
 
-function pickStopImage(
-  canonicalImage: string | null | undefined,
-  curatedFallback: string | null | undefined,
-  stopImage: string | null | undefined,
-  canonicalSource: CanonicalImageRow["image_source"],
-  placeholder: string
-) {
-  const preferStopSpecific =
-    canonicalSource === "places" &&
-    isNonPlaceholderImage(stopImage) &&
-    isNonPlaceholderImage(canonicalImage);
-  const rankedCandidates = preferStopSpecific
-    ? [stopImage, canonicalImage, curatedFallback]
-    : [canonicalImage, curatedFallback, stopImage];
-
-  const strongCandidates = rankedCandidates
-    .map((value) => toNullableTrimmed(value))
-    .filter((value): value is string => Boolean(value) && isNonPlaceholderImage(value));
-
-  if (strongCandidates[0]) return strongCandidates[0];
-  return toNullableTrimmed(stopImage) || placeholder;
+function isMissingMixedComposerSessionColumnError(message: string | null | undefined) {
+  const normalized = (message ?? "").toLowerCase();
+  if (!normalized || !normalized.includes("mixed_composer_session_id")) {
+    return false;
+  }
+  return (
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    (normalized.includes("could not find") && normalized.includes("schema cache"))
+  );
 }
 
 async function isUsableImageUrl(url: string) {
@@ -357,9 +378,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
 
     const admin = getAdmin();
     const routeSelectWithStoryBy =
-      "id,title,length_minutes,transport_mode,status,city,narrator_default,narrator_guidance,narrator_voice,experience_kind,origin_label,origin_lat,origin_lng,destination_label,destination_lat,destination_lng,route_distance_meters,route_duration_seconds,route_polyline,story_by,story_by_url,story_by_avatar_url,story_by_source";
+      "id,title,length_minutes,transport_mode,status,city,narrator_default,narrator_guidance,narrator_voice,experience_kind,origin_label,origin_lat,origin_lng,destination_label,destination_lat,destination_lng,route_distance_meters,route_duration_seconds,route_polyline,mixed_composer_session_id,owner_user_id,story_by,story_by_url,story_by_avatar_url,story_by_source";
+    const routeSelectWithStoryByLegacyMixed =
+      "id,title,length_minutes,transport_mode,status,city,narrator_default,narrator_guidance,narrator_voice,experience_kind,origin_label,origin_lat,origin_lng,destination_label,destination_lat,destination_lng,route_distance_meters,route_duration_seconds,route_polyline,owner_user_id,story_by,story_by_url,story_by_avatar_url,story_by_source";
     const routeSelectLegacy =
-      "id,title,length_minutes,transport_mode,status,city,narrator_default,narrator_guidance,narrator_voice,experience_kind,origin_label,origin_lat,origin_lng,destination_label,destination_lat,destination_lng,route_distance_meters,route_duration_seconds,route_polyline";
+      "id,title,length_minutes,transport_mode,status,city,narrator_default,narrator_guidance,narrator_voice,experience_kind,origin_label,origin_lat,origin_lng,destination_label,destination_lat,destination_lng,route_distance_meters,route_duration_seconds,route_polyline,owner_user_id";
     let route: RouteRow;
 
     const routeWithStoryByResult = await admin
@@ -368,7 +391,42 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
       .eq("id", routeId)
       .single();
 
-    if (routeWithStoryByResult.error && isMissingStoryByColumnError(routeWithStoryByResult.error.message)) {
+    if (
+      routeWithStoryByResult.error &&
+      isMissingMixedComposerSessionColumnError(routeWithStoryByResult.error.message)
+    ) {
+      const routeWithoutMixedResult = await admin
+        .from("custom_routes")
+        .select(routeSelectWithStoryByLegacyMixed)
+        .eq("id", routeId)
+        .single();
+      if (routeWithoutMixedResult.error && isMissingStoryByColumnError(routeWithoutMixedResult.error.message)) {
+        const legacyRouteResult = await admin
+          .from("custom_routes")
+          .select(routeSelectLegacy)
+          .eq("id", routeId)
+          .single();
+        if (legacyRouteResult.error || !legacyRouteResult.data) {
+          return NextResponse.json({ error: legacyRouteResult.error?.message || "Route not found" }, { status: 404 });
+        }
+        route = {
+          ...(legacyRouteResult.data as Omit<RouteRow, "mixed_composer_session_id" | "story_by" | "story_by_url" | "story_by_avatar_url" | "story_by_source">),
+          mixed_composer_session_id: null,
+          story_by: null,
+          story_by_url: null,
+          story_by_avatar_url: null,
+          story_by_source: null,
+        };
+      } else {
+        if (routeWithoutMixedResult.error || !routeWithoutMixedResult.data) {
+          return NextResponse.json({ error: routeWithoutMixedResult.error?.message || "Route not found" }, { status: 404 });
+        }
+        route = {
+          ...(routeWithoutMixedResult.data as Omit<RouteRow, "mixed_composer_session_id">),
+          mixed_composer_session_id: null,
+        };
+      }
+    } else if (routeWithStoryByResult.error && isMissingStoryByColumnError(routeWithStoryByResult.error.message)) {
       const legacyRouteResult = await admin
         .from("custom_routes")
         .select(routeSelectLegacy)
@@ -378,7 +436,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
         return NextResponse.json({ error: legacyRouteResult.error?.message || "Route not found" }, { status: 404 });
       }
       route = {
-        ...(legacyRouteResult.data as Omit<RouteRow, "story_by" | "story_by_url" | "story_by_avatar_url" | "story_by_source">),
+        ...(legacyRouteResult.data as Omit<RouteRow, "mixed_composer_session_id" | "story_by" | "story_by_url" | "story_by_avatar_url" | "story_by_source">),
+        mixed_composer_session_id: null,
         story_by: null,
         story_by_url: null,
         story_by_avatar_url: null,
@@ -393,31 +452,62 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
     route = await hydrateInstagramRouteAttribution(admin, route);
 
     const stopsSelectWithGhost =
+      "stop_id,title,lat,lng,image_url,source_provider,source_kind,source_url,source_id,source_preview_image_url,source_creator_name,source_creator_url,source_creator_avatar_url,stop_kind,distance_along_route_meters,trigger_radius_meters,script_adult,script_preteen,script_ghost,script_custom,audio_url_adult,audio_url_preteen,audio_url_ghost,audio_url_custom,position";
+    const stopsSelectWithGhostNoCreators =
+      "stop_id,title,lat,lng,image_url,source_provider,source_kind,source_url,source_id,source_preview_image_url,stop_kind,distance_along_route_meters,trigger_radius_meters,script_adult,script_preteen,script_ghost,script_custom,audio_url_adult,audio_url_preteen,audio_url_ghost,audio_url_custom,position";
+    const stopsSelectWithGhostNoPreview =
       "stop_id,title,lat,lng,image_url,source_provider,source_kind,source_url,source_id,source_creator_name,source_creator_url,source_creator_avatar_url,stop_kind,distance_along_route_meters,trigger_radius_meters,script_adult,script_preteen,script_ghost,script_custom,audio_url_adult,audio_url_preteen,audio_url_ghost,audio_url_custom,position";
+    const stopsSelectWithGhostNoPreviewOrCreators =
+      "stop_id,title,lat,lng,image_url,source_provider,source_kind,source_url,source_id,stop_kind,distance_along_route_meters,trigger_radius_meters,script_adult,script_preteen,script_ghost,script_custom,audio_url_adult,audio_url_preteen,audio_url_ghost,audio_url_custom,position";
     const stopsSelectLegacy =
       "stop_id,title,lat,lng,image_url,stop_kind,distance_along_route_meters,trigger_radius_meters,script_adult,script_preteen,audio_url_adult,audio_url_preteen,position";
     let stops: StopRow[] = [];
 
-    const { data: stopsWithGhost, error: stopsWithGhostErr } = await admin
-      .from("custom_route_stops")
-      .select(stopsSelectWithGhost)
-      .eq("route_id", routeId)
-      .order("position", { ascending: true });
+    const stopSelectCandidates = [
+      stopsSelectWithGhost,
+      stopsSelectWithGhostNoCreators,
+      stopsSelectWithGhostNoPreview,
+      stopsSelectWithGhostNoPreviewOrCreators,
+    ];
 
-    if (
-      stopsWithGhostErr &&
-      (isMissingGhostColumnError(stopsWithGhostErr.message) || isMissingSourceColumnError(stopsWithGhostErr.message))
-    ) {
-      const { data: legacyStops, error: legacyStopsErr } = await admin
+    let lastStopsError: { message?: string | null } | null = null;
+    for (const stopSelect of stopSelectCandidates) {
+      const { data: candidateStops, error: candidateError } = await admin
         .from("custom_route_stops")
-        .select(stopsSelectLegacy)
+        .select(stopSelect)
         .eq("route_id", routeId)
         .order("position", { ascending: true });
-      if (legacyStopsErr) return NextResponse.json({ error: legacyStopsErr.message }, { status: 500 });
-      stops = (legacyStops ?? []) as StopRow[];
-    } else {
-      if (stopsWithGhostErr) return NextResponse.json({ error: stopsWithGhostErr.message }, { status: 500 });
-      stops = (stopsWithGhost ?? []) as StopRow[];
+
+      if (!candidateError) {
+        stops = (candidateStops ?? []) as unknown as StopRow[];
+        lastStopsError = null;
+        break;
+      }
+
+      lastStopsError = candidateError;
+      const isRecoverableSourceError =
+        isMissingSourcePreviewImageColumnError(candidateError.message) ||
+        isMissingSourceCreatorColumnError(candidateError.message);
+      if (!isRecoverableSourceError) {
+        break;
+      }
+    }
+
+    if (lastStopsError) {
+      if (
+        isMissingGhostColumnError(lastStopsError.message) ||
+        isMissingSourceColumnError(lastStopsError.message)
+      ) {
+        const { data: legacyStops, error: legacyStopsErr } = await admin
+          .from("custom_route_stops")
+          .select(stopsSelectLegacy)
+          .eq("route_id", routeId)
+          .order("position", { ascending: true });
+        if (legacyStopsErr) return NextResponse.json({ error: legacyStopsErr.message }, { status: 500 });
+        stops = (legacyStops ?? []) as StopRow[];
+      } else {
+        return NextResponse.json({ error: lastStopsError.message || "Failed to load route stops" }, { status: 500 });
+      }
     }
 
     const { data: mappings, error: mapErr } = await admin
@@ -505,24 +595,27 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
       const canonical = mapping ? assetsByCanonical.get(mapping.canonical_stop_id) : null;
       const canonicalImage = mapping ? imageByCanonical.get(mapping.canonical_stop_id) : null;
 
-      const scriptAdult = canonical?.script_adult ?? toNullableTrimmed(stop.script_adult);
-      const scriptPreteen = canonical?.script_preteen ?? toNullableTrimmed(stop.script_preteen);
-      const scriptGhost = canonical?.script_ghost ?? toNullableTrimmed(stop.script_ghost);
-      const scriptCustom = toNullableTrimmed(stop.script_custom);
-      const audioAdult = canonical?.audio_url_adult ?? toNullableAudioUrl(stop.audio_url_adult);
-      const audioPreteen = canonical?.audio_url_preteen ?? toNullableAudioUrl(stop.audio_url_preteen);
-      const audioGhost = canonical?.audio_url_ghost ?? toNullableAudioUrl(stop.audio_url_ghost);
-      const audioCustom = toNullableAudioUrl(stop.audio_url_custom);
+      const mergedAssets = mergeCustomRouteStopAssets({
+        routeStop: stop,
+        canonical,
+      });
       const canonicalImageUrl = toNullableTrimmed(canonicalImage?.image_url);
       const curatedFallback = toNullableTrimmed(canonicalImage?.fallback_image_url);
       const stopImage = toNullableTrimmed(stop.image_url);
-      const imageUrl = pickStopImage(
-        canonicalImageUrl,
+      const googlePlaceId =
+        toNullableTrimmed(stop.google_place_id) ??
+        toNullableTrimmed(canonicalImage?.google_place_id);
+      const placeIdPhoto = isValidGooglePlaceId(googlePlaceId)
+        ? buildGooglePlaceIdPhotoUrl(googlePlaceId!.trim())
+        : null;
+      const imageUrl = pickCustomRouteStopImage({
+        canonicalImage: canonicalImageUrl,
+        placeIdPhoto,
         curatedFallback,
         stopImage,
-        canonicalImage?.image_source ?? null,
-        placeholder
-      );
+        canonicalSource: canonicalImage?.image_source ?? null,
+        placeholder,
+      });
 
       return {
         ...stop,
@@ -531,23 +624,30 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
         source_kind: stop.source_kind ?? null,
         source_url: toNullableTrimmed(stop.source_url),
         source_id: toNullableTrimmed(stop.source_id),
+        source_preview_image_url: toNullableTrimmed(stop.source_preview_image_url),
         source_creator_name: toNullableTrimmed(stop.source_creator_name),
         source_creator_url: toNullableTrimmed(stop.source_creator_url),
         source_creator_avatar_url: toNullableTrimmed(stop.source_creator_avatar_url),
-        google_place_id: toNullableTrimmed(canonicalImage?.google_place_id),
-        script_adult: scriptAdult,
-        script_preteen: scriptPreteen,
-        script_ghost: scriptGhost,
-        script_custom: scriptCustom,
-        audio_url_adult: audioAdult,
-        audio_url_preteen: audioPreteen,
-        audio_url_ghost: audioGhost,
-        audio_url_custom: audioCustom,
+        google_place_id: googlePlaceId,
+        script_adult: mergedAssets.script_adult,
+        script_preteen: mergedAssets.script_preteen,
+        script_ghost: mergedAssets.script_ghost,
+        script_custom: mergedAssets.script_custom,
+        audio_url_adult: mergedAssets.audio_url_adult,
+        audio_url_preteen: mergedAssets.audio_url_preteen,
+        audio_url_ghost: mergedAssets.audio_url_ghost,
+        audio_url_custom: mergedAssets.audio_url_custom,
       };
     });
 
-    const responseRoute = {
+    const publicRoute = {
       ...route,
+      mixed_composer_session_id: undefined,
+    };
+    delete publicRoute.mixed_composer_session_id;
+    const responseRoute = {
+      ...publicRoute,
+      can_edit: Boolean(authUser?.id && route.owner_user_id === authUser.id),
       story_by_avatar_url: proxyInstagramImageUrl(route.story_by_avatar_url) || null,
     };
 
@@ -559,6 +659,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ routeId: string
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ routeId: string }> }) {
   try {
+    const authUser = await getRequestAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json(
+        { error: "Sign in with your creator email to edit this journey." },
+        { status: 401 }
+      );
+    }
+
     const { routeId } = await ctx.params;
     const admin = getAdmin();
     const body = (await req.json().catch(() => ({}))) as PatchBody;
@@ -586,11 +694,14 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ routeId: stri
 
     const { data: route, error: routeErr } = await admin
       .from("custom_routes")
-      .select("id")
+      .select("id,owner_user_id")
       .eq("id", routeId)
       .single();
     if (routeErr || !route?.id) {
       return NextResponse.json({ error: routeErr?.message || "Route not found" }, { status: 404 });
+    }
+    if ((route as { owner_user_id?: string | null }).owner_user_id !== authUser.id) {
+      return NextResponse.json({ error: "Only the creator can edit this journey." }, { status: 403 });
     }
 
     const { data: currentStops, error: currentStopsErr } = await admin

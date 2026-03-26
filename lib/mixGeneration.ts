@@ -44,6 +44,7 @@ export type StopInput = {
   sourceKind?: "social_import" | "place_search" | null;
   sourceUrl?: string | null;
   sourceId?: string | null;
+  sourcePreviewImageUrl?: string | null;
   sourceCreatorName?: string | null;
   sourceCreatorUrl?: string | null;
   sourceCreatorAvatarUrl?: string | null;
@@ -81,6 +82,33 @@ const FIXED_PERSONA_PROMPTS = {
   preteen: personaCatalog.preteen.prompt,
   ghost: personaCatalog.ghost.prompt,
 } as const;
+
+type NarrationStorageError = {
+  message: string;
+};
+
+type NarrationStorageBucketClient = {
+  upload: (
+    path: string,
+    fileBody: Uint8Array,
+    options: {
+      contentType: string;
+      cacheControl: string;
+      upsert: boolean;
+    }
+  ) => Promise<{ error: NarrationStorageError | null }>;
+  getPublicUrl: (path: string) => { data?: { publicUrl?: string } | null };
+};
+
+type NarrationStorageAdminClient = {
+  storage: {
+    createBucket: (
+      id: string,
+      options: { public: boolean }
+    ) => Promise<{ error: NarrationStorageError | null }>;
+    from: (bucket: string) => NarrationStorageBucketClient;
+  };
+};
 
 function getPersonaPrompt(persona: Persona) {
   if (persona === "custom") return customNarratorPersonaPrompt;
@@ -198,6 +226,14 @@ export function selectCustomNarratorVoice(guidance: string): CustomNarratorVoice
 function getNarrationVoice(persona: Persona, customVoice?: CustomNarratorVoice | null) {
   if (persona === "custom") return customVoice ?? "alloy";
   return VOICE_BY_PERSONA[persona];
+}
+
+async function buildOpenAiFailureMessage(response: Response, prefix: string) {
+  const body = await response.text().catch(() => "");
+  const normalizedBody = body.replace(/\s+/g, " ").trim();
+  const truncatedBody =
+    normalizedBody.length > 240 ? `${normalizedBody.slice(0, 237)}...` : normalizedBody;
+  return `${prefix} (${response.status}${truncatedBody ? `: ${truncatedBody}` : ""})`;
 }
 
 const GUIDANCE_REFERENCE_STOPWORDS = new Set([
@@ -548,7 +584,7 @@ export async function generateScriptWithOpenAI(
   });
 
   if (!response.ok) {
-    throw new Error("OpenAI script generation failed");
+    throw new Error(await buildOpenAiFailureMessage(response, "OpenAI script generation failed"));
   }
 
   const data = (await response.json()) as {
@@ -637,7 +673,7 @@ export async function rewriteScriptOpenerWithOpenAI(
   });
 
   if (!response.ok) {
-    throw new Error("OpenAI opener rewrite failed");
+    throw new Error(await buildOpenAiFailureMessage(response, "OpenAI opener rewrite failed"));
   }
 
   const data = (await response.json()) as {
@@ -687,7 +723,13 @@ export async function synthesizeSpeechWithOpenAI(
   throw new Error(`OpenAI TTS generation failed (${failures.join(" | ")})`);
 }
 
-export async function uploadNarrationAudio(audioBytes: Uint8Array, routeId: string, persona: Persona, stopId: string) {
+export async function uploadNarrationAudio(
+  audioBytes: Uint8Array,
+  routeId: string,
+  persona: Persona,
+  stopId: string,
+  adminClient?: NarrationStorageAdminClient
+) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const bucket = process.env.SUPABASE_AUDIO_BUCKET || "narrations";
@@ -700,30 +742,34 @@ export async function uploadNarrationAudio(audioBytes: Uint8Array, routeId: stri
     throw new Error("Missing storage configuration for narration upload.");
   }
 
-  const admin = createClient(url, serviceRole, { auth: { persistSession: false } });
+  const admin =
+    adminClient ||
+    (createClient(url, serviceRole, {
+      auth: { persistSession: false },
+    }) as unknown as NarrationStorageAdminClient);
   const path = `mixes/${safeRouteId}/${persona}/${safeStopId}.mp3`;
 
-  const { data: buckets, error: listBucketsError } = await admin.storage.listBuckets();
-  if (listBucketsError) {
-    throw new Error(`Narration upload failed: could not list storage buckets (${listBucketsError.message}).`);
-  }
-  const bucketExists = (buckets ?? []).some((item) => item.name === bucket);
-  if (!bucketExists) {
+  const uploadToBucket = async () =>
+    admin.storage.from(bucket).upload(path, audioBytes, {
+      contentType: "audio/mpeg",
+      cacheControl,
+      upsert: true,
+    });
+
+  let { error } = await uploadToBucket();
+  if (isBucketNotFoundError(error)) {
     const { error: createBucketError } = await admin.storage.createBucket(bucket, { public: true });
-    if (createBucketError && !createBucketError.message.toLowerCase().includes("already exists")) {
+    if (createBucketError && !isBucketAlreadyExistsError(createBucketError)) {
       throw new Error(
         `Narration upload failed: Supabase storage bucket "${bucket}" was not found and could not be created (${createBucketError.message}).`
       );
     }
+
+    ({ error } = await uploadToBucket());
   }
 
-  const { error } = await admin.storage.from(bucket).upload(path, audioBytes, {
-    contentType: "audio/mpeg",
-    cacheControl,
-    upsert: true,
-  });
   if (error) {
-    if (error.message.toLowerCase().includes("bucket not found")) {
+    if (isBucketNotFoundError(error)) {
       throw new Error(
         `Narration upload failed: Supabase storage bucket "${bucket}" was not found. ` +
           "Create the bucket or set SUPABASE_AUDIO_BUCKET to an existing bucket name."
@@ -738,6 +784,18 @@ export async function uploadNarrationAudio(audioBytes: Uint8Array, routeId: stri
   }
   const sep = data.publicUrl.includes("?") ? "&" : "?";
   return `${data.publicUrl}${sep}v=${version}`;
+}
+
+function isBucketNotFoundError(error: NarrationStorageError | null | undefined) {
+  return normalizeNarrationStorageErrorMessage(error).includes("bucket not found");
+}
+
+function isBucketAlreadyExistsError(error: NarrationStorageError | null | undefined) {
+  return normalizeNarrationStorageErrorMessage(error).includes("already exists");
+}
+
+function normalizeNarrationStorageErrorMessage(error: NarrationStorageError | null | undefined) {
+  return error?.message?.toLowerCase().trim() || "";
 }
 
 export function fallbackScript(city: string, persona: Persona, stop: StopInput, index: number) {

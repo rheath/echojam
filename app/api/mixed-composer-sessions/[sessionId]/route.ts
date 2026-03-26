@@ -4,10 +4,14 @@ import {
   toMixedComposerSessionPatch,
   type MixedComposerSessionSnapshot,
 } from "@/lib/mixedComposerSession";
+import { ensureCreatorAccess } from "@/lib/server/creatorAccess";
 import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
 
 const SESSION_SELECT = `
   id,
+  jam_id,
+  base_route_id,
+  draft_status,
   active_provider,
   route_title,
   custom_narrator_guidance,
@@ -23,12 +27,18 @@ const SESSION_SELECT = `
 
 export async function GET(_req: Request, ctx: { params: Promise<{ sessionId: string }> }) {
   try {
+    const access = await ensureCreatorAccess(_req, "mixed");
+    if (!access.ok) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
+    }
+
     const { sessionId } = await ctx.params;
     const admin = getSupabaseAdminClient();
     const { data, error } = await admin
       .from("mixed_composer_sessions")
       .select(SESSION_SELECT)
       .eq("id", sessionId)
+      .eq("owner_user_id", access.authUser.id)
       .maybeSingle();
 
     if (error) throw new Error(error.message);
@@ -47,6 +57,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ sessionId: str
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ sessionId: string }> }) {
   try {
+    const access = await ensureCreatorAccess(req, "mixed");
+    if (!access.ok) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
+    }
+
     const { sessionId } = await ctx.params;
     const body = (await req.json().catch(() => ({}))) as Partial<MixedComposerSessionSnapshot>;
     const patch = toMixedComposerSessionPatch(body);
@@ -56,7 +71,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ sessionId: st
       const { error } = await admin
         .from("mixed_composer_sessions")
         .update(patch)
-        .eq("id", sessionId);
+        .eq("id", sessionId)
+        .eq("owner_user_id", access.authUser.id);
       if (error) throw new Error(error.message);
     }
 
@@ -64,6 +80,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ sessionId: st
       .from("mixed_composer_sessions")
       .select(SESSION_SELECT)
       .eq("id", sessionId)
+      .eq("owner_user_id", access.authUser.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!data) {

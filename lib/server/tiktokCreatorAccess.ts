@@ -1,10 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import {
+  ensureCreatorAccess,
+  isCreatorAccessAuthorizedFromCookieStore,
+} from "@/lib/server/creatorAccess";
 
 const ENABLED_VALUES = new Set(["1", "true", "yes", "on"]);
 const COOKIE_VERSION = "v1";
 const COOKIE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-
-export const TIKTOK_CREATOR_ACCESS_COOKIE_NAME = "tiktok_creator_access";
 
 type CookieReader = {
   get(name: string): { value: string } | undefined;
@@ -42,21 +44,6 @@ function safeSignatureEquals(left: string, right: string) {
   const rightBuffer = Buffer.from(right);
   if (leftBuffer.length !== rightBuffer.length) return false;
   return timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-function getCookieValueFromHeader(header: string | null, name: string) {
-  if (!header) return null;
-  const segments = header.split(";");
-  for (const segment of segments) {
-    const trimmed = segment.trim();
-    if (!trimmed) continue;
-    const separatorIndex = trimmed.indexOf("=");
-    if (separatorIndex < 0) continue;
-    const key = trimmed.slice(0, separatorIndex).trim();
-    if (key !== name) continue;
-    return decodeURIComponent(trimmed.slice(separatorIndex + 1));
-  }
-  return null;
 }
 
 export function parseTikTokCreatorAccessCodes(value: string | undefined) {
@@ -137,13 +124,10 @@ export function isTikTokCreatorAccessCookieAuthorized(cookieValue: string | null
 }
 
 export function isTikTokCreatorAccessAuthorizedFromCookieStore(cookieStore: CookieReader, now = Date.now()) {
-  return isTikTokCreatorAccessCookieAuthorized(
-    cookieStore.get(TIKTOK_CREATOR_ACCESS_COOKIE_NAME)?.value,
-    now
-  );
+  return isCreatorAccessAuthorizedFromCookieStore(cookieStore, "mixed", now);
 }
 
-export function getTikTokImportRequestAuthorizationState(request: Request, now = Date.now()) {
+export async function getTikTokImportRequestAuthorizationState(request: Request) {
   if (!isTikTokImportEnabled()) {
     return {
       enabled: false,
@@ -151,14 +135,21 @@ export function getTikTokImportRequestAuthorizationState(request: Request, now =
     };
   }
 
-  const cookieValue = getCookieValueFromHeader(
-    request.headers.get("cookie"),
-    TIKTOK_CREATOR_ACCESS_COOKIE_NAME
-  );
+  const authorization = await ensureCreatorAccess(request, "mixed");
+  if (!authorization.ok) {
+    return {
+      enabled: true,
+      authorized: false,
+      status: authorization.status,
+      error: authorization.error,
+    };
+  }
 
   return {
     enabled: true,
-    authorized: isTikTokCreatorAccessCookieAuthorized(cookieValue, now),
+    authorized: true,
+    status: 200,
+    error: null,
   };
 }
 

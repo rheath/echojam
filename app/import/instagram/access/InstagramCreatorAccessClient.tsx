@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { normalizeMixedImportNextPath } from "@/lib/mixedImportRouting";
 import styles from "./InstagramCreatorAccessClient.module.css";
 
 type AccessResponse = {
@@ -10,45 +11,34 @@ type AccessResponse = {
   error?: string;
 };
 
-async function submitCreatorCode(code: string) {
-  const response = await fetch("/api/instagram-imports/access", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ code }),
-  });
-
-  const body = (await response.json().catch(() => ({}))) as AccessResponse;
-  if (!response.ok) {
-    throw new Error(body.error || "Failed to unlock Instagram uploader.");
-  }
-
-  return body;
-}
-
 export default function InstagramCreatorAccessClient() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [code, setCode] = useState("");
+  const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const nextPath = (() => {
-    const candidate = searchParams.get("next");
-    if (!candidate || !candidate.startsWith("/import/instagram")) {
-      return "/import/instagram";
-    }
-    return candidate;
-  })();
+  const nextPath = normalizeMixedImportNextPath(searchParams.get("next"), "instagram");
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
     setError(null);
+    setMessage(null);
 
     try {
-      await submitCreatorCode(code);
-      router.replace(nextPath);
+      const response = await fetch("/api/instagram-imports/access", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ code, email, next: nextPath }),
+      });
+      const body = (await response.json().catch(() => ({}))) as AccessResponse;
+      if (!response.ok) {
+        throw new Error(body.error || "Failed to unlock Instagram uploader.");
+      }
+      setMessage("Check your inbox for a private Wandrful sign-in link.");
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -85,19 +75,33 @@ export default function InstagramCreatorAccessClient() {
               autoComplete="one-time-code"
               disabled={isSubmitting}
             />
+            <label className={styles.fieldLabel} htmlFor="creator-email">
+              Creator email
+            </label>
+            <input
+              id="creator-email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className={styles.input}
+              placeholder="you@example.com"
+              autoComplete="email"
+              disabled={isSubmitting}
+            />
             <button
               type="submit"
               className={styles.submitButton}
               disabled={isSubmitting}
             >
-              {isSubmitting ? "Unlocking..." : "Unlock Instagram uploader"}
+              {isSubmitting ? "Sending..." : "Send magic link"}
             </button>
           </form>
 
           {error ? <div className={styles.errorBanner}>{error}</div> : null}
+          {message ? <div className={styles.helperCopy}>{message}</div> : null}
 
           <p className={styles.helperCopy}>
-            This unlock stays active on this browser for 30 days. Don&apos;t have a code? Reach out
+            Enter the invite code we gave you, then sign in from the email we send.
           </p>
         </section>
       </div>

@@ -40,6 +40,9 @@ export type PreparedCustomRouteStop = StopInput & {
 export type PrepareCustomRouteJobInput = {
   admin: SupabaseClient;
   jamId?: string | null;
+  mixedComposerSessionId?: string | null;
+  ownerUserId?: string | null;
+  createRouteRevision?: boolean;
   city: string;
   transportMode: TransportMode;
   lengthMinutes: number;
@@ -137,6 +140,32 @@ function isMissingStoryByColumnError(message: string | null | undefined) {
   );
 }
 
+function isMissingMixedComposerSessionColumnError(
+  message: string | null | undefined
+) {
+  const normalized = (message || "").toLowerCase();
+  if (!normalized || !normalized.includes("mixed_composer_session_id")) {
+    return false;
+  }
+  return (
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    (normalized.includes("could not find") && normalized.includes("schema cache"))
+  );
+}
+
+function isMissingSourcePreviewImageColumnError(
+  message: string | null | undefined
+) {
+  const normalized = (message || "").toLowerCase();
+  if (!normalized || !normalized.includes("source_preview_image_url")) {
+    return false;
+  }
+  return (
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    (normalized.includes("could not find") && normalized.includes("schema cache"))
+  );
+}
+
 function formatCityLabel(city: string) {
   const normalized = (city || "").trim().toLowerCase();
   if (!normalized || normalized === "nearby") return "Nearby";
@@ -185,6 +214,117 @@ function normalizePrefilledScript(value: string | null | undefined) {
   return toNullableTrimmed(value);
 }
 
+export function shouldTreatPrefilledScriptAsFinal(
+  experienceKind: CustomRouteExperienceKind,
+  prefilledScript: string | null | undefined
+) {
+  return experienceKind === "mix" && Boolean(normalizePrefilledScript(prefilledScript));
+}
+
+export function shouldReuseCanonicalAudioForRouteScript(args: {
+  experienceKind: CustomRouteExperienceKind;
+  isCustomNarrator: boolean;
+  forceAudio: boolean;
+  currentScript: string | null | undefined;
+  canonicalScript: string | null | undefined;
+}) {
+  const currentScript = toNullableTrimmed(args.currentScript);
+  const canonicalScript = toNullableTrimmed(args.canonicalScript);
+  const hasRouteSpecificScript =
+    args.experienceKind === "mix" &&
+    Boolean(currentScript) &&
+    currentScript !== canonicalScript;
+  return !args.forceAudio && !args.isCustomNarrator && !hasRouteSpecificScript;
+}
+
+function buildCustomRouteStopInsert(
+  routeId: string,
+  stop: PreparedCustomRouteStop,
+  idx: number
+) {
+  return {
+    route_id: routeId,
+    stop_id: stop.id,
+    position: idx,
+    title: stop.title,
+    lat: stop.lat,
+    lng: stop.lng,
+    image_url: stop.image,
+    stop_kind: stop.stopKind ?? "story",
+    distance_along_route_meters:
+      typeof stop.distanceAlongRouteMeters === "number"
+        ? Math.round(stop.distanceAlongRouteMeters)
+        : null,
+    trigger_radius_meters:
+      typeof stop.triggerRadiusMeters === "number"
+        ? Math.round(stop.triggerRadiusMeters)
+        : null,
+    source_provider: stop.sourceProvider ?? null,
+    source_kind: stop.sourceKind ?? null,
+    source_url: toNullableTrimmed(stop.sourceUrl),
+    source_id: toNullableTrimmed(stop.sourceId),
+    source_preview_image_url: toNullableTrimmed(stop.sourcePreviewImageUrl),
+    source_creator_name: toNullableTrimmed(stop.sourceCreatorName),
+    source_creator_url: toNullableTrimmed(stop.sourceCreatorUrl),
+    source_creator_avatar_url: toNullableTrimmed(stop.sourceCreatorAvatarUrl),
+  };
+}
+
+function buildLegacyCustomRouteStopInsert(
+  routeId: string,
+  stop: PreparedCustomRouteStop,
+  idx: number
+) {
+  const insert = buildCustomRouteStopInsert(routeId, stop, idx);
+  return {
+    route_id: insert.route_id,
+    stop_id: insert.stop_id,
+    position: insert.position,
+    title: insert.title,
+    lat: insert.lat,
+    lng: insert.lng,
+    image_url: insert.image_url,
+    stop_kind: insert.stop_kind,
+    distance_along_route_meters: insert.distance_along_route_meters,
+    trigger_radius_meters: insert.trigger_radius_meters,
+    source_provider: insert.source_provider,
+    source_kind: insert.source_kind,
+    source_url: insert.source_url,
+    source_id: insert.source_id,
+    source_creator_name: insert.source_creator_name,
+    source_creator_url: insert.source_creator_url,
+    source_creator_avatar_url: insert.source_creator_avatar_url,
+  };
+}
+
+export async function insertPreparedCustomRouteStops(args: {
+  admin: SupabaseClient;
+  routeId: string;
+  stops: PreparedCustomRouteStop[];
+}) {
+  const inserts = args.stops.map((stop, idx) =>
+    buildCustomRouteStopInsert(args.routeId, stop, idx)
+  );
+
+  const { error: stopsErr } = await args.admin
+    .from("custom_route_stops")
+    .insert(inserts);
+  if (!stopsErr) return;
+  if (!isMissingSourcePreviewImageColumnError(stopsErr.message)) {
+    throw new Error(stopsErr.message);
+  }
+
+  const legacyInserts = args.stops.map((stop, idx) =>
+    buildLegacyCustomRouteStopInsert(args.routeId, stop, idx)
+  );
+  const { error: legacyStopsErr } = await args.admin
+    .from("custom_route_stops")
+    .insert(legacyInserts);
+  if (legacyStopsErr) {
+    throw new Error(legacyStopsErr.message);
+  }
+}
+
 export async function harmonizeMixedRouteStopScripts(args: {
   experienceKind: CustomRouteExperienceKind;
   persona: Persona;
@@ -206,7 +346,11 @@ export async function harmonizeMixedRouteStopScripts(args: {
       continue;
     }
 
-    if (args.experienceKind !== "mix" || stop.scriptEditedByUser) {
+    if (
+      args.experienceKind !== "mix" ||
+      stop.scriptEditedByUser ||
+      shouldTreatPrefilledScriptAsFinal(args.experienceKind, stop.prefilledScript)
+    ) {
       nextScripts.push(script);
       finalizedScripts.push(script);
       continue;
@@ -251,11 +395,13 @@ export async function harmonizeMixedRouteStopScripts(args: {
 
 async function createJam(
   admin: SupabaseClient,
-  persona: Persona
+  persona: Persona,
+  ownerUserId?: string | null
 ) {
   const { data: jam, error: jamErr } = await admin
     .from("jams")
     .insert({
+      owner_user_id: toNullableTrimmed(ownerUserId),
       host_name: "Rob",
       route_id: null,
       persona,
@@ -270,6 +416,42 @@ async function createJam(
     throw new Error(jamErr?.message || "Failed to create jam");
   }
   return jam.id as string;
+}
+
+function extractCustomRouteIdFromJamRouteRef(routeRef: string | null | undefined) {
+  const normalized = toNullableTrimmed(routeRef);
+  if (!normalized || !normalized.startsWith("custom:")) return null;
+  const routeId = normalized.slice("custom:".length).trim();
+  return routeId || null;
+}
+
+async function loadLiveCustomRouteIdForJam(admin: SupabaseClient, jamId: string) {
+  const { data: jam, error: jamErr } = await admin
+    .from("jams")
+    .select("route_id")
+    .eq("id", jamId)
+    .maybeSingle();
+  if (jamErr) {
+    throw new Error(jamErr.message || "Failed to load jam route state");
+  }
+
+  const routeIdFromJam = extractCustomRouteIdFromJamRouteRef(
+    (jam as { route_id?: string | null } | null)?.route_id ?? null
+  );
+  if (routeIdFromJam) return routeIdFromJam;
+
+  const { data: liveRoute, error: liveRouteErr } = await admin
+    .from("custom_routes")
+    .select("id")
+    .eq("jam_id", jamId)
+    .eq("is_live", true)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (liveRouteErr) {
+    throw new Error(liveRouteErr.message || "Failed to load live custom route");
+  }
+  return (liveRoute as { id?: string } | null)?.id ?? null;
 }
 
 function normalizeCustomNarratorSelection(
@@ -318,7 +500,7 @@ export async function prepareCustomRouteJob(
   }
   let jamId = input.jamId ?? null;
   if (!jamId) {
-    jamId = await createJam(input.admin, persona);
+    jamId = await createJam(input.admin, persona, input.ownerUserId);
   }
 
   const { data: activeJob } = await input.admin
@@ -339,11 +521,10 @@ export async function prepareCustomRouteJob(
     input.stops,
     experienceKind
   );
-  const { data: existingRoute } = await input.admin
-    .from("custom_routes")
-    .select("id")
-    .eq("jam_id", jamId)
-    .maybeSingle();
+  const shouldCreateRouteRevision = Boolean(input.createRouteRevision && jamId);
+  const existingRouteId = jamId
+    ? await loadLiveCustomRouteIdForJam(input.admin, jamId)
+    : null;
 
   const routePatch = {
     city,
@@ -388,9 +569,10 @@ export async function prepareCustomRouteJob(
       input.routeMeta?.routePolyline && input.routeMeta.routePolyline.length > 1
         ? input.routeMeta.routePolyline
         : null,
+    mixed_composer_session_id: toNullableTrimmed(input.mixedComposerSessionId),
     ...normalizeRouteAttribution(input.routeAttribution),
   };
-  const legacyRoutePatch = {
+  const routePatchWithoutMixedComposerSession = {
     city: routePatch.city,
     transport_mode: routePatch.transport_mode,
     length_minutes: routePatch.length_minutes,
@@ -409,27 +591,78 @@ export async function prepareCustomRouteJob(
     route_distance_meters: routePatch.route_distance_meters,
     route_duration_seconds: routePatch.route_duration_seconds,
     route_polyline: routePatch.route_polyline,
+    ...normalizeRouteAttribution(input.routeAttribution),
+  };
+  const legacyRoutePatch = {
+    city: routePatchWithoutMixedComposerSession.city,
+    transport_mode: routePatchWithoutMixedComposerSession.transport_mode,
+    length_minutes: routePatchWithoutMixedComposerSession.length_minutes,
+    title: routePatchWithoutMixedComposerSession.title,
+    narrator_default: routePatchWithoutMixedComposerSession.narrator_default,
+    narrator_guidance: routePatchWithoutMixedComposerSession.narrator_guidance,
+    narrator_voice: routePatchWithoutMixedComposerSession.narrator_voice,
+    status: routePatchWithoutMixedComposerSession.status,
+    experience_kind: routePatchWithoutMixedComposerSession.experience_kind,
+    origin_label: routePatchWithoutMixedComposerSession.origin_label,
+    origin_lat: routePatchWithoutMixedComposerSession.origin_lat,
+    origin_lng: routePatchWithoutMixedComposerSession.origin_lng,
+    destination_label: routePatchWithoutMixedComposerSession.destination_label,
+    destination_lat: routePatchWithoutMixedComposerSession.destination_lat,
+    destination_lng: routePatchWithoutMixedComposerSession.destination_lng,
+    route_distance_meters: routePatchWithoutMixedComposerSession.route_distance_meters,
+    route_duration_seconds: routePatchWithoutMixedComposerSession.route_duration_seconds,
+    route_polyline: routePatchWithoutMixedComposerSession.route_polyline,
+  };
+  const routeInsertMetadata = {
+    owner_user_id: toNullableTrimmed(input.ownerUserId),
+    is_live: !shouldCreateRouteRevision,
+    base_route_id: shouldCreateRouteRevision ? toNullableTrimmed(existingRouteId) : null,
+    superseded_at: null,
+    published_at: shouldCreateRouteRevision ? null : new Date().toISOString(),
   };
 
-  let routeId = existingRoute?.id as string | undefined;
+  let routeId = shouldCreateRouteRevision ? undefined : existingRouteId ?? undefined;
   if (routeId) {
     const { error: updateRouteErr } = await input.admin
       .from("custom_routes")
       .update(routePatch)
       .eq("id", routeId);
-    if (updateRouteErr && !isMissingStoryByColumnError(updateRouteErr.message)) {
-      throw new Error(
-        updateRouteErr.message || "Failed to update custom route"
-      );
-    }
-    if (updateRouteErr && isMissingStoryByColumnError(updateRouteErr.message)) {
-      const { error: legacyUpdateRouteErr } = await input.admin
-        .from("custom_routes")
-        .update(legacyRoutePatch)
-        .eq("id", routeId);
-      if (legacyUpdateRouteErr) {
+    if (updateRouteErr) {
+      if (isMissingMixedComposerSessionColumnError(updateRouteErr.message)) {
+        const { error: updateWithoutMixedErr } = await input.admin
+          .from("custom_routes")
+          .update(routePatchWithoutMixedComposerSession)
+          .eq("id", routeId);
+        if (!updateWithoutMixedErr) {
+          // handled by fallback without mixed composer session column
+        } else if (isMissingStoryByColumnError(updateWithoutMixedErr.message)) {
+          const { error: legacyUpdateRouteErr } = await input.admin
+            .from("custom_routes")
+            .update(legacyRoutePatch)
+            .eq("id", routeId);
+          if (legacyUpdateRouteErr) {
+            throw new Error(
+              legacyUpdateRouteErr.message || "Failed to update custom route"
+            );
+          }
+        } else {
+          throw new Error(
+            updateWithoutMixedErr.message || "Failed to update custom route"
+          );
+        }
+      } else if (isMissingStoryByColumnError(updateRouteErr.message)) {
+        const { error: legacyUpdateRouteErr } = await input.admin
+          .from("custom_routes")
+          .update(legacyRoutePatch)
+          .eq("id", routeId);
+        if (legacyUpdateRouteErr) {
+          throw new Error(
+            legacyUpdateRouteErr.message || "Failed to update custom route"
+          );
+        }
+      } else {
         throw new Error(
-          legacyUpdateRouteErr.message || "Failed to update custom route"
+          updateRouteErr.message || "Failed to update custom route"
         );
       }
     }
@@ -438,15 +671,46 @@ export async function prepareCustomRouteJob(
       .from("custom_routes")
       .insert({
         jam_id: jamId,
+        ...routeInsertMetadata,
         ...routePatch,
       })
       .select("id")
       .single();
-    if (routeErr && isMissingStoryByColumnError(routeErr.message)) {
+    if (routeErr && isMissingMixedComposerSessionColumnError(routeErr.message)) {
+      const { data: routeWithoutMixed, error: routeWithoutMixedErr } = await input.admin
+        .from("custom_routes")
+        .insert({
+          jam_id: jamId,
+          ...routeInsertMetadata,
+          ...routePatchWithoutMixedComposerSession,
+        })
+        .select("id")
+        .single();
+      if (routeWithoutMixedErr && isMissingStoryByColumnError(routeWithoutMixedErr.message)) {
+        const { data: legacyRoute, error: legacyRouteErr } = await input.admin
+          .from("custom_routes")
+          .insert({
+            jam_id: jamId,
+            ...routeInsertMetadata,
+            ...legacyRoutePatch,
+          })
+          .select("id")
+          .single();
+        if (legacyRouteErr || !legacyRoute?.id) {
+          throw new Error(legacyRouteErr?.message || "Failed to create custom route");
+        }
+        routeId = legacyRoute.id as string;
+      } else if (routeWithoutMixedErr || !routeWithoutMixed?.id) {
+        throw new Error(routeWithoutMixedErr?.message || "Failed to create custom route");
+      } else {
+        routeId = routeWithoutMixed.id as string;
+      }
+    } else if (routeErr && isMissingStoryByColumnError(routeErr.message)) {
       const { data: legacyRoute, error: legacyRouteErr } = await input.admin
         .from("custom_routes")
         .insert({
           jam_id: jamId,
+          ...routeInsertMetadata,
           ...legacyRoutePatch,
         })
         .select("id")
@@ -486,7 +750,7 @@ export async function prepareCustomRouteJob(
   await input.admin
     .from("jams")
     .update({
-      route_id: `custom:${routeId}`,
+      ...(shouldCreateRouteRevision ? {} : { route_id: `custom:${routeId}` }),
       persona,
       current_stop: 0,
       completed_at: null,
@@ -494,35 +758,11 @@ export async function prepareCustomRouteJob(
     })
     .eq("id", jamId);
 
-  const inserts = input.stops.map((stop, idx) => ({
-    route_id: routeId,
-    stop_id: stop.id,
-    position: idx,
-    title: stop.title,
-    lat: stop.lat,
-    lng: stop.lng,
-    image_url: stop.image,
-    stop_kind: stop.stopKind ?? "story",
-    distance_along_route_meters:
-      typeof stop.distanceAlongRouteMeters === "number"
-        ? Math.round(stop.distanceAlongRouteMeters)
-        : null,
-    trigger_radius_meters:
-      typeof stop.triggerRadiusMeters === "number"
-        ? Math.round(stop.triggerRadiusMeters)
-        : null,
-    source_provider: stop.sourceProvider ?? null,
-    source_kind: stop.sourceKind ?? null,
-    source_url: toNullableTrimmed(stop.sourceUrl),
-    source_id: toNullableTrimmed(stop.sourceId),
-    source_creator_name: toNullableTrimmed(stop.sourceCreatorName),
-    source_creator_url: toNullableTrimmed(stop.sourceCreatorUrl),
-    source_creator_avatar_url: toNullableTrimmed(stop.sourceCreatorAvatarUrl),
-  }));
-  const { error: stopsErr } = await input.admin
-    .from("custom_route_stops")
-    .insert(inserts);
-  if (stopsErr) throw new Error(stopsErr.message);
+  await insertPreparedCustomRouteStops({
+    admin: input.admin,
+    routeId,
+    stops: input.stops,
+  });
 
   const { data: job, error: jobErr } = await input.admin
     .from("mix_generation_jobs")
@@ -552,6 +792,69 @@ export async function prepareCustomRouteJob(
     narratorGuidance,
     stops: input.stops,
   };
+}
+
+async function finalizeCustomRoutePublication(
+  admin: SupabaseClient,
+  routeId: string
+) {
+  const { data: route, error: routeErr } = await admin
+    .from("custom_routes")
+    .select("id,jam_id,is_live,mixed_composer_session_id")
+    .eq("id", routeId)
+    .maybeSingle();
+  if (routeErr) {
+    throw new Error(routeErr.message || "Failed to load route publication state");
+  }
+  if (!route) return;
+
+  const typedRoute = route as {
+    id: string;
+    jam_id: string;
+    is_live?: boolean | null;
+    mixed_composer_session_id?: string | null;
+  };
+
+  const nowIso = new Date().toISOString();
+  await admin
+    .from("custom_routes")
+    .update({
+      is_live: false,
+      superseded_at: nowIso,
+    })
+    .eq("jam_id", typedRoute.jam_id)
+    .eq("is_live", true)
+    .neq("id", routeId);
+
+  await admin
+    .from("custom_routes")
+    .update({
+      is_live: true,
+      superseded_at: null,
+      published_at: nowIso,
+    })
+    .eq("id", routeId);
+
+  await admin
+    .from("jams")
+    .update({
+      route_id: `custom:${routeId}`,
+    })
+    .eq("id", typedRoute.jam_id);
+
+  const mixedComposerSessionId = toNullableTrimmed(
+    typedRoute.mixed_composer_session_id
+  );
+  if (!mixedComposerSessionId) return;
+
+  await admin
+    .from("mixed_composer_sessions")
+    .update({
+      jam_id: typedRoute.jam_id,
+      base_route_id: routeId,
+      draft_status: "draft",
+    })
+    .eq("id", mixedComposerSessionId);
 }
 
 export async function runCustomRouteGeneration(
@@ -603,6 +906,7 @@ export async function runCustomRouteGeneration(
     baseScript: string | null;
     routeScript: string | null;
     audioUrl: string | null;
+    usesFinalPrefilledScript: boolean;
   };
   const states: RowState[] = [];
 
@@ -622,12 +926,19 @@ export async function runCustomRouteGeneration(
           .maybeSingle()
       : { data: null };
 
+    const prefilledScript = normalizePrefilledScript(stop.prefilledScript);
+    const usesFinalPrefilledScript = shouldTreatPrefilledScriptAsFinal(
+      experienceKind,
+      stop.prefilledScript
+    );
     let script =
-      !forceScript && !isCustomNarrator
+      usesFinalPrefilledScript
+        ? prefilledScript
+        : !forceScript && !isCustomNarrator
         ? toNullableTrimmed(assetRow?.script)
         : null;
-    if (!forceScript) {
-      script = script || normalizePrefilledScript(stop.prefilledScript);
+    if (!forceScript && !script) {
+      script = prefilledScript;
     }
     if (!script) {
       try {
@@ -653,7 +964,14 @@ export async function runCustomRouteGeneration(
       }
     }
 
-    if (!isCustomNarrator) {
+    const scriptPatch = SCRIPT_PATCH_BY_PERSONA[persona](script);
+    await admin
+      .from("custom_route_stops")
+      .update(scriptPatch)
+      .eq("route_id", routeId)
+      .eq("stop_id", stop.id);
+
+    if (!isCustomNarrator && !usesFinalPrefilledScript) {
       await admin.from("canonical_stop_assets").upsert(
         {
           canonical_stop_id: canonical.id,
@@ -673,6 +991,7 @@ export async function runCustomRouteGeneration(
       baseScript: script,
       routeScript: script,
       audioUrl: null,
+      usesFinalPrefilledScript,
     });
     doneUnits += 1;
     await updateProgress(
@@ -740,13 +1059,22 @@ export async function runCustomRouteGeneration(
       : { data: null };
 
     const currentScript = toNullableTrimmed(state.routeScript);
-    const canonicalScript = toNullableTrimmed(assetRow?.script) || toNullableTrimmed(state.baseScript);
+    const canonicalScript =
+      toNullableTrimmed(assetRow?.script) ||
+      (state.usesFinalPrefilledScript ? null : toNullableTrimmed(state.baseScript));
     const hasRouteSpecificScript =
       experienceKind === "mix" &&
       Boolean(currentScript) &&
       currentScript !== canonicalScript;
+    const shouldReuseCanonicalAudio = shouldReuseCanonicalAudioForRouteScript({
+      experienceKind,
+      isCustomNarrator,
+      forceAudio,
+      currentScript,
+      canonicalScript,
+    });
     let audioUrl =
-      !forceAudio && !isCustomNarrator && !hasRouteSpecificScript
+      shouldReuseCanonicalAudio
         ? toNullableAudioUrl(assetRow?.audio_url)
         : null;
     if (replayUrl) audioUrl = replayUrl;
@@ -813,6 +1141,7 @@ export async function runCustomRouteGeneration(
   }
 
   await admin.from("custom_routes").update({ status: "ready" }).eq("id", routeId);
+  await finalizeCustomRoutePublication(admin, routeId);
   if (warningCount > 0) {
     const warning = `${warningCount} generation warnings. ${lastWarning || ""}`.trim();
     await admin

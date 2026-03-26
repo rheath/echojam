@@ -20,8 +20,7 @@
 
 .backLink,
 .openLink,
-.linkButton,
-.headerLinkPill {
+.linkButton {
   text-decoration: none;
 }
 
@@ -52,21 +51,6 @@
   margin: 12px 0 0;
   font-size: 17px;
   line-height: 1.5;
-}
-
-.headerLinks {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.headerLinkPill {
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: rgba(31, 23, 20, 0.08);
-  font-size: 13px;
-  white-space: nowrap;
-  color: inherit;
 }
 
 .titleCard {
@@ -308,8 +292,7 @@
 .placeRow:hover,
 .stopActions button:hover,
 .linkButton:hover,
-.resultRow:hover,
-.headerLinkPill:hover {
+.resultRow:hover {
   transform: translateY(-1px);
 }
 
@@ -707,10 +690,6 @@
   .actionRow,
   .modalHeader {
     display: grid;
-  }
-
-  .headerLinks {
-    justify-content: flex-start;
   }
 
   .stopRow, 

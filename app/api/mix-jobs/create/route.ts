@@ -12,9 +12,12 @@ import {
   type CustomRouteExperienceKind,
   runCustomRouteGeneration,
 } from "@/lib/customRouteGeneration";
+import { ensureCreatorAccess } from "@/lib/server/creatorAccess";
+import { getOwnedMixedComposerSessionById } from "@/lib/server/mixedComposerOwnership";
 
 type CreateBody = {
   jamId?: string | null;
+  mixedComposerSessionId?: string | null;
   city: string;
   transportMode: TransportMode;
   lengthMinutes: number;
@@ -63,11 +66,49 @@ export async function POST(req: Request) {
         const narratorGuidance = toNullableTrimmed(body.narratorGuidance);
 
         const admin = getAdmin();
+        const mixedComposerSessionId = toNullableTrimmed(body.mixedComposerSessionId);
+        const mixedAccess = mixedComposerSessionId ? await ensureCreatorAccess(req, "mixed") : null;
+        if (mixedComposerSessionId && mixedAccess && !mixedAccess.ok) {
+          return NextResponse.json(
+            { error: mixedAccess.error },
+            { status: mixedAccess.status }
+          );
+        }
+        const authUser = mixedAccess && mixedAccess.ok ? mixedAccess.authUser : null;
+
+        const ownedSession =
+          mixedComposerSessionId && authUser
+            ? await getOwnedMixedComposerSessionById(admin, mixedComposerSessionId, authUser.id)
+            : null;
+        if (mixedComposerSessionId && !ownedSession) {
+          return NextResponse.json(
+            { error: "That private journey draft was not found." },
+            { status: 404 }
+          );
+        }
+
+        const resolvedJamId =
+          toNullableTrimmed(body.jamId) || toNullableTrimmed(ownedSession?.jam_id) || null;
+        if (
+          mixedComposerSessionId &&
+          toNullableTrimmed(body.jamId) &&
+          toNullableTrimmed(ownedSession?.jam_id) &&
+          toNullableTrimmed(body.jamId) !== toNullableTrimmed(ownedSession?.jam_id)
+        ) {
+          return NextResponse.json(
+            { error: "This draft does not belong to the selected journey." },
+            { status: 403 }
+          );
+        }
+
         let prepared;
         try {
           prepared = await prepareCustomRouteJob({
             admin,
-            jamId: body.jamId ?? null,
+            jamId: resolvedJamId,
+            mixedComposerSessionId,
+            ownerUserId: authUser?.id ?? null,
+            createRouteRevision: Boolean(mixedComposerSessionId && resolvedJamId),
             city: body.city,
             transportMode: body.transportMode,
             lengthMinutes: body.lengthMinutes,
@@ -83,12 +124,12 @@ export async function POST(req: Request) {
           if (
             e instanceof Error &&
             e.message === "A generation job is already in progress for this jam." &&
-            body.jamId
+            resolvedJamId
           ) {
             const { data: activeJob } = await admin
               .from("mix_generation_jobs")
               .select("id,status")
-              .eq("jam_id", body.jamId)
+              .eq("jam_id", resolvedJamId)
               .in("status", ["queued", "generating_script", "generating_audio"])
               .order("created_at", { ascending: false })
               .limit(1)
@@ -117,6 +158,17 @@ export async function POST(req: Request) {
           prepared.persona === "custom" && prepared.narratorGuidance
             ? selectCustomNarratorVoice(prepared.narratorGuidance)
             : null;
+
+        if (mixedComposerSessionId) {
+          await admin
+            .from("mixed_composer_sessions")
+            .update({
+              jam_id: prepared.jamId,
+              draft_status: "publishing",
+            })
+            .eq("id", mixedComposerSessionId)
+            .eq("owner_user_id", authUser?.id ?? null);
+        }
 
         after(async () => {
           try {
@@ -151,6 +203,13 @@ export async function POST(req: Request) {
                 error: e instanceof Error ? e.message : "Unknown error",
               })
               .eq("id", prepared.jobId);
+            if (mixedComposerSessionId && authUser) {
+              await admin
+                .from("mixed_composer_sessions")
+                .update({ draft_status: "draft" })
+                .eq("id", mixedComposerSessionId)
+                .eq("owner_user_id", authUser.id);
+            }
           }
         });
 

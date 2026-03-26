@@ -19,14 +19,14 @@ type DraftRow = {
 };
 
 export async function GET(req: Request, ctx: { params: Promise<{ routeId: string }> }) {
-  const access = getInstagramImportRequestAuthorizationState(req);
+  const access = await getInstagramImportRequestAuthorizationState(req);
   if (!access.enabled) {
     return NextResponse.json({ error: "Instagram import is unavailable." }, { status: 404 });
   }
   if (!access.authorized) {
     return NextResponse.json(
-      { error: "Enter a valid creator code to use the Instagram uploader." },
-      { status: 401 }
+      { error: access.error || "Creator access required. Enter your code and creator email first." },
+      { status: access.status || 401 }
     );
   }
 

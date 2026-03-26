@@ -16,6 +16,7 @@ export type ComposerStop = {
   googlePlaceId?: string | null;
   sourceUrl?: string | null;
   sourceId?: string | null;
+  sourcePreviewImageUrl?: string | null;
   creatorName?: string | null;
   creatorUrl?: string | null;
   creatorAvatarUrl?: string | null;
@@ -152,6 +153,7 @@ export function mapSocialDraftToComposerStop(
     googlePlaceId: confirmedPlace.googlePlaceId || null,
     sourceUrl: draft.source.url,
     sourceId: sourceId || draft.id,
+    sourcePreviewImageUrl: draft.source.thumbnailUrl,
     creatorName: draft.source.ownerTitle,
     creatorUrl: normalizeCreatorUrl(provider, draft.source.ownerTitle),
     creatorAvatarUrl: null,
@@ -244,6 +246,20 @@ export function mapGooglePlaceDraftOntoComposerStop(
     id: stop.id,
     sourceId: stop.sourceId || updated.sourceId,
   } satisfies ComposerStop;
+}
+
+export function saveGooglePlaceDraftToStops(
+  stops: ComposerStop[],
+  stopId: string,
+  draft: GooglePlaceDraft
+) {
+  const stop = stops.find((candidate) => candidate.id === stopId);
+  if (!stop) return null;
+
+  const updatedStop = mapGooglePlaceDraftOntoComposerStop(stop, draft);
+  if (!updatedStop) return null;
+
+  return stops.map((candidate) => (candidate.id === stopId ? updatedStop : candidate));
 }
 
 export function isGooglePlaceStopScriptStale(

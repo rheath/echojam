@@ -111,6 +111,10 @@ function formatCollectionStatusLabel(status: InstagramCollectionDraftStatus) {
   }
 }
 
+function getPlaceSubtitle(place: InstagramPlaceCandidate | null | undefined) {
+  return place?.locationLabel || place?.formattedAddress || null;
+}
+
 function summarizeCollectionDraft(draft: InstagramDraftResponse | null | undefined, draftId: string) {
   if (!draft) return draftId;
   return (
@@ -757,7 +761,7 @@ export default function InstagramImportClient() {
 
   async function handleConfirmPlace(candidate: InstagramPlaceCandidate | null) {
     try {
-      await patchDraft({
+      const updated = await patchDraft({
         placeQuery: placeQueryInput,
         confirmedPlace: candidate
           ? {
@@ -769,6 +773,24 @@ export default function InstagramImportClient() {
             }
           : null,
       });
+      if (updated && candidate) {
+        const confirmedPlace = updated.location.confirmedPlace;
+        if (confirmedPlace) {
+          const nextDraft = {
+            ...updated,
+            location: {
+              ...updated.location,
+              confirmedPlace: {
+                ...confirmedPlace,
+                formattedAddress: candidate.formattedAddress,
+                locationLabel: candidate.locationLabel,
+              },
+            },
+          } satisfies InstagramDraftResponse;
+          setDraft(nextDraft);
+          storeDraft(nextDraft);
+        }
+      }
       setError(null);
     } catch (confirmError) {
       setError(confirmError instanceof Error ? confirmError.message : "Failed to confirm place");
@@ -1244,7 +1266,7 @@ export default function InstagramImportClient() {
                   <div>
                     <div className={styles.metaLabel}>Confirmed place</div>
                     <div className={styles.placeTitle}>{confirmedPlace.label}</div>
-                    {confirmedPlace.formattedAddress ? <div>{confirmedPlace.formattedAddress}</div> : null}
+                    {getPlaceSubtitle(confirmedPlace) ? <div>{getPlaceSubtitle(confirmedPlace)}</div> : null}
                   </div>
                   <button type="button" onClick={() => void handleConfirmPlace(null)} className={styles.linkButton}>
                     Clear
@@ -1270,8 +1292,8 @@ export default function InstagramImportClient() {
                   >
                     <div>
                       <div className={styles.placeTitle}>{candidate.label}</div>
-                      {candidate.formattedAddress ? (
-                        <div className={styles.placeAddress}>{candidate.formattedAddress}</div>
+                      {getPlaceSubtitle(candidate) ? (
+                        <div className={styles.placeAddress}>{getPlaceSubtitle(candidate)}</div>
                       ) : null}
                     </div>
                     <span className={styles.placeAction}>Use</span>

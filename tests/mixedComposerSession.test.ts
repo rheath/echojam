@@ -65,6 +65,41 @@ test("mixed composer session normalizes instagram draft collections", () => {
   );
 });
 
+test("mixed composer session preserves instagram source preview images on restored stops", () => {
+  const snapshot = normalizeMixedComposerSessionSnapshot({
+    activeProvider: "instagram",
+    stops: [
+      {
+        id: "instagram:draft-1",
+        kind: "social_import",
+        provider: "instagram",
+        title: "Cholula Deli & Grill",
+        lat: 40.7,
+        lng: -73.9,
+        image: "https://example.com/place-image.jpg",
+        sourceUrl: "https://www.instagram.com/reel/abc123/",
+        sourceId: "abc123",
+        sourcePreviewImageUrl: "https://example.com/instagram-thumb.jpg",
+        creatorName: "@letsfamilystyle",
+        script: "Imported script",
+      },
+    ],
+  });
+
+  assert.equal(
+    snapshot.stops[0]?.sourcePreviewImageUrl,
+    "https://example.com/instagram-thumb.jpg"
+  );
+  assert.equal(
+    (
+      (toMixedComposerInsertOrPatch("insert", snapshot).stops as Array<{
+        sourcePreviewImageUrl?: string | null;
+      }>)?.[0]?.sourcePreviewImageUrl
+    ) ?? null,
+    "https://example.com/instagram-thumb.jpg"
+  );
+});
+
 function toMixedComposerInsertOrPatch(
   mode: "insert" | "patch",
   value: Parameters<typeof normalizeMixedComposerSessionSnapshot>[0]

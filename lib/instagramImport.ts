@@ -52,6 +52,7 @@ export type InstagramPlaceCandidate = {
   imageUrl: string | null;
   googlePlaceId: string | null;
   formattedAddress: string | null;
+  locationLabel: string | null;
 };
 
 export type InstagramImportJobResponse = {

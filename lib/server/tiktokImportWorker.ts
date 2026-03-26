@@ -13,6 +13,10 @@ import {
   toNullableTrimmed,
   type InstagramPlaceCandidate,
 } from "@/lib/instagramImport";
+import {
+  buildPlaceLocationLabel,
+  type GooglePlaceAddressComponent,
+} from "@/lib/server/placeLocationLabel";
 import { resolvePlaceGrounding } from "@/lib/server/placeGroundingResolver";
 import { generateGroundedSocialScriptWithOpenAI } from "@/lib/server/socialScriptGrounding";
 import { getSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
@@ -95,6 +99,7 @@ type GooglePlaceSearchResponse = {
     id?: string;
     displayName?: { text?: string };
     location?: { latitude?: number; longitude?: number };
+    addressComponents?: GooglePlaceAddressComponent[];
     formattedAddress?: string;
   }>;
   error?: { message?: string };
@@ -185,7 +190,8 @@ function makePlaceCandidate(
   lng: number | null,
   imageUrl: string | null,
   googlePlaceId: string | null,
-  formattedAddress: string | null = null
+  formattedAddress: string | null = null,
+  locationLabel: string | null = null
 ): InstagramPlaceCandidate | null {
   if (!label || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   return {
@@ -195,6 +201,7 @@ function makePlaceCandidate(
     imageUrl: proxyGoogleImageUrl(imageUrl) || imageUrl,
     googlePlaceId,
     formattedAddress,
+    locationLabel,
   };
 }
 
@@ -461,7 +468,7 @@ async function searchPlaces(query: string, cityHint: string | null, countryHint:
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
       "X-Goog-FieldMask":
-        "places.id,places.displayName,places.location,places.formattedAddress",
+        "places.id,places.displayName,places.location,places.addressComponents,places.formattedAddress",
     },
     body: JSON.stringify({
       textQuery,
@@ -478,10 +485,23 @@ async function searchPlaces(query: string, cityHint: string | null, countryHint:
         Number(place.location?.longitude),
         null,
         toNullableTrimmed(place.id) || null,
-        toNullableTrimmed(place.formattedAddress) || null
+        toNullableTrimmed(place.formattedAddress) || null,
+        buildPlaceLocationLabel({
+          addressComponents: place.addressComponents,
+          formattedAddress: place.formattedAddress,
+        })
       )
     )
     .filter((place): place is InstagramPlaceCandidate => Boolean(place));
+}
+
+export async function searchTikTokImportPlacesByQuery(
+  query: string,
+  cityHint: string | null,
+  countryHint: string | null,
+  limit: number
+) {
+  return await searchPlaces(query, cityHint, countryHint, limit);
 }
 
 async function loadDraft(admin: SupabaseClient, draftId: string) {

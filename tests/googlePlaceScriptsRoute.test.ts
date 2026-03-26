@@ -199,7 +199,7 @@ test("google place script route returns a usable error when generation fails", a
 
     assert.equal(response.status, 500);
     const body = (await response.json()) as { error?: string };
-    assert.match(String(body.error), /OpenAI script generation failed/);
+    assert.match(String(body.error), /OpenAI script generation failed \(500: upstream error\)/);
   } finally {
     global.fetch = originalFetch;
     process.env.OPENAI_API_KEY = originalApiKey;

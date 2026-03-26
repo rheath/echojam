@@ -423,7 +423,7 @@
 }
 
 .landingFeaturedCardTitleRevolutionary {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: 0.03em;
   line-height: 0.98;
@@ -2907,6 +2907,94 @@
   font-size: 20px;
   line-height: 1.45;
   white-space: pre-wrap;
+}
+
+.scriptModalSourceLink {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 18px 24px 0;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(17, 17, 26, 0.06);
+  color: inherit;
+  text-decoration: none;
+}
+
+.scriptModalSourceThumbWrap {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #d6d0c5;
+}
+
+.scriptModalSourceThumb {
+  object-fit: cover;
+}
+
+.scriptModalSourceText {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.scriptModalInstagramCard {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 18px 24px 0;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(255, 107, 138, 0.16), rgba(255, 156, 90, 0.14)),
+    #11111a;
+  color: inherit;
+  text-decoration: none;
+}
+
+.scriptModalInstagramThumbWrap {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  flex: 0 0 88px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #d6d0c5;
+}
+
+.scriptModalInstagramThumb {
+  object-fit: cover;
+}
+
+.scriptModalInstagramText {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.scriptModalInstagramEyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.scriptModalInstagramDescription {
+  font-size: 15px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.scriptModalInstagramCta {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ff8fad;
 }
 
 .scriptModalImageWrap {

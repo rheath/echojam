@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { createHash } from "node:crypto";
+import { uploadNarrationAudio } from "@/lib/mixGeneration";
 import { personaCatalog } from "@/lib/personas/catalog";
 
 type Persona = "adult" | "preteen" | "ghost";
@@ -98,64 +97,6 @@ async function synthesizeSpeechWithOpenAI(apiKey: string, persona: Persona, text
   }
 
   throw new Error("OpenAI TTS generation failed");
-}
-
-async function uploadNarrationAudio(
-  audioBytes: Uint8Array,
-  jamLikeId: string,
-  persona: Persona,
-  stopId: string
-) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const bucket = process.env.SUPABASE_AUDIO_BUCKET || "narrations";
-  const cacheControl = process.env.SUPABASE_AUDIO_CACHE_SECONDS || "31536000";
-  const version = createHash("sha1").update(audioBytes).digest("hex").slice(0, 12);
-  const safeJamId = jamLikeId.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "mix";
-  const safeStopId = stopId.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "stop";
-
-  if (!url || !serviceRole) {
-    throw new Error("Missing storage configuration for narration upload.");
-  }
-
-  const admin = createClient(url, serviceRole, { auth: { persistSession: false } });
-  const path = `mixes/${safeJamId}/${persona}/${safeStopId}.mp3`;
-
-  const { data: buckets, error: listBucketsError } = await admin.storage.listBuckets();
-  if (listBucketsError) {
-    throw new Error(`Narration upload failed: could not list storage buckets (${listBucketsError.message}).`);
-  }
-  const bucketExists = (buckets ?? []).some((item) => item.name === bucket);
-  if (!bucketExists) {
-    const { error: createBucketError } = await admin.storage.createBucket(bucket, { public: true });
-    if (createBucketError && !createBucketError.message.toLowerCase().includes("already exists")) {
-      throw new Error(
-        `Narration upload failed: Supabase storage bucket "${bucket}" was not found and could not be created (${createBucketError.message}).`
-      );
-    }
-  }
-
-  const { error } = await admin.storage.from(bucket).upload(path, audioBytes, {
-    contentType: "audio/mpeg",
-    cacheControl,
-    upsert: true,
-  });
-  if (error) {
-    if (error.message.toLowerCase().includes("bucket not found")) {
-      throw new Error(
-        `Narration upload failed: Supabase storage bucket "${bucket}" was not found. ` +
-          "Create the bucket or set SUPABASE_AUDIO_BUCKET to an existing bucket name."
-      );
-    }
-    throw new Error(`Narration upload failed: ${error.message}`);
-  }
-
-  const { data } = admin.storage.from(bucket).getPublicUrl(path);
-  if (!data?.publicUrl) {
-    throw new Error("Narration upload succeeded but public URL was unavailable.");
-  }
-  const sep = data.publicUrl.includes("?") ? "&" : "?";
-  return `${data.publicUrl}${sep}v=${version}`;
 }
 
 export async function POST(req: Request) {

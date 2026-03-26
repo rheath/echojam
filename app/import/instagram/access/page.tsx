@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import { normalizeMixedImportNextPath } from "@/lib/mixedImportRouting";
 import {
   isInstagramCreatorAccessAuthorizedFromCookieStore,
   isInstagramImportEnabled,
@@ -8,10 +9,7 @@ import InstagramCreatorAccessClient from "./InstagramCreatorAccessClient";
 
 function resolveNextPath(value: string | string[] | undefined) {
   const candidate = typeof value === "string" ? value : Array.isArray(value) ? value[0] : null;
-  if (!candidate || !candidate.startsWith("/import/instagram")) {
-    return "/import/instagram";
-  }
-  return candidate;
+  return normalizeMixedImportNextPath(candidate, "instagram");
 }
 
 export default async function InstagramImportAccessPage({

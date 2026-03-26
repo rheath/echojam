@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { cityPlaceholderImage, isValidGooglePlaceId } from "@/lib/placesImages";
+import { cityPlaceholderImage } from "@/lib/placesImages";
+import {
+  buildMixedComposerPlaceCandidates,
+  type GooglePlaceSearchCandidate,
+  type MixedComposerPlaceCandidate,
+} from "@/lib/server/placeSearchCandidates";
 
 type Body = {
   city?: string;
@@ -7,11 +12,9 @@ type Body = {
   limit?: number;
 };
 
-type GooglePlace = {
+type GooglePlace = GooglePlaceSearchCandidate & {
   id?: string;
   name?: string;
-  displayName?: { text?: string };
-  location?: { latitude?: number; longitude?: number };
   types?: string[];
   rating?: number;
   userRatingCount?: number;
@@ -24,14 +27,7 @@ type GooglePlacesSearchResponse = {
   };
 };
 
-type CandidateStop = {
-  id: string;
-  title: string;
-  lat: number;
-  lng: number;
-  image: string;
-  googlePlaceId?: string;
-};
+type CandidateStop = MixedComposerPlaceCandidate;
 
 const GOOGLE_PLACES_NEW_SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const DEFAULT_LIMIT = 5;
@@ -90,15 +86,6 @@ function toSafeLimit(raw: unknown, cityLikeQuery: boolean) {
   return Math.min(MAX_LIMIT, parsed);
 }
 
-function isFiniteCoord(lat: number, lng: number) {
-  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
-}
-
-function toStopId(placeId: string, lat: number, lng: number) {
-  if (isValidGooglePlaceId(placeId)) return `ext-gplace-${placeId}`;
-  return `ext-search-${lat.toFixed(6)},${lng.toFixed(6)}`;
-}
-
 function isCityLikeQuery(query: string) {
   const normalized = query.trim().toLowerCase();
   if (normalized.length < MIN_QUERY_LENGTH) return false;
@@ -136,7 +123,7 @@ async function runTextSearch(query: string, limit: number, apiKey: string, signa
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
       "X-Goog-FieldMask":
-        "places.id,places.displayName,places.location,places.types,places.rating,places.userRatingCount",
+        "places.id,places.displayName,places.location,places.addressComponents,places.formattedAddress,places.types,places.rating,places.userRatingCount",
     },
     body: JSON.stringify({
       textQuery: query,
@@ -187,37 +174,8 @@ export async function POST(req: Request) {
           .map((entry) => entry.place);
       }
 
-      const candidates: CandidateStop[] = [];
-      const seenPlaceIds = new Set<string>();
-      const seenCoordKeys = new Set<string>();
       const placeholder = cityPlaceholderImage(city || "nearby");
-
-      for (const place of places) {
-        const title = (place.displayName?.text || "").trim();
-        const lat = Number(place.location?.latitude);
-        const lng = Number(place.location?.longitude);
-        const googlePlaceId = (place.id || "").trim();
-        if (!title || !isFiniteCoord(lat, lng)) continue;
-
-        if (isValidGooglePlaceId(googlePlaceId)) {
-          if (seenPlaceIds.has(googlePlaceId)) continue;
-          seenPlaceIds.add(googlePlaceId);
-        } else {
-          const coordKey = `${lat.toFixed(6)},${lng.toFixed(6)}`;
-          if (seenCoordKeys.has(coordKey)) continue;
-          seenCoordKeys.add(coordKey);
-        }
-
-        candidates.push({
-          id: toStopId(googlePlaceId, lat, lng),
-          title,
-          lat,
-          lng,
-          image: placeholder,
-          ...(isValidGooglePlaceId(googlePlaceId) ? { googlePlaceId } : {}),
-        });
-        if (candidates.length >= limit) break;
-      }
+      const candidates = buildMixedComposerPlaceCandidates(places, placeholder, limit);
 
       return NextResponse.json({ candidates });
     } catch {

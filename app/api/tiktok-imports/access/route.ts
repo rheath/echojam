@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
 import {
-  createTikTokCreatorAccessCookieValue,
-  getTikTokCreatorAccessCookieOptions,
   isTikTokImportEnabled,
-  validateTikTokCreatorAccessCode,
 } from "@/lib/server/tiktokCreatorAccess";
+import {
+  CREATOR_ACCESS_PENDING_COOKIE_NAME,
+  createPendingCreatorAccessClaimCookieValue,
+  getPendingCreatorAccessCookieOptions,
+  sendCreatorAccessMagicLink,
+  validateCreatorAccessStart,
+} from "@/lib/server/creatorAccess";
 
 type Body = {
   code?: string | null;
+  email?: string | null;
+  next?: string | null;
 };
 
 export async function POST(req: Request) {
@@ -15,17 +21,39 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "TikTok import is unavailable." }, { status: 404 });
   }
 
-  const body = (await req.json().catch(() => ({}))) as Body;
-  const validation = validateTikTokCreatorAccessCode(body.code);
-  if (!validation.ok) {
-    return NextResponse.json({ error: validation.error }, { status: validation.status });
-  }
+  try {
+    const body = (await req.json().catch(() => ({}))) as Body;
+    const validation = await validateCreatorAccessStart({
+      code: body.code,
+      email: body.email,
+      next: body.next,
+      requestedScope: "mixed",
+    });
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: validation.status });
+    }
 
-  const response = NextResponse.json({ ok: true });
-  response.cookies.set(
-    "tiktok_creator_access",
-    createTikTokCreatorAccessCookieValue(),
-    getTikTokCreatorAccessCookieOptions()
-  );
-  return response;
+    await sendCreatorAccessMagicLink({
+      email: validation.normalizedEmail,
+      nextPath: validation.nextPath,
+    });
+
+    const response = NextResponse.json({ ok: true });
+    response.cookies.set(
+      CREATOR_ACCESS_PENDING_COOKIE_NAME,
+      createPendingCreatorAccessClaimCookieValue({
+        inviteId: validation.invite.id,
+        email: validation.normalizedEmail,
+        requestedScope: validation.requestedScope,
+        nextPath: validation.nextPath,
+      }),
+      getPendingCreatorAccessCookieOptions()
+    );
+    return response;
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to unlock TikTok uploader." },
+      { status: 500 }
+    );
+  }
 }

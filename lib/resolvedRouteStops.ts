@@ -13,6 +13,7 @@ export type ResolvedRouteStopPayload = {
   source_kind?: "social_import" | "place_search" | null;
   source_url?: string | null;
   source_id?: string | null;
+  source_preview_image_url?: string | null;
   source_creator_name?: string | null;
   source_creator_url?: string | null;
   source_creator_avatar_url?: string | null;
@@ -54,6 +55,7 @@ export function mapResolvedRouteStops(
       sourceKind: stop.source_kind ?? null,
       sourceUrl: stop.source_url ?? null,
       sourceId: stop.source_id ?? null,
+      sourcePreviewImageUrl: stop.source_preview_image_url ?? null,
       sourceCreatorName: stop.source_creator_name ?? null,
       sourceCreatorUrl: stop.source_creator_url ?? null,
       sourceCreatorAvatarUrl: stop.source_creator_avatar_url ?? null,

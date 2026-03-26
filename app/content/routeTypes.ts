@@ -49,6 +49,7 @@ export type Stop = {
   sourceKind?: "social_import" | "place_search" | null;
   sourceUrl?: string | null;
   sourceId?: string | null;
+  sourcePreviewImageUrl?: string | null;
   sourceCreatorName?: string | null;
   sourceCreatorUrl?: string | null;
   sourceCreatorAvatarUrl?: string | null;
@@ -90,6 +91,7 @@ export type RouteDef = {
   destination?: { lat: number; lng: number; label: string; subtitle?: string | null } | null;
   routeDistanceMeters?: number | null;
   routeDurationSeconds?: number | null;
+  canEdit?: boolean;
   stops: Stop[];
 };
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 import { CUSTOM_NARRATOR_MAX_CHARS } from "@/lib/customNarrator";
 import {
   type InstagramDraftResponse,
@@ -20,6 +21,12 @@ import {
   type MixedComposerSessionSnapshot,
   type MixedComposerSessionProvider,
 } from "@/lib/mixedComposerSession";
+import { buildMixedImportPath } from "@/lib/mixedImportRouting";
+import {
+  buildMixedComposerCreateMixRequest,
+  normalizeMixedComposerPublishTarget,
+  type MixedComposerPublishTarget,
+} from "@/lib/mixedComposerPublish";
 import { buildMixedRouteOpenerContext } from "@/lib/mixedRouteOpeners";
 import { formatEstimatedScriptDuration } from "@/lib/scriptDurationEstimate";
 import {
@@ -29,10 +36,10 @@ import {
   createGooglePlaceRouteSignature,
   isGooglePlaceStopScriptStale,
   mapComposerStopToGooglePlaceDraft,
-  mapGooglePlaceDraftOntoComposerStop,
   mapGooglePlaceDraftToComposerStop,
   mapSocialDraftToComposerStop,
   moveComposerStop,
+  saveGooglePlaceDraftToStops,
   resolveGooglePlaceDraftPersona,
   type ComposerStop,
   type GooglePlaceDraft,
@@ -50,6 +57,7 @@ type SearchPlaceResponse = {
     lat: number;
     lng: number;
     image: string;
+    locationLabel: string | null;
     googlePlaceId?: string;
   }>;
 };
@@ -58,6 +66,32 @@ type CreateMixResponse = {
   jamId?: string;
   routeId?: string;
   jobId?: string;
+  error?: string;
+};
+
+type OwnedMixedJourneySummary = {
+  jamId: string;
+  routeId: string;
+  sessionId: string | null;
+  title: string;
+  updatedAt: string;
+  hasDraft: boolean;
+};
+
+type OwnedMixedJourneysResponse = {
+  journeys: OwnedMixedJourneySummary[];
+};
+
+type CreatorAccessStatusResponse = {
+  authorized?: boolean;
+  email?: string | null;
+  scopes?: string[];
+  error?: string;
+};
+
+type ResumeMixedJourneyResponse = {
+  sessionId?: string;
+  reused?: boolean;
   error?: string;
 };
 
@@ -90,18 +124,10 @@ const MIX_ROUTE_CITY = "nearby";
 const ROUTE_TITLE_MAX_CHARS = 40;
 const CUSTOM_NARRATOR_HELP_TEXT =
   "This helps shape the tone and perspective of the narration. It is guidance, not the script itself.";
-const CUSTOM_NARRATOR_PLACEHOLDER = "I help people experience places by...";
+const CUSTOM_NARRATOR_PLACEHOLDER = "Enter a theme and more...";
 
 function clampRouteTitle(value: string) {
   return value.slice(0, ROUTE_TITLE_MAX_CHARS);
-}
-
-function buildMixedComposerPath(sessionId?: string | null) {
-  const normalizedSessionId = toNullableTrimmed(sessionId);
-  if (!normalizedSessionId) return "/import/mixed";
-  const params = new URLSearchParams();
-  params.set("session", normalizedSessionId);
-  return `/import/mixed?${params.toString()}`;
 }
 
 function preferredInstagramPlaceQuery(draft: InstagramDraftResponse | null) {
@@ -127,8 +153,21 @@ function formatTokenEstimate(value: number | null | undefined) {
   return `~${value} tokens`;
 }
 
+function getPlaceSubtitle(
+  place: Pick<InstagramPlaceCandidate, "locationLabel" | "formattedAddress"> | null | undefined
+) {
+  return place?.locationLabel || place?.formattedAddress || null;
+}
+
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
-  const response = await fetch(input, init);
+  const headers = new Headers(init?.headers);
+  const { data } = await supabase.auth.getSession();
+  const accessToken = data.session?.access_token?.trim();
+  if (accessToken && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
+  }
+
+  const response = await fetch(input, { ...init, headers });
   const body = (await response.json().catch(() => ({}))) as T & { error?: string };
   if (!response.ok) throw new Error(body.error || "Request failed");
   return body;
@@ -162,14 +201,18 @@ function readStoredStops() {
 
 export default function MixedComposerClient({
   initialSessionId,
+  initialResumeJamId,
   initialProvider,
   initialInstagramDraftId,
   initialTikTokDraftId,
+  initialPublishTarget,
 }: {
   initialSessionId: string | null;
+  initialResumeJamId: string | null;
   initialProvider: string | null;
   initialInstagramDraftId: string | null;
   initialTikTokDraftId: string | null;
+  initialPublishTarget: MixedComposerPublishTarget | null;
 }) {
   const router = useRouter();
   const [stopEntryMode, setStopEntryMode] = useState<StopEntryMode>(
@@ -215,6 +258,20 @@ export default function MixedComposerClient({
   const [importJobState, setImportJobState] = useState<ImportJobState | null>(null);
   const [googlePlaceDraft, setGooglePlaceDraft] = useState<GooglePlaceDraft | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
+  const [publishTarget, setPublishTarget] = useState<MixedComposerPublishTarget | null>(
+    normalizeMixedComposerPublishTarget(initialPublishTarget)
+  );
+  const [authEmail, setAuthEmail] = useState<string | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [hasCreatorAccess, setHasCreatorAccess] = useState(false);
+  const [isCheckingCreatorAccess, setIsCheckingCreatorAccess] = useState(false);
+  const [creatorCode, setCreatorCode] = useState("");
+  const [magicLinkEmail, setMagicLinkEmail] = useState("");
+  const [magicLinkMessage, setMagicLinkMessage] = useState<string | null>(null);
+  const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
+  const [ownedJourneys, setOwnedJourneys] = useState<OwnedMixedJourneySummary[]>([]);
+  const [isLoadingOwnedJourneys, setIsLoadingOwnedJourneys] = useState(false);
+  const [isResumingOwnedJourney, setIsResumingOwnedJourney] = useState(false);
   const [isInitialStateReady, setIsInitialStateReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -222,6 +279,7 @@ export default function MixedComposerClient({
   const creatingSessionPromiseRef = useRef<Promise<string> | null>(null);
   const lastSavedSessionSnapshotRef = useRef<string | null>(null);
   const googlePlaceGenerationRequestRef = useRef(0);
+  const resumedOwnedJamRef = useRef<string | null>(null);
   const attribution = useMemo(() => deriveComposerRouteAttribution(stops), [stops]);
   const narratorSignature = useMemo(
     () => createGooglePlaceNarratorSignature(customNarratorGuidance),
@@ -239,7 +297,215 @@ export default function MixedComposerClient({
   const editingInstagramConfirmedPlace = editingInstagramDraft?.location.confirmedPlace || null;
   const editingInstagramSuggestedPlace = editingInstagramDraft?.location.suggestedPlace || null;
 
+  const startCreatorAccess = useCallback(async () => {
+    const normalizedCode = creatorCode.trim();
+    const email = magicLinkEmail.trim().toLowerCase();
+    if (!normalizedCode) {
+      setError("Enter your creator code.");
+      return;
+    }
+    if (!email) {
+      setError("Enter the creator email for this journey.");
+      return;
+    }
+
+    setError(null);
+    setMagicLinkMessage(null);
+    setIsSendingMagicLink(true);
+    try {
+      const nextPath =
+        typeof window === "undefined"
+          ? buildMixedImportPath({
+              sessionId,
+              resumeJamId: initialResumeJamId,
+              provider: initialProvider,
+              instagramDraftId: initialInstagramDraftId,
+              tiktokDraftId: initialTikTokDraftId,
+            })
+          : `${window.location.pathname}${window.location.search}`;
+      await fetchJson<{ ok: boolean }>("/api/creator-access/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: normalizedCode,
+          email,
+          next: nextPath,
+          scope: "mixed",
+        }),
+      });
+      setMagicLinkMessage(
+        "Check your inbox for a private Wandrful sign-in link. It expires in 5 minutes."
+      );
+    } catch (magicLinkError) {
+      setError(
+        magicLinkError instanceof Error
+          ? magicLinkError.message
+          : "Failed to send your magic link."
+      );
+    } finally {
+      setIsSendingMagicLink(false);
+    }
+  }, [
+    initialInstagramDraftId,
+    initialProvider,
+    initialResumeJamId,
+    initialTikTokDraftId,
+    creatorCode,
+    magicLinkEmail,
+    sessionId,
+  ]);
+
+  const resumeOwnedJourney = useCallback(async (jamId: string) => {
+    const normalizedJamId = toNullableTrimmed(jamId);
+    if (!normalizedJamId) return;
+
+    setError(null);
+    setIsResumingOwnedJourney(true);
+    try {
+      const response = await fetchJson<ResumeMixedJourneyResponse>(
+        `/api/mixed-composer-jams/${encodeURIComponent(normalizedJamId)}/resume`,
+        {
+          method: "POST",
+        }
+      );
+      const nextSessionId = toNullableTrimmed(response.sessionId);
+      if (!nextSessionId) {
+        throw new Error(response.error || "Failed to reopen your journey.");
+      }
+      router.replace(buildMixedImportPath({ sessionId: nextSessionId }));
+    } catch (resumeError) {
+      setError(
+        resumeError instanceof Error
+          ? resumeError.message
+          : "Failed to reopen your journey."
+      );
+    } finally {
+      setIsResumingOwnedJourney(false);
+    }
+  }, [router]);
+
   useEffect(() => {
+    let cancelled = false;
+
+    async function syncAuth() {
+      const { data } = await supabase.auth.getUser();
+      if (cancelled) return;
+      setAuthEmail(data.user?.email?.trim() || null);
+      setIsAuthReady(true);
+    }
+
+    void syncAuth();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      void syncAuth();
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authEmail) return;
+    setMagicLinkEmail((current) => current || authEmail);
+  }, [authEmail]);
+
+  useEffect(() => {
+    if (!isAuthReady) return;
+    if (!authEmail) {
+      setHasCreatorAccess(false);
+      setIsCheckingCreatorAccess(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadCreatorAccess() {
+      setIsCheckingCreatorAccess(true);
+      try {
+        const response = await fetchJson<CreatorAccessStatusResponse>("/api/creator-access/status?scope=mixed");
+        if (cancelled) return;
+        setHasCreatorAccess(Boolean(response.authorized));
+      } catch (loadError) {
+        if (cancelled) return;
+        setHasCreatorAccess(false);
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to verify your creator access."
+        );
+      } finally {
+        if (!cancelled) {
+          setIsCheckingCreatorAccess(false);
+        }
+      }
+    }
+
+    void loadCreatorAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [authEmail, isAuthReady]);
+
+  useEffect(() => {
+    if (!isAuthReady || !authEmail || !hasCreatorAccess) return;
+    let cancelled = false;
+
+    async function loadOwnedJourneys() {
+      setIsLoadingOwnedJourneys(true);
+      try {
+        const response = await fetchJson<OwnedMixedJourneysResponse>("/api/mixed-composer-jams");
+        if (!cancelled) {
+          setOwnedJourneys(Array.isArray(response.journeys) ? response.journeys : []);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Failed to load your creator journeys."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingOwnedJourneys(false);
+        }
+      }
+    }
+
+    void loadOwnedJourneys();
+    return () => {
+      cancelled = true;
+    };
+  }, [authEmail, hasCreatorAccess, isAuthReady]);
+
+  useEffect(() => {
+    if (!isAuthReady || !authEmail || !hasCreatorAccess) return;
+    if (initialSessionId) return;
+    const normalizedResumeJamId = toNullableTrimmed(initialResumeJamId);
+    if (!normalizedResumeJamId) return;
+    if (resumedOwnedJamRef.current === normalizedResumeJamId) return;
+
+    resumedOwnedJamRef.current = normalizedResumeJamId;
+    void resumeOwnedJourney(normalizedResumeJamId);
+  }, [
+    authEmail,
+    hasCreatorAccess,
+    initialResumeJamId,
+    initialSessionId,
+    isAuthReady,
+    resumeOwnedJourney,
+  ]);
+
+  useEffect(() => {
+    if (!isAuthReady) return;
+    if (!authEmail || !hasCreatorAccess) {
+      setIsInitialStateReady(true);
+      return;
+    }
+
     let cancelled = false;
 
     async function initializeComposer() {
@@ -252,6 +518,12 @@ export default function MixedComposerClient({
 
           const snapshot = normalizeMixedComposerSessionSnapshot(restored);
           setSessionId(restored.id);
+          setPublishTarget(
+            normalizeMixedComposerPublishTarget({
+              jamId: restored.jamId ?? undefined,
+              routeId: restored.baseRouteId ?? undefined,
+            })
+          );
           setStopEntryMode(snapshot.activeProvider);
           setRouteTitle(clampRouteTitle(snapshot.routeTitle || ""));
           setCustomNarratorGuidance(snapshot.customNarratorGuidance || "");
@@ -372,7 +644,7 @@ export default function MixedComposerClient({
     return () => {
       cancelled = true;
     };
-  }, [initialInstagramDraftId, initialSessionId, initialTikTokDraftId]);
+  }, [authEmail, hasCreatorAccess, initialInstagramDraftId, initialSessionId, initialTikTokDraftId, isAuthReady]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -537,6 +809,11 @@ export default function MixedComposerClient({
     setTikTokDraft(null);
     setTikTokSearchError(null);
     setImportUrl("");
+  }
+
+  function resetGooglePlaceSearch() {
+    setGoogleSearchQuery("");
+    setGoogleSearchResults([]);
   }
 
   function clearGooglePlaceDraftEditor() {
@@ -719,7 +996,7 @@ export default function MixedComposerClient({
             const createdSnapshotKey = JSON.stringify(normalizedCreatedSnapshot);
             lastSavedSessionSnapshotRef.current = createdSnapshotKey;
             setSessionId(created.id);
-            router.replace(buildMixedComposerPath(created.id));
+            router.replace(buildMixedImportPath({ sessionId: created.id }));
             return created.id;
           })().finally(() => {
             creatingSessionPromiseRef.current = null;
@@ -882,16 +1159,49 @@ export default function MixedComposerClient({
   );
 
   async function handleSaveGooglePlaceDraft() {
-    if (!googlePlaceDraft || editingGooglePlaceStopId) return;
+    if (!googlePlaceDraft) return;
     setIsSavingGooglePlaceDraft(true);
     try {
-      await persistMixedComposerSession(
-        {
-          activeProvider: "google_places",
-          googlePlaceDraft,
-        },
-        { createIfMissing: true }
-      );
+      if (editingGooglePlaceStopId) {
+        const title = toNullableTrimmed(googlePlaceDraft.title);
+        const script = toNullableTrimmed(googlePlaceDraft.script);
+        if (!title || !script) {
+          setError("Google place draft needs a title and script before it can be saved.");
+          return;
+        }
+
+        const normalizedDraft = {
+          ...googlePlaceDraft,
+          title,
+          script,
+        };
+        const nextStops = saveGooglePlaceDraftToStops(
+          stops,
+          editingGooglePlaceStopId,
+          normalizedDraft
+        );
+        if (!nextStops) {
+          setError("Google place stop could not be found.");
+          return;
+        }
+
+        await persistMixedComposerSession(
+          {
+            stops: nextStops,
+          },
+          { createIfMissing: true }
+        );
+        setStops(nextStops);
+        setGooglePlaceDraft(normalizedDraft);
+      } else {
+        await persistMixedComposerSession(
+          {
+            activeProvider: "google_places",
+            googlePlaceDraft,
+          },
+          { createIfMissing: true }
+        );
+      }
       setError(null);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Failed to save Google place draft");
@@ -1251,7 +1561,7 @@ export default function MixedComposerClient({
         },
         { createIfMissing: true }
       );
-      await patchTikTokDraft({
+      const updated = await patchTikTokDraft({
         placeQuery: tiktokPlaceQueryInput,
         confirmedPlace: candidate
           ? {
@@ -1263,6 +1573,22 @@ export default function MixedComposerClient({
             }
           : null,
       });
+      if (updated && candidate) {
+        const confirmedPlace = updated.location.confirmedPlace;
+        if (confirmedPlace) {
+          setTikTokDraft({
+            ...updated,
+            location: {
+              ...updated.location,
+              confirmedPlace: {
+                ...confirmedPlace,
+                formattedAddress: candidate.formattedAddress,
+                locationLabel: candidate.locationLabel,
+              },
+            },
+          });
+        }
+      }
       setError(null);
     } catch (confirmError) {
       setError(confirmError instanceof Error ? confirmError.message : "Failed to confirm place");
@@ -1278,7 +1604,7 @@ export default function MixedComposerClient({
         },
         { createIfMissing: true }
       );
-      await patchInstagramDraft({
+      const updated = await patchInstagramDraft({
         placeQuery: instagramPlaceQueryInput,
         confirmedPlace: candidate
           ? {
@@ -1290,6 +1616,27 @@ export default function MixedComposerClient({
             }
           : null,
       });
+      if (updated && candidate) {
+        const confirmedPlace = updated.location.confirmedPlace;
+        if (confirmedPlace) {
+          const nextDraft = {
+            ...updated,
+            location: {
+              ...updated.location,
+              confirmedPlace: {
+                ...confirmedPlace,
+                formattedAddress: candidate.formattedAddress,
+                locationLabel: candidate.locationLabel,
+              },
+            },
+          } satisfies InstagramDraftResponse;
+          setInstagramDraft(nextDraft);
+          setInstagramDraftsById((current) => ({
+            ...current,
+            [nextDraft.id]: nextDraft,
+          }));
+        }
+      }
       setError(null);
     } catch (confirmError) {
       setError(confirmError instanceof Error ? confirmError.message : "Failed to confirm place");
@@ -1358,7 +1705,7 @@ export default function MixedComposerClient({
 
   async function handleConfirmEditingInstagramPlace(candidate: InstagramPlaceCandidate | null) {
     try {
-      await patchEditingInstagramDraft({
+      const updated = await patchEditingInstagramDraft({
         placeQuery: editingInstagramPlaceQueryInput,
         confirmedPlace: candidate
           ? {
@@ -1370,6 +1717,22 @@ export default function MixedComposerClient({
             }
           : null,
       });
+      if (updated && candidate) {
+        const confirmedPlace = updated.location.confirmedPlace;
+        if (confirmedPlace) {
+          setEditingInstagramDraft({
+            ...updated,
+            location: {
+              ...updated.location,
+              confirmedPlace: {
+                ...confirmedPlace,
+                formattedAddress: candidate.formattedAddress,
+                locationLabel: candidate.locationLabel,
+              },
+            },
+          });
+        }
+      }
       setError(null);
     } catch (confirmError) {
       setError(confirmError instanceof Error ? confirmError.message : "Failed to confirm place");
@@ -1520,6 +1883,7 @@ export default function MixedComposerClient({
       narratorSignature,
       draftRouteSignature
     );
+    resetGooglePlaceSearch();
     setGooglePlaceDraft(nextDraft);
     setStopEntryMode("google_places");
     setModalMode("google_place_editor");
@@ -1591,26 +1955,22 @@ export default function MixedComposerClient({
       return;
     }
 
-    const stop = stops.find((candidate) => candidate.id === editingGooglePlaceStopId);
-    if (!stop) {
+    const normalizedDraft = {
+      ...googlePlaceDraft,
+      title,
+      script,
+    };
+    const nextStops = saveGooglePlaceDraftToStops(
+      stops,
+      editingGooglePlaceStopId,
+      normalizedDraft
+    );
+    if (!nextStops) {
       setError("Google place stop could not be found.");
       return;
     }
 
-    const updatedStop = mapGooglePlaceDraftOntoComposerStop(stop, {
-      ...googlePlaceDraft,
-      title,
-      script,
-    });
-    if (!updatedStop) {
-      setError("Failed to map the updated Google place stop.");
-      return;
-    }
-
     try {
-      const nextStops = stops.map((candidate) =>
-        candidate.id === editingGooglePlaceStopId ? updatedStop : candidate
-      );
       await persistMixedComposerSession(
         {
           stops: nextStops,
@@ -1618,6 +1978,7 @@ export default function MixedComposerClient({
         { createIfMissing: true }
       );
       setStops(nextStops);
+      setGooglePlaceDraft(normalizedDraft);
       closeEditingGooglePlaceModal();
       setModalMode("closed");
     } catch (updateError) {
@@ -1774,6 +2135,24 @@ export default function MixedComposerClient({
     narratorSignature,
   ]);
 
+  async function waitForMixJobCompletion(jobId: string) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const job = await fetchJson<{
+        status?: string;
+        error?: string | null;
+      }>(`/api/mix-jobs/${encodeURIComponent(jobId)}`);
+      if (job.status === "ready" || job.status === "ready_with_warnings") {
+        return job;
+      }
+      if (job.status === "failed") {
+        throw new Error(job.error || "Journey publishing failed.");
+      }
+      await sleep(1000);
+    }
+
+    throw new Error("Timed out waiting for the journey publish to finish.");
+  }
+
   async function publishRoute() {
     if (stops.length === 0) {
       setError("Add at least one stop before publishing.");
@@ -1786,47 +2165,66 @@ export default function MixedComposerClient({
     setIsPublishing(true);
     try {
       const publishStops = await regenerateStaleGooglePlaceStops(stops);
+      const mixedComposerSessionId = await persistMixedComposerSession(undefined, {
+        createIfMissing: true,
+      });
+      if (!mixedComposerSessionId) {
+        throw new Error("Failed to create mixed composer session");
+      }
       const result = await fetchJson<CreateMixResponse>("/api/mix-jobs/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          city: MIX_ROUTE_CITY,
-          transportMode: "walk",
-          lengthMinutes: 30,
-          persona,
-          narratorGuidance: trimmedNarratorGuidance || null,
-          source: "manual",
-          routeTitle: routeTitle.trim() || null,
-          routeAttribution: attribution.storyBySource
-            ? {
-                storyBy: attribution.storyBy,
-                storyByUrl: attribution.storyByUrl,
-                storyByAvatarUrl: attribution.storyByAvatarUrl,
-                storyBySource: attribution.storyBySource,
-              }
-            : null,
-          stops: publishStops.map((stop) => ({
-            id: stop.id,
-            title: stop.title,
-            lat: stop.lat,
-            lng: stop.lng,
-            image: stop.image,
-            googlePlaceId: stop.googlePlaceId || undefined,
-            sourceProvider: stop.provider,
-            sourceKind: stop.kind,
-            sourceUrl: stop.sourceUrl || null,
-            sourceId: stop.sourceId || null,
-            sourceCreatorName: stop.creatorName || null,
-            sourceCreatorUrl: stop.creatorUrl || null,
-            sourceCreatorAvatarUrl: stop.creatorAvatarUrl || null,
-            prefilledScript: stop.script || null,
-            scriptEditedByUser: stop.scriptEditedByUser ?? null,
-          })),
-        }),
+        body: JSON.stringify(
+          buildMixedComposerCreateMixRequest({
+            mixedComposerSessionId,
+            publishTarget,
+            city: MIX_ROUTE_CITY,
+            transportMode: "walk",
+            lengthMinutes: 30,
+            persona,
+            narratorGuidance: trimmedNarratorGuidance || null,
+            source: "manual",
+            routeTitle: routeTitle.trim() || null,
+            routeAttribution: attribution.storyBySource
+              ? {
+                  storyBy: attribution.storyBy,
+                  storyByUrl: attribution.storyByUrl,
+                  storyByAvatarUrl: attribution.storyByAvatarUrl,
+                  storyBySource: attribution.storyBySource as "instagram" | "tiktok" | "social",
+                }
+              : null,
+            stops: publishStops.map((stop) => ({
+              id: stop.id,
+              title: stop.title,
+              lat: stop.lat,
+              lng: stop.lng,
+              image: stop.image,
+              googlePlaceId: stop.googlePlaceId || undefined,
+              sourceProvider: stop.provider,
+              sourceKind: stop.kind,
+              sourceUrl: stop.sourceUrl || null,
+              sourceId: stop.sourceId || null,
+              sourcePreviewImageUrl: stop.sourcePreviewImageUrl || null,
+              sourceCreatorName: stop.creatorName || null,
+              sourceCreatorUrl: stop.creatorUrl || null,
+              sourceCreatorAvatarUrl: stop.creatorAvatarUrl || null,
+              prefilledScript: stop.script || null,
+              scriptEditedByUser: stop.scriptEditedByUser ?? null,
+            })),
+          })
+        ),
       });
       if (!result.jamId) {
         throw new Error(result.error || "Failed to create route");
       }
+      if (result.jobId) {
+        await waitForMixJobCompletion(result.jobId);
+      }
+      const nextPublishTarget = normalizeMixedComposerPublishTarget({
+        jamId: result.jamId,
+        routeId: result.routeId,
+      });
+      setPublishTarget(nextPublishTarget);
       router.replace(`/?jam=${result.jamId}`);
     } catch (publishError) {
       setError(publishError instanceof Error ? publishError.message : "Failed to publish route");
@@ -2047,8 +2445,8 @@ export default function MixedComposerClient({
               <div>
                 <div className={styles.metaLabel}>Confirmed place</div>
                 <div className={styles.placeTitle}>{confirmedPlace.label}</div>
-                {confirmedPlace.formattedAddress ? (
-                  <div className={styles.placeAddress}>{confirmedPlace.formattedAddress}</div>
+                {getPlaceSubtitle(confirmedPlace) ? (
+                  <div className={styles.placeAddress}>{getPlaceSubtitle(confirmedPlace)}</div>
                 ) : null}
               </div>
               <button type="button" onClick={() => void onConfirm(null)} className={styles.linkButton}>
@@ -2075,8 +2473,8 @@ export default function MixedComposerClient({
               >
                 <div>
                   <div className={styles.placeTitle}>{candidate.label}</div>
-                  {candidate.formattedAddress ? (
-                    <div className={styles.placeAddress}>{candidate.formattedAddress}</div>
+                  {getPlaceSubtitle(candidate) ? (
+                    <div className={styles.placeAddress}>{getPlaceSubtitle(candidate)}</div>
                   ) : null}
                 </div>
                 <span className={styles.placeAction}>Use</span>
@@ -2224,8 +2622,8 @@ export default function MixedComposerClient({
               <div>
                 <div className={styles.metaLabel}>Confirmed place</div>
                 <div className={styles.placeTitle}>{tiktokConfirmedPlace.label}</div>
-                {tiktokConfirmedPlace.formattedAddress ? (
-                  <div className={styles.placeAddress}>{tiktokConfirmedPlace.formattedAddress}</div>
+                {getPlaceSubtitle(tiktokConfirmedPlace) ? (
+                  <div className={styles.placeAddress}>{getPlaceSubtitle(tiktokConfirmedPlace)}</div>
                 ) : null}
               </div>
               <button type="button" onClick={() => void handleConfirmTikTokPlace(null)} className={styles.linkButton}>
@@ -2252,8 +2650,8 @@ export default function MixedComposerClient({
               >
                 <div>
                   <div className={styles.placeTitle}>{candidate.label}</div>
-                  {candidate.formattedAddress ? (
-                    <div className={styles.placeAddress}>{candidate.formattedAddress}</div>
+                  {getPlaceSubtitle(candidate) ? (
+                    <div className={styles.placeAddress}>{getPlaceSubtitle(candidate)}</div>
                   ) : null}
                 </div>
                 <span className={styles.placeAction}>Use</span>
@@ -2381,16 +2779,14 @@ export default function MixedComposerClient({
             />
           </label>
           <div className={styles.actionRow}>
-            {mode === "add" ? (
-              <button
-                type="button"
-                onClick={() => void handleSaveGooglePlaceDraft()}
-                disabled={isSavingGooglePlaceDraft}
-                className={styles.secondaryButton}
-              >
-                {isSavingGooglePlaceDraft ? "Saving..." : "Save changes"}
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={() => void handleSaveGooglePlaceDraft()}
+              disabled={isSavingGooglePlaceDraft}
+              className={styles.secondaryButton}
+            >
+              {isSavingGooglePlaceDraft ? "Saving..." : "Save changes"}
+            </button>
             <button
               type="button"
               onClick={() => void handleRetryGooglePlaceScript()}
@@ -2452,6 +2848,60 @@ export default function MixedComposerClient({
     );
   }
 
+  if (!isAuthReady || (authEmail && isCheckingCreatorAccess)) {
+    return (
+      <main className={styles.page}>
+        <div className={styles.shell}>
+          <section className={styles.card}>
+            <h1 className={styles.title}>Create your journey</h1>
+            <p className={styles.emptyState}>Checking your creator access...</p>
+          </section>
+        </div>
+      </main>
+    );
+  }
+
+  if (!authEmail || !hasCreatorAccess) {
+    return (
+      <main className={styles.page}>
+        <div className={styles.shell}>
+          <section className={styles.card}>
+            <h1 className={styles.title}>Claim creator access</h1>
+            <p className={styles.emptyState}>
+              Enter your creator code and email. We&apos;ll send a private magic link that unlocks only your journeys.
+            </p>
+            <div className={styles.inlineRow}>
+              <input
+                value={creatorCode}
+                onChange={(event) => setCreatorCode(event.target.value)}
+                placeholder="Creator code"
+                type="text"
+                autoComplete="one-time-code"
+              />
+              <input
+                value={magicLinkEmail}
+                onChange={(event) => setMagicLinkEmail(event.target.value)}
+                placeholder="you@example.com"
+                type="email"
+                autoComplete="email"
+              />
+              <button type="button" onClick={() => void startCreatorAccess()} disabled={isSendingMagicLink}>
+                {isSendingMagicLink ? "Sending..." : "Send magic link"}
+              </button>
+            </div>
+            {authEmail && !hasCreatorAccess ? (
+              <p className={styles.statusCopy}>
+                Signed in as {authEmail}. Enter the invite code for this creator account to unlock editing.
+              </p>
+            ) : null}
+            {magicLinkMessage ? <p className={styles.statusCopy}>{magicLinkMessage}</p> : null}
+            {error ? <div className={styles.errorBanner}>{error}</div> : null}
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
@@ -2461,11 +2911,6 @@ export default function MixedComposerClient({
               Back
             </Link> 
             <h1 className={styles.title}>Create your journey</h1>
-             
-          </div>
-          <div className={styles.headerLinks}>
-            <Link href="/import/instagram" className={styles.headerLinkPill}>Instagram uploader</Link>
-            <Link href="/import/tiktok" className={styles.headerLinkPill}>TikTok importer</Link>
           </div>
         </div>
 
@@ -2504,6 +2949,37 @@ export default function MixedComposerClient({
             </div>
           </div>
         </section>
+
+        {ownedJourneys.length > 0 || isLoadingOwnedJourneys ? (
+          <section className={styles.card}>
+            <div className={styles.listHeader}>
+              <h2 className={styles.sectionTitle}>Your creator journeys</h2>
+            </div>
+            {isLoadingOwnedJourneys ? (
+              <p className={styles.emptyState}>Loading your journeys...</p>
+            ) : (
+              <div className={styles.results}>
+                {ownedJourneys.map((journey) => (
+                  <button
+                    key={journey.jamId}
+                    type="button"
+                    className={styles.resultRow}
+                    onClick={() => void resumeOwnedJourney(journey.jamId)}
+                    disabled={isResumingOwnedJourney}
+                  >
+                    <div>
+                      <div className={styles.resultTitle}>{journey.title}</div>
+                      <div className={styles.placeAddress}>
+                        {journey.hasDraft ? "Private draft ready" : "Reopen live journey into a private draft"}
+                      </div>
+                    </div>
+                    <span className={styles.resultMeta}>Edit</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        ) : null}
 
         <div className={styles.columns}>
           <section className={styles.card}>
@@ -2552,7 +3028,12 @@ export default function MixedComposerClient({
                         className={styles.resultRow}
                         onClick={() => void handleAddGooglePlaceStop(result)}
                       >
-                        <span className={styles.resultTitle}>{result.title}</span>
+                        <div>
+                          <div className={styles.resultTitle}>{result.title}</div>
+                          {result.locationLabel ? (
+                            <div className={styles.placeAddress}>{result.locationLabel}</div>
+                          ) : null}
+                        </div>
                         <span className={styles.resultMeta}>Add</span>
                       </button>
                     ))}

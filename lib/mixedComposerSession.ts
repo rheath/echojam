@@ -14,6 +14,8 @@ export type MixedComposerSessionActiveImportJob = {
   jobId: string;
 };
 
+export type MixedComposerSessionDraftStatus = "draft" | "publishing";
+
 export type MixedComposerSessionSnapshot = {
   activeProvider: MixedComposerSessionProvider;
   routeTitle: string | null;
@@ -28,12 +30,18 @@ export type MixedComposerSessionSnapshot = {
 
 export type MixedComposerSessionResponse = MixedComposerSessionSnapshot & {
   id: string;
+  jamId: string | null;
+  baseRouteId: string | null;
+  draftStatus: MixedComposerSessionDraftStatus;
   createdAt: string;
   updatedAt: string;
 };
 
 type MixedComposerSessionRow = {
   id: string;
+  jam_id: string | null;
+  base_route_id: string | null;
+  draft_status: string | null;
   active_provider: string | null;
   route_title: string | null;
   custom_narrator_guidance: string | null;
@@ -65,11 +73,21 @@ const GOOGLE_PLACE_DRAFT_STATUSES = new Set<GooglePlaceDraftStatus>([
   "ready",
   "failed",
 ]);
+const SESSION_DRAFT_STATUSES = new Set<MixedComposerSessionDraftStatus>([
+  "draft",
+  "publishing",
+]);
 
 function normalizeSessionProvider(value: unknown): MixedComposerSessionProvider {
   return typeof value === "string" && SESSION_PROVIDERS.has(value as MixedComposerSessionProvider)
     ? (value as MixedComposerSessionProvider)
     : "instagram";
+}
+
+function normalizeDraftStatus(value: unknown): MixedComposerSessionDraftStatus {
+  return typeof value === "string" && SESSION_DRAFT_STATUSES.has(value as MixedComposerSessionDraftStatus)
+    ? (value as MixedComposerSessionDraftStatus)
+    : "draft";
 }
 
 function normalizeComposerStop(value: unknown): ComposerStop | null {
@@ -107,6 +125,9 @@ function normalizeComposerStop(value: unknown): ComposerStop | null {
     ),
     sourceUrl: toNullableTrimmed(typeof candidate.sourceUrl === "string" ? candidate.sourceUrl : null),
     sourceId: toNullableTrimmed(typeof candidate.sourceId === "string" ? candidate.sourceId : null),
+    sourcePreviewImageUrl: toNullableTrimmed(
+      typeof candidate.sourcePreviewImageUrl === "string" ? candidate.sourcePreviewImageUrl : null
+    ),
     creatorName: toNullableTrimmed(
       typeof candidate.creatorName === "string" ? candidate.creatorName : null
     ),
@@ -243,6 +264,9 @@ export function normalizeMixedComposerSessionSnapshot(
 export function serializeMixedComposerSession(row: MixedComposerSessionRow): MixedComposerSessionResponse {
   return {
     id: row.id,
+    jamId: toNullableTrimmed(row.jam_id),
+    baseRouteId: toNullableTrimmed(row.base_route_id),
+    draftStatus: normalizeDraftStatus(row.draft_status),
     activeProvider: normalizeSessionProvider(row.active_provider),
     routeTitle: toNullableTrimmed(row.route_title),
     customNarratorGuidance: toNullableTrimmed(row.custom_narrator_guidance),

@@ -33,6 +33,22 @@ export default function AuthCallbackPage() {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
         }
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const accessToken = session?.access_token?.trim();
+        if (accessToken) {
+          const response = await fetch("/api/creator-access/complete", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          if (!response.ok) {
+            throw new Error(body.error || "Failed to finish creator sign-in.");
+          }
+        }
         if (!cancelled) {
           router.replace(nextPath);
         }
